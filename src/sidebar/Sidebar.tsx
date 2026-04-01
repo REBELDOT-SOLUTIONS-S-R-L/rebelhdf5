@@ -1,7 +1,8 @@
-import { FiFileText, FiHelpCircle, FiPlusCircle } from 'react-icons/fi';
-import { NavLink, useMatch } from 'react-router-dom';
+import { FiActivity, FiFileText, FiHelpCircle, FiPlusCircle } from 'react-icons/fi';
+import { NavLink, useMatch, useSearchParams } from 'react-router-dom';
 
 import { useStore } from '../stores';
+import { getPoseTraceLink } from '../utils';
 import Flyout from './Flyout';
 import OpenedFiles from './OpenedFiles';
 import styles from './Sidebar.module.css';
@@ -9,8 +10,11 @@ import SidebarToggle from './SidebarToggle';
 
 function Sidebar() {
   const isViewingFile = !!useMatch('/view');
+  const opened = useStore((state) => state.opened);
   const mayCollapse = useStore((state) => state.sidebarMayCollapse);
   const isCollapsed = mayCollapse && isViewingFile;
+  const [searchParams] = useSearchParams();
+  const activeFileUrl = searchParams.get('url') ?? opened[0]?.url ?? null;
 
   return (
     <div className={styles.sidebar} data-collapsed={isCollapsed || undefined}>
@@ -38,6 +42,16 @@ function Sidebar() {
           >
             <FiHelpCircle className={styles.icon} />
             <span className={styles.label}>Help</span>
+          </NavLink>
+
+          <NavLink
+            className={styles.mainNavItem}
+            to={activeFileUrl ? getPoseTraceLink(activeFileUrl) : '/pose-trace'}
+            aria-label="Pose Trace"
+            title="Pose Trace"
+          >
+            <FiActivity className={styles.icon} />
+            <span className={styles.label}>Pose Trace</span>
           </NavLink>
 
           {isCollapsed ? (

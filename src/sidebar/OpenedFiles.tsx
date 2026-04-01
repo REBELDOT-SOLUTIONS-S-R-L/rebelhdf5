@@ -11,13 +11,14 @@ import { TbLetterZ } from 'react-icons/tb';
 import {
   createSearchParams,
   Link,
+  useLocation,
   useNavigate,
   useSearchParams,
 } from 'react-router-dom';
 import { clear } from 'suspend-react';
 
 import { FileService, type H5File, useStore } from '../stores';
-import { getViewerLink } from '../utils';
+import { getFileLink } from '../utils';
 import sidebarStyles from './Sidebar.module.css';
 
 const ICONS: Record<FileService, IconType> = {
@@ -33,14 +34,16 @@ function OpenedFiles() {
   const removeFileAt = useStore((state) => state.removeFileAt);
 
   const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams] = useSearchParams();
   const fileUrl = searchParams.get('url');
+  const fileRoute = location.pathname === '/pose-trace' ? '/pose-trace' : '/view';
 
   function removeFile(file: H5File, index: number, isActive: boolean) {
     if (isActive) {
       // Select next or previous file, or navigate back to homepage
       const nextIndex = index < opened.length - 1 ? index + 1 : index - 1;
-      navigate(nextIndex >= 0 ? getViewerLink(opened[nextIndex].url) : '/');
+      navigate(nextIndex >= 0 ? getFileLink(fileRoute, opened[nextIndex].url) : '/');
     }
 
     // Remove from store and evict from suspense cache
@@ -63,7 +66,7 @@ function OpenedFiles() {
                 <Link
                   key={url}
                   className={sidebarStyles.navItem}
-                  to={`view?${createSearchParams({ url }).toString()}`}
+                  to={`${fileRoute}?${createSearchParams({ url }).toString()}`}
                   title={url}
                   aria-current={isActive ? 'page' : undefined}
                   onClick={(evt) => {

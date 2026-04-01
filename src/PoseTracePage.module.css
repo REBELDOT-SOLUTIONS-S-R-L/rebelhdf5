@@ -1,0 +1,202 @@
+.root {
+  composes: page from './utils.module.css';
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  overflow-y: auto;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+}
+
+.eyebrow {
+  margin: 0;
+  color: var(--color-gray);
+  font-size: 0.82em;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.title {
+  margin: 0.25rem 0 0;
+  color: var(--color-gray);
+  font-family: var(--font-logo);
+  font-size: clamp(2.1em, 3vw, 2.8em);
+  font-weight: normal;
+}
+
+.subtitle {
+  max-width: 44rem;
+  margin: 0.5rem 0 0;
+  color: var(--color-gray);
+}
+
+.datasetName {
+  align-self: flex-start;
+  margin: 0;
+  padding: 0.75rem 1rem;
+  border-radius: 1rem;
+  background: rgba(144, 238, 144, 0.28);
+  color: #2f6b2f;
+  font-weight: 700;
+}
+
+.card {
+  padding: 1.25rem 1.5rem;
+  background: #f7f7fa;
+  border: 1px solid rgba(90, 90, 102, 0.18);
+  border-radius: 1rem;
+  box-shadow: 0 0.75rem 1.75rem rgba(90, 90, 102, 0.08);
+}
+
+.controlsCard {
+  composes: card;
+}
+
+.controlGrid {
+  display: grid;
+  grid-template-columns: minmax(16rem, 1.7fr) auto auto;
+  gap: 1rem;
+  align-items: end;
+}
+
+.field {
+  min-width: 0;
+}
+
+.fieldLabel {
+  display: block;
+  margin-bottom: 0.5rem;
+  color: var(--color-gray);
+  font-size: 0.82em;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.select {
+  composes: input from './utils.module.css';
+  width: 100%;
+  min-height: 2.75rem;
+  color: var(--color-gray);
+  background: white;
+}
+
+.modeGroup {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.25rem;
+  background: white;
+  border-radius: 999px;
+  box-shadow: 0px 2px 3px 1px inset rgba(90, 90, 102, 0.12);
+}
+
+.modeButton {
+  composes: btnClean from global;
+  padding: 0.6rem 1rem;
+  border-radius: 999px;
+  color: var(--color-gray);
+  font-weight: 700;
+}
+
+.modeButton[data-active] {
+  background: var(--color-gray);
+  color: white;
+}
+
+.viewerLink {
+  composes: primaryBtn from './utils.module.css';
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  white-space: nowrap;
+  text-decoration: none;
+}
+
+.statusRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.5rem;
+  margin-top: 1rem;
+}
+
+.statusItem {
+  color: var(--color-gray);
+}
+
+.statusKey {
+  font-weight: 700;
+}
+
+.messageCard {
+  composes: card;
+  color: var(--color-gray);
+}
+
+.errorText {
+  color: crimson;
+}
+
+.chartStack {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.chartCard {
+  composes: card;
+  padding: 1rem;
+}
+
+.splitCharts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.emptyState {
+  composes: card;
+  max-width: 40rem;
+  color: var(--color-gray);
+}
+
+.emptyTitle {
+  margin: 0;
+  color: var(--color-gray);
+  font-family: var(--font-logo);
+  font-size: 1.5em;
+  font-weight: normal;
+}
+
+.emptyText {
+  margin: 0.5rem 0 0;
+}
+
+.emptyActions {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 1rem;
+  flex-wrap: wrap;
+}
+
+.openBtn {
+  composes: primaryBtn from './utils.module.css';
+  text-decoration: none;
+}
+
+@media (max-width: 90em) {
+  .controlGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .splitCharts {
+    grid-template-columns: 1fr;
+  }
+}
