@@ -359,6 +359,42 @@
   flex-wrap: wrap;
 }
 
+.processingStatus {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.85rem;
+  align-items: flex-start;
+  padding: 0.9rem 1rem;
+  border: 1px solid rgba(255, 208, 0, 0.22);
+  border-radius: 0.85rem;
+  background: rgba(255, 208, 0, 0.06);
+  color: var(--color-gray);
+}
+
+.processingSpinner {
+  flex: 0 0 auto;
+  margin-top: 0.08rem;
+  color: #ffd000;
+  font-size: 1.15rem;
+  animation: datasetProcessingSpin 0.9s linear infinite;
+}
+
+.processingCopy {
+  min-width: 0;
+}
+
+.processingTitle {
+  margin: 0;
+  color: var(--color-gray);
+  font-weight: 700;
+}
+
+.processingText {
+  margin: 0.25rem 0 0;
+  color: var(--color-gray);
+  opacity: 0.86;
+}
+
 .primaryAction {
   composes: primaryBtn from './utils.module.css';
   background-color: #ffd000 !important;
@@ -416,6 +452,16 @@
 
 .openBtn:hover {
   background-color: #e1b800 !important;
+}
+
+@keyframes datasetProcessingSpin {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 @media (max-width: 90em) {

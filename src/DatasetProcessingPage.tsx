@@ -1,5 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
-import { FiChevronDown, FiChevronRight, FiDownload, FiFile, FiFolder, FiRefreshCw } from 'react-icons/fi';
+import {
+  FiChevronDown,
+  FiChevronRight,
+  FiDownload,
+  FiFile,
+  FiFolder,
+  FiLoader,
+  FiRefreshCw,
+} from 'react-icons/fi';
 import { HiFolder } from 'react-icons/hi';
 import { Link, createSearchParams, useSearchParams } from 'react-router-dom';
 
@@ -636,6 +644,17 @@ function DatasetProcessingPage() {
     () => buildDefaultOutputName(operation, selectedSourceFiles, cutDemoNames),
     [cutDemoNames, operation, selectedSourceFiles],
   );
+  const processingDescription = useMemo(() => {
+    if (operation === 'merge') {
+      return `Merging ${orderedSelectedSourceUrls.length} datasets into a new file. Video-heavy keys can take a while to copy.`;
+    }
+
+    if (operation === 'append') {
+      return `Appending ${appendSourceUrls.length} dataset${appendSourceUrls.length === 1 ? '' : 's'} to the base dataset. Video-heavy keys can take a while to copy.`;
+    }
+
+    return `Cutting ${cutDemoNames.length} demo${cutDemoNames.length === 1 ? '' : 's'} into a new file. Video-heavy keys can take a while to copy.`;
+  }, [appendSourceUrls.length, cutDemoNames.length, operation, orderedSelectedSourceUrls.length]);
 
   const canProcess = useMemo(() => {
     if (selectedSourceLoading || !selectedSourcesReady || selectedKeys.length === 0) {
@@ -1017,6 +1036,17 @@ function DatasetProcessingPage() {
               <p className={styles.successText}>
                 Downloaded {lastResult.fileName} with {lastResult.demoCount} demos and {lastResult.selectedKeyCount} keys.
               </p>
+            )}
+            {isProcessing && (
+              <div className={styles.processingStatus} role="status" aria-live="polite">
+                <FiLoader aria-hidden className={styles.processingSpinner} />
+                <div className={styles.processingCopy}>
+                  <p className={styles.processingTitle}>Processing dataset operation…</p>
+                  <p className={styles.processingText}>
+                    {processingDescription} The download will start automatically when the output file is ready.
+                  </p>
+                </div>
+              </div>
             )}
 
             {!canProcess && (

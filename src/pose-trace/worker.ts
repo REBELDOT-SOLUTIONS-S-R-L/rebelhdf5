@@ -26,6 +26,8 @@ import type {
 
 type PoseSeries = number[][][];
 type H5Module = Awaited<typeof h5wasm.ready>;
+type H5WasmCreateDatasetArgs = Parameters<H5WasmGroup['create_dataset']>[0];
+type H5WasmCompressionConfig = Pick<H5WasmCreateDatasetArgs, 'compression' | 'compression_opts'>;
 
 type OpenLocalSourcePayload = {
   file: File;
@@ -112,6 +114,15 @@ interface OpenSourceEntry {
   demos: DemoInfo[];
   h5File: H5WasmFile;
   cleanup: () => void;
+}
+
+interface DatasetCopyPlanItem {
+  datasetName: string;
+}
+
+interface DatasetCopyPlanGroup {
+  parentGroupSegments: string[];
+  datasets: DatasetCopyPlanItem[];
 }
 
 const PLUGIN_ROOT = '/plugins';
@@ -740,17 +751,20 @@ function ensureChildGroup(parent: H5WasmGroup, name: string): H5WasmGroup {
 function ensureTargetGroupPath(
   targetDemoGroup: H5WasmGroup,
   sourceDemoGroup: H5WasmGroup,
-  relativeGroupPath: string,
+  relativeGroupSegments: readonly string[],
   copiedGroupPaths: Set<string>,
-): H5WasmGroup {
+): {
+  sourceGroup: H5WasmGroup;
+  targetGroup: H5WasmGroup;
+} {
   let targetGroup = targetDemoGroup;
   let sourceGroup = sourceDemoGroup;
 
-  if (!relativeGroupPath) {
-    return targetGroup;
+  if (relativeGroupSegments.length === 0) {
+    return { sourceGroup, targetGroup };
   }
 
-  for (const segment of relativeGroupPath.split('/')) {
+  for (const segment of relativeGroupSegments) {
     const nextSource = sourceGroup.get(segment);
     if (!isGroup(nextSource)) {
       throw new Error(
@@ -768,60 +782,114 @@ function ensureTargetGroupPath(
     }
   }
 
-  return targetGroup;
+  return { sourceGroup, targetGroup };
 }
 
 function getDatasetCopyValue(
   dataset: H5WasmDataset,
-): Parameters<H5WasmGroup['create_dataset']>[0]['data'] {
+): H5WasmCreateDatasetArgs['data'] {
   const value = dataset.value;
   if (value != null) {
-    return value as Parameters<H5WasmGroup['create_dataset']>[0]['data'];
+    return value as H5WasmCreateDatasetArgs['data'];
   }
 
   const jsonValue = dataset.json_value;
   if (jsonValue != null) {
-    return jsonValue as Parameters<H5WasmGroup['create_dataset']>[0]['data'];
+    return jsonValue as H5WasmCreateDatasetArgs['data'];
   }
 
   throw new Error(`Dataset '${dataset.path}' does not expose copyable data.`);
 }
 
+function buildDatasetCopyPlan(selectedKeys: readonly string[]): DatasetCopyPlanGroup[] {
+  const planByParentGroup = new Map<string, DatasetCopyPlanGroup>();
+
+  for (const keyPath of selectedKeys) {
+    const splitIndex = keyPath.lastIndexOf('/');
+    const parentGroupPath = splitIndex >= 0 ? keyPath.slice(0, splitIndex) : '';
+    const datasetName = splitIndex >= 0 ? keyPath.slice(splitIndex + 1) : keyPath;
+
+    let groupPlan = planByParentGroup.get(parentGroupPath);
+    if (!groupPlan) {
+      groupPlan = {
+        parentGroupSegments: parentGroupPath ? parentGroupPath.split('/') : [],
+        datasets: [],
+      };
+      planByParentGroup.set(parentGroupPath, groupPlan);
+    }
+
+    groupPlan.datasets.push({ datasetName });
+  }
+
+  return [...planByParentGroup.values()];
+}
+
+function getDatasetCompressionConfig(dataset: H5WasmDataset): H5WasmCompressionConfig {
+  for (let index = dataset.filters.length - 1; index >= 0; index -= 1) {
+    const filter = dataset.filters[index];
+
+    if (filter.id === 1) {
+      const compressionLevel = filter.cd_values[0];
+      return Number.isFinite(compressionLevel)
+        ? {
+            compression: 'gzip',
+            compression_opts: compressionLevel,
+          }
+        : {
+            compression: 'gzip',
+          };
+    }
+
+    if (FILTER_PLUGIN_NAMES[filter.id]) {
+      return filter.cd_values.length > 0
+        ? {
+            compression: filter.id,
+            compression_opts: [...filter.cd_values],
+          }
+        : {
+            compression: filter.id,
+          };
+    }
+  }
+
+  return {};
+}
+
 function copySelectedDatasetsForDemo(
   sourceDemoGroup: H5WasmGroup,
   targetDemoGroup: H5WasmGroup,
-  selectedKeys: readonly string[],
+  copyPlan: readonly DatasetCopyPlanGroup[],
 ) {
   const copiedGroupPaths = new Set<string>([targetDemoGroup.path]);
 
-  for (const keyPath of selectedKeys) {
-    const sourceEntity = sourceDemoGroup.get(keyPath);
-    if (!isDataset(sourceEntity)) {
-      continue;
-    }
-
-    const pathParts = keyPath.split('/');
-    const datasetName = pathParts[pathParts.length - 1];
-    const parentGroupPath = pathParts.slice(0, -1).join('/');
-    const targetParentGroup = ensureTargetGroupPath(
+  for (const groupPlan of copyPlan) {
+    const { sourceGroup, targetGroup } = ensureTargetGroupPath(
       targetDemoGroup,
       sourceDemoGroup,
-      parentGroupPath,
+      groupPlan.parentGroupSegments,
       copiedGroupPaths,
     );
 
-    const metadata = sourceEntity.metadata;
-    const targetDataset = targetParentGroup.create_dataset({
-      name: datasetName,
-      data: getDatasetCopyValue(sourceEntity),
-      shape: metadata.shape,
-      dtype: sourceEntity.dtype,
-      maxshape: metadata.maxshape,
-      chunks: metadata.chunks,
-      track_order: true,
-    });
+    for (const datasetPlan of groupPlan.datasets) {
+      const sourceEntity = sourceGroup.get(datasetPlan.datasetName);
+      if (!isDataset(sourceEntity)) {
+        continue;
+      }
 
-    copyAttributes(sourceEntity, targetDataset);
+      const metadata = sourceEntity.metadata;
+      const targetDataset = targetGroup.create_dataset({
+        name: datasetPlan.datasetName,
+        data: getDatasetCopyValue(sourceEntity),
+        shape: metadata.shape,
+        dtype: sourceEntity.dtype,
+        maxshape: metadata.maxshape,
+        chunks: metadata.chunks,
+        track_order: true,
+        ...getDatasetCompressionConfig(sourceEntity),
+      });
+
+      copyAttributes(sourceEntity, targetDataset);
+    }
   }
 }
 
@@ -841,6 +909,7 @@ async function processDataset(
   const { FS } = module;
   const entries = getOrderedSourceEntries(request.orderedSourceIds);
   const selectedKeys = [...new Set(request.selectedKeys)].sort((left, right) => left.localeCompare(right));
+  const copyPlan = buildDatasetCopyPlan(selectedKeys);
 
   if (selectedKeys.length === 0) {
     throw new Error('Select at least one key to include in the processed dataset.');
@@ -870,7 +939,7 @@ async function processDataset(
         const targetDemoGroup = outputDataGroup.create_group(`demo_${outputDemoIndex}`, true);
 
         copyAttributes(sourceDemoGroup, targetDemoGroup);
-        copySelectedDatasetsForDemo(sourceDemoGroup, targetDemoGroup, selectedKeys);
+        copySelectedDatasetsForDemo(sourceDemoGroup, targetDemoGroup, copyPlan);
 
         totalSamples += optionalInt(getAttributeValue(sourceDemoGroup, 'num_samples')) ?? 0;
         outputDemoIndex += 1;
