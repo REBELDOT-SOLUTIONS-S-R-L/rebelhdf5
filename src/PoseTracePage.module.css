@@ -190,7 +190,13 @@
 
 .openBtn {
   composes: primaryBtn from './utils.module.css';
+  background-color: #ffd000 !important;
+  color: #111824 !important;
   text-decoration: none;
+}
+
+.openBtn:hover {
+  background-color: #e1b800 !important;
 }
 
 @media (max-width: 90em) {

@@ -42,6 +42,8 @@ function OpenedFiles() {
       ? '/pose-trace'
       : location.pathname === '/video-converter'
         ? '/video-converter'
+        : location.pathname === '/dataset-processing'
+          ? '/dataset-processing'
         : '/view'
   );
 

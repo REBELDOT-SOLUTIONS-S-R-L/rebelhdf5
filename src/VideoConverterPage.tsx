@@ -396,7 +396,9 @@ function VideoConverterPage() {
         setSelectedVideoKey((current) =>
           current && nextVideos.some((video) => video.key === current)
             ? current
-            : nextVideos[0]?.key ?? null,
+            : nextVideos.some((video) => video.key === 'top')
+              ? 'top'
+              : nextVideos[0]?.key ?? null,
         );
         setVideoOptionsLoading(false);
       })

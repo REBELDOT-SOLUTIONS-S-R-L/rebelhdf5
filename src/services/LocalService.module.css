@@ -1,8 +1,14 @@
 .selectBtn {
   composes: primaryBtn from '../utils.module.css';
+  background-color: #ffd000 !important;
+  color: #111824 !important;
   margin-top: 0.5em;
   margin-bottom: 0.5rem;
   font-size: 1.125em;
+}
+
+.selectBtn:hover {
+  background-color: #e1b800 !important;
 }
 
 .hint {

@@ -1,8 +1,13 @@
-import { FiActivity, FiEye, FiFileText, FiFilm, FiPlusCircle } from 'react-icons/fi';
+import { FiActivity, FiEye, FiFileText, FiFilm, FiLayers, FiPlusCircle } from 'react-icons/fi';
 import { NavLink, useMatch, useSearchParams } from 'react-router-dom';
 
 import { useStore } from '../stores';
-import { getPoseTraceLink, getVideoConverterLink, getViewerLink } from '../utils';
+import {
+  getDatasetProcessingLink,
+  getPoseTraceLink,
+  getVideoConverterLink,
+  getViewerLink,
+} from '../utils';
 import Flyout from './Flyout';
 import OpenedFiles from './OpenedFiles';
 import styles from './Sidebar.module.css';
@@ -100,6 +105,29 @@ function Sidebar() {
             >
               <FiFilm className={styles.icon} />
               <span className={styles.label}>Video Converter</span>
+            </button>
+          )}
+
+          {activeFileUrl ? (
+            <NavLink
+              className={styles.mainNavItem}
+              to={getDatasetProcessingLink(activeFileUrl)}
+              aria-label="Dataset Processing"
+              title="Dataset Processing"
+            >
+              <FiLayers className={styles.icon} />
+              <span className={styles.label}>Dataset Processing</span>
+            </NavLink>
+          ) : (
+            <button
+              type="button"
+              className={styles.navBtn}
+              aria-label="Dataset Processing"
+              title="Dataset Processing"
+              disabled
+            >
+              <FiLayers className={styles.icon} />
+              <span className={styles.label}>Dataset Processing</span>
             </button>
           )}
 

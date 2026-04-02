@@ -35,7 +35,7 @@
 }
 
 .subtitle {
-  max-width: 52rem;
+  max-width: 54rem;
   margin: 0.5rem 0 0;
   color: var(--color-gray);
 }
@@ -108,18 +108,13 @@
   color: var(--color-danger);
 }
 
-.hintText {
-  margin: 0.9rem 0 0;
-  color: var(--color-gray);
-  opacity: 0.82;
-}
-
 .infoText {
   margin: 0;
   color: var(--color-gray);
+  opacity: 0.86;
 }
 
-.previewCard {
+.keysCard {
   composes: card;
   width: 100%;
   display: flex;
@@ -127,7 +122,7 @@
   gap: 1rem;
 }
 
-.previewHeader {
+.keysHeader {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
@@ -135,95 +130,188 @@
   flex-wrap: wrap;
 }
 
-.previewTitle {
-  margin: 0;
-  color: var(--color-gray);
-  font-size: 1.15em;
-}
-
-.previewMeta {
-  margin: 0.35rem 0 0;
-  color: var(--color-gray);
-  opacity: 0.82;
-  word-break: break-word;
-}
-
-.previewSurface {
-  padding: 0.75rem;
-  background: #09090c;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 0.9rem;
-}
-
-.previewViewport {
-  width: min(100%, 52rem);
-  margin: 0 auto;
-}
-
-.previewCanvas {
-  display: block;
-  width: 100%;
-  height: auto;
-  background: #000;
-  border-radius: 0.55rem;
-}
-
-.playerControls {
+.keyActions {
   display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 1rem;
-  margin-top: 0.9rem;
-}
-
-.playBtn {
-  composes: primaryBtn from './utils.module.css';
-  background-color: #ffd000 !important;
-  color: #111824 !important;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 5.5rem;
-  text-align: center;
-}
-
-.playBtn:hover:not(:disabled) {
-  background-color: #e1b800 !important;
-}
-
-.playBtn:disabled {
-  cursor: default;
-  opacity: 0.6;
-}
-
-.sliderBlock {
-  width: min(100%, 52rem);
-  min-width: 0;
-}
-
-.timelineSlider {
-  width: 100%;
-  accent-color: #ffd000;
-  cursor: pointer;
-}
-
-.timelineSlider:disabled {
-  cursor: default;
-  opacity: 0.6;
-}
-
-.sliderMeta {
-  display: flex;
-  justify-content: space-between;
-  gap: 1rem;
-  margin-top: 0.35rem;
-  color: var(--color-gray);
-  font-size: 0.92em;
-  font-variant-numeric: tabular-nums;
+  gap: 0.75rem;
   flex-wrap: wrap;
 }
 
-.saveBtn {
+.secondaryBtn {
+  composes: btnClean from global;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.55rem;
+  min-height: 2.6rem;
+  padding: 0.55rem 0.9rem;
+  border: 1px solid var(--color-border);
+  border-radius: 0.65rem;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--color-gray);
+  box-shadow: 0 0.35rem 0.9rem var(--color-shadow-soft);
+  transition:
+    border-color 0.18s ease,
+    background-color 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+.secondaryBtn:hover:not(:disabled) {
+  border-color: rgba(255, 208, 0, 0.38);
+  background: rgba(255, 208, 0, 0.08);
+  box-shadow: 0 0.55rem 1rem var(--color-shadow-soft);
+}
+
+.secondaryBtn:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.keyTree {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  max-height: 30rem;
+  overflow: auto;
+  padding: 0.45rem 0.35rem;
+  background: rgba(255, 255, 255, 0.015);
+  border: 1px solid var(--color-border);
+  border-radius: 0.85rem;
+}
+
+.treeBranch {
+  display: flex;
+  flex-direction: column;
+}
+
+.treeBranchLabel {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-height: 1.9rem;
+  padding-top: 0.12rem;
+  padding-bottom: 0.12rem;
+  color: var(--color-gray);
+  font-size: 0.95em;
+  font-weight: 700;
+}
+
+.treeBranchIcon {
+  flex: 0 0 auto;
+  color: #ffd000;
+  opacity: 0.9;
+}
+
+.treeChildren {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.treeLeaf {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.45rem;
+  min-height: 1.9rem;
+  padding-top: 0.12rem;
+  padding-right: 0.5rem;
+  padding-bottom: 0.12rem;
+  color: var(--color-gray);
+  font-size: 0.93em;
+  border-radius: 0.45rem;
+}
+
+.treeLeaf:hover {
+  background: rgba(255, 208, 0, 0.06);
+}
+
+.treeLeaf input {
+  margin: 0;
+  accent-color: #ffd000;
+}
+
+.treeLeafIcon {
+  flex: 0 0 auto;
+  opacity: 0.72;
+}
+
+.treeLeafLabel {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.treeMeta {
+  color: var(--color-gray);
+  opacity: 0.58;
+  font-variant-numeric: tabular-nums;
+}
+
+.actionsCard {
+  composes: card;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.sectionTitle {
+  margin: 0;
+  color: var(--color-gray);
+  font-size: 1.1em;
+}
+
+.sectionText {
+  margin: 0.35rem 0 0;
+  color: var(--color-gray);
+  opacity: 0.86;
+}
+
+.sectionLabel {
+  margin: 1rem 0 0.75rem;
+  color: var(--color-gray);
+  font-size: 0.82em;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.checkboxGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: 0.75rem;
+}
+
+.checkboxItem {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  min-width: 0;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--color-border);
+  border-radius: 0.85rem;
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--color-gray);
+}
+
+.checkboxItem input {
+  flex: 0 0 auto;
+  accent-color: #ffd000;
+}
+
+.checkboxItem span {
+  min-width: 0;
+  word-break: break-word;
+}
+
+.actionRow {
+  display: flex;
+  gap: 0.85rem;
+  flex-wrap: wrap;
+}
+
+.primaryAction {
   composes: primaryBtn from './utils.module.css';
   background-color: #ffd000 !important;
   color: #111824 !important;
@@ -232,18 +320,23 @@
   gap: 0.55rem;
 }
 
-.saveBtn:hover:not(:disabled) {
+.primaryAction:hover:not(:disabled) {
   background-color: #e1b800 !important;
 }
 
-.saveBtn:disabled {
+.primaryAction:disabled {
   cursor: default;
   opacity: 0.6;
 }
 
+.successText {
+  margin: 0;
+  color: #a9e4a2;
+}
+
 .emptyState {
   composes: card;
-  max-width: 40rem;
+  max-width: 42rem;
   color: var(--color-gray);
 }
 
@@ -277,7 +370,7 @@
   background-color: #e1b800 !important;
 }
 
-@media (max-width: 72em) {
+@media (max-width: 90em) {
   .controlGrid {
     grid-template-columns: 1fr;
   }

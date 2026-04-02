@@ -4,6 +4,7 @@ import { Route, Routes } from 'react-router-dom';
 import Dropzone from './Dropzone';
 import HelpPage from './HelpPage';
 import Layout from './Layout';
+const DatasetProcessingPage = lazy(() => import('./DatasetProcessingPage'));
 const PoseTracePage = lazy(() => import('./PoseTracePage'));
 import ServicesPage from './ServicesPage';
 const VideoConverterPage = lazy(() => import('./VideoConverterPage'));
@@ -30,6 +31,14 @@ function App() {
             element={(
               <Suspense fallback={null}>
                 <VideoConverterPage />
+              </Suspense>
+            )}
+          />
+          <Route
+            path="/dataset-processing"
+            element={(
+              <Suspense fallback={null}>
+                <DatasetProcessingPage />
               </Suspense>
             )}
           />

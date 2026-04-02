@@ -22,6 +22,37 @@ export interface DemoVideoFrames extends DemoVideoInfo {
   frames: Uint8Array;
 }
 
+export type DatasetProcessingOperation = 'cut' | 'merge' | 'append';
+
+export interface DatasetProcessingKeyInfo {
+  path: string;
+  availableInDemoCount: number;
+}
+
+export interface DatasetProcessingSourceInfo {
+  keyPaths: DatasetProcessingKeyInfo[];
+}
+
+export interface DatasetProcessingCutRange {
+  startDemoName: string;
+  endDemoName: string;
+}
+
+export interface DatasetProcessingRequest {
+  operation: DatasetProcessingOperation;
+  orderedSourceIds: string[];
+  selectedKeys: string[];
+  fileName: string;
+  cutRange?: DatasetProcessingCutRange;
+}
+
+export interface DatasetProcessingResult {
+  fileName: string;
+  demoCount: number;
+  selectedKeyCount: number;
+  fileBuffer: ArrayBuffer;
+}
+
 export interface DemoRow {
   dataset_name: string;
   demo_name: string;

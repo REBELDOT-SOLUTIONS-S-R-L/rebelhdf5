@@ -17,6 +17,9 @@ import { DEMO_VIDEO_KEYS } from './types';
 import type {
   DemoInfo,
   DemoRow,
+  DatasetProcessingRequest,
+  DatasetProcessingResult,
+  DatasetProcessingSourceInfo,
   DemoVideoInfo,
   DemoVideoKey,
 } from './types';
@@ -38,6 +41,12 @@ type LoadDemoRowsPayload = {
   demoName: string;
 };
 
+type GetDatasetProcessingInfoPayload = {
+  sourceId: string;
+};
+
+type ProcessDatasetPayload = DatasetProcessingRequest;
+
 type ListDemoVideosPayload = {
   sourceId: string;
   demoName: string;
@@ -57,12 +66,18 @@ type PoseTraceWorkerRequest =
   | { id: number; type: 'openLocalSource'; payload: OpenLocalSourcePayload }
   | { id: number; type: 'openRemoteSource'; payload: OpenRemoteSourcePayload }
   | { id: number; type: 'loadDemoRows'; payload: LoadDemoRowsPayload }
+  | { id: number; type: 'getDatasetProcessingInfo'; payload: GetDatasetProcessingInfoPayload }
+  | { id: number; type: 'processDataset'; payload: ProcessDatasetPayload }
   | { id: number; type: 'listDemoVideos'; payload: ListDemoVideosPayload }
   | { id: number; type: 'loadDemoVideo'; payload: LoadDemoVideoPayload }
   | { id: number; type: 'closeSource'; payload: CloseSourcePayload };
 
 type LoadDemoVideoResult = DemoVideoInfo & {
   framesBuffer: ArrayBuffer;
+};
+
+type ProcessDatasetResult = Omit<DatasetProcessingResult, 'fileBuffer'> & {
+  fileBuffer: ArrayBuffer;
 };
 
 type PoseTraceWorkerResponse =
@@ -72,6 +87,8 @@ type PoseTraceWorkerResponse =
       result:
         | { sourceId: string; datasetName: string; demos: DemoInfo[] }
         | DemoRow[]
+        | DatasetProcessingSourceInfo
+        | ProcessDatasetResult
         | DemoVideoInfo[]
         | LoadDemoVideoResult
         | null;
@@ -82,6 +99,8 @@ interface WorkerSuccessResult {
   result:
     | { sourceId: string; datasetName: string; demos: DemoInfo[] }
     | DemoRow[]
+    | DatasetProcessingSourceInfo
+    | ProcessDatasetResult
     | DemoVideoInfo[]
     | LoadDemoVideoResult
     | null;
@@ -584,6 +603,318 @@ function buildDemoRows(entry: OpenSourceEntry, demoName: string): DemoRow[] {
   return rows;
 }
 
+interface H5AttributeOwner {
+  path: string;
+  attrs: Record<string, {
+    value: unknown;
+    json_value: unknown;
+    shape: number[] | null;
+    dtype: Parameters<H5WasmGroup['create_attribute']>[3];
+  }>;
+  create_attribute: (
+    name: string,
+    data: Parameters<H5WasmGroup['create_attribute']>[1],
+    shape?: number[] | null,
+    dtype?: Parameters<H5WasmGroup['create_attribute']>[3],
+  ) => void;
+}
+
+function collectRelativeDatasetPaths(
+  group: H5WasmGroup,
+  prefix: string,
+  output: Set<string>,
+) {
+  for (const childName of group.keys()) {
+    const child = group.get(childName);
+    const childPath = prefix ? `${prefix}/${childName}` : childName;
+
+    if (isDataset(child)) {
+      output.add(childPath);
+      continue;
+    }
+
+    if (isGroup(child)) {
+      collectRelativeDatasetPaths(child, childPath, output);
+    }
+  }
+}
+
+function listDatasetProcessingInfo(entry: OpenSourceEntry): DatasetProcessingSourceInfo {
+  const keyCounts = new Map<string, number>();
+
+  for (const demo of entry.demos) {
+    const demoGroup = getDemoGroup(entry, demo.name);
+    const demoKeys = new Set<string>();
+    collectRelativeDatasetPaths(demoGroup, '', demoKeys);
+
+    for (const path of demoKeys) {
+      keyCounts.set(path, (keyCounts.get(path) ?? 0) + 1);
+    }
+  }
+
+  return {
+    keyPaths: [...keyCounts.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([path, availableInDemoCount]) => ({
+        path,
+        availableInDemoCount,
+      })),
+  };
+}
+
+function copyAttributes(
+  source: H5AttributeOwner,
+  target: H5AttributeOwner,
+  excludedNames: ReadonlySet<string> = new Set(),
+) {
+  for (const [name, attribute] of Object.entries(source.attrs)) {
+    if (excludedNames.has(name)) {
+      continue;
+    }
+
+    const value = attribute.value ?? attribute.json_value;
+    if (value == null) {
+      continue;
+    }
+
+    try {
+      target.create_attribute(
+        name,
+        value as Parameters<H5WasmGroup['create_attribute']>[1],
+        attribute.shape,
+        attribute.dtype,
+      );
+    } catch {
+      // Ignore unsupported attribute variants and preserve the rest of the structure.
+    }
+  }
+}
+
+function getOrderedSourceEntries(sourceIds: string[]): OpenSourceEntry[] {
+  if (sourceIds.length === 0) {
+    throw new Error('Select at least one source dataset.');
+  }
+
+  return sourceIds.map((sourceId) => {
+    const entry = openSources.get(sourceId);
+    if (!entry) {
+      throw new Error('One of the selected source datasets is no longer available.');
+    }
+
+    return entry;
+  });
+}
+
+function getCutDemoNames(
+  entry: OpenSourceEntry,
+  cutRange: DatasetProcessingRequest['cutRange'],
+): string[] {
+  const demoNames = entry.demos.map((demo) => demo.name);
+  if (!cutRange) {
+    return demoNames;
+  }
+
+  const startIndex = demoNames.indexOf(cutRange.startDemoName);
+  const endIndex = demoNames.indexOf(cutRange.endDemoName);
+
+  if (startIndex < 0 || endIndex < 0) {
+    throw new Error('The selected demo range is no longer valid.');
+  }
+
+  if (startIndex > endIndex) {
+    throw new Error('The cut start demo must come before the end demo.');
+  }
+
+  return demoNames.slice(startIndex, endIndex + 1);
+}
+
+function ensureChildGroup(parent: H5WasmGroup, name: string): H5WasmGroup {
+  const existing = parent.get(name);
+  if (isGroup(existing)) {
+    return existing;
+  }
+
+  return parent.create_group(name, true);
+}
+
+function ensureTargetGroupPath(
+  targetDemoGroup: H5WasmGroup,
+  sourceDemoGroup: H5WasmGroup,
+  relativeGroupPath: string,
+  copiedGroupPaths: Set<string>,
+): H5WasmGroup {
+  let targetGroup = targetDemoGroup;
+  let sourceGroup = sourceDemoGroup;
+
+  if (!relativeGroupPath) {
+    return targetGroup;
+  }
+
+  for (const segment of relativeGroupPath.split('/')) {
+    const nextSource = sourceGroup.get(segment);
+    if (!isGroup(nextSource)) {
+      throw new Error(
+        `Expected '${sourceGroup.path}/${segment}' to be a group while copying dataset structure.`,
+      );
+    }
+
+    targetGroup = ensureChildGroup(targetGroup, segment);
+    sourceGroup = nextSource;
+
+    const currentPath = targetGroup.path;
+    if (!copiedGroupPaths.has(currentPath)) {
+      copyAttributes(sourceGroup, targetGroup);
+      copiedGroupPaths.add(currentPath);
+    }
+  }
+
+  return targetGroup;
+}
+
+function getDatasetCopyValue(
+  dataset: H5WasmDataset,
+): Parameters<H5WasmGroup['create_dataset']>[0]['data'] {
+  const value = dataset.value;
+  if (value != null) {
+    return value as Parameters<H5WasmGroup['create_dataset']>[0]['data'];
+  }
+
+  const jsonValue = dataset.json_value;
+  if (jsonValue != null) {
+    return jsonValue as Parameters<H5WasmGroup['create_dataset']>[0]['data'];
+  }
+
+  throw new Error(`Dataset '${dataset.path}' does not expose copyable data.`);
+}
+
+function copySelectedDatasetsForDemo(
+  sourceDemoGroup: H5WasmGroup,
+  targetDemoGroup: H5WasmGroup,
+  selectedKeys: readonly string[],
+) {
+  const copiedGroupPaths = new Set<string>([targetDemoGroup.path]);
+
+  for (const keyPath of selectedKeys) {
+    const sourceEntity = sourceDemoGroup.get(keyPath);
+    if (!isDataset(sourceEntity)) {
+      continue;
+    }
+
+    const pathParts = keyPath.split('/');
+    const datasetName = pathParts[pathParts.length - 1];
+    const parentGroupPath = pathParts.slice(0, -1).join('/');
+    const targetParentGroup = ensureTargetGroupPath(
+      targetDemoGroup,
+      sourceDemoGroup,
+      parentGroupPath,
+      copiedGroupPaths,
+    );
+
+    const metadata = sourceEntity.metadata;
+    const targetDataset = targetParentGroup.create_dataset({
+      name: datasetName,
+      data: getDatasetCopyValue(sourceEntity),
+      shape: metadata.shape,
+      dtype: sourceEntity.dtype,
+      maxshape: metadata.maxshape,
+      chunks: metadata.chunks,
+      track_order: true,
+    });
+
+    copyAttributes(sourceEntity, targetDataset);
+  }
+}
+
+function normalizeOutputFileName(fileName: string): string {
+  const trimmed = fileName.trim();
+  if (trimmed.length === 0) {
+    return 'processed-dataset.hdf5';
+  }
+
+  return /\.(hdf5|h5)$/i.test(trimmed) ? trimmed : `${trimmed}.hdf5`;
+}
+
+async function processDataset(
+  request: DatasetProcessingRequest,
+): Promise<ProcessDatasetResult> {
+  const module = await ensureModule();
+  const { FS } = module;
+  const entries = getOrderedSourceEntries(request.orderedSourceIds);
+  const selectedKeys = [...new Set(request.selectedKeys)].sort((left, right) => left.localeCompare(right));
+
+  if (selectedKeys.length === 0) {
+    throw new Error('Select at least one key to include in the processed dataset.');
+  }
+
+  const outputName = normalizeOutputFileName(request.fileName);
+  const outputPath = `/${uniqueName(sanitizeFilename(outputName))}`;
+  const outputFile = new h5wasm.File(outputPath, 'w', { track_order: true });
+
+  try {
+    copyAttributes(entries[0].h5File, outputFile);
+
+    const firstDataGroup = getDataGroup(entries[0].h5File);
+    const outputDataGroup = outputFile.create_group('data', true);
+    copyAttributes(firstDataGroup, outputDataGroup, new Set(['total']));
+
+    let outputDemoIndex = 0;
+    let totalSamples = 0;
+
+    for (const entry of entries) {
+      const sourceDemoNames = request.operation === 'cut'
+        ? getCutDemoNames(entry, request.cutRange)
+        : entry.demos.map((demo) => demo.name);
+
+      for (const sourceDemoName of sourceDemoNames) {
+        const sourceDemoGroup = getDemoGroup(entry, sourceDemoName);
+        const targetDemoGroup = outputDataGroup.create_group(`demo_${outputDemoIndex}`, true);
+
+        copyAttributes(sourceDemoGroup, targetDemoGroup);
+        copySelectedDatasetsForDemo(sourceDemoGroup, targetDemoGroup, selectedKeys);
+
+        totalSamples += optionalInt(getAttributeValue(sourceDemoGroup, 'num_samples')) ?? 0;
+        outputDemoIndex += 1;
+      }
+    }
+
+    if (outputDemoIndex === 0) {
+      throw new Error('No demos matched the selected processing settings.');
+    }
+
+    if ('total' in firstDataGroup.attrs) {
+      outputDataGroup.create_attribute('total', totalSamples);
+    }
+
+    outputFile.flush();
+    outputFile.close();
+
+    const fileBytes = FS.readFile(outputPath);
+    const fileBuffer = fileBytes.buffer.slice(
+      fileBytes.byteOffset,
+      fileBytes.byteOffset + fileBytes.byteLength,
+    ) as ArrayBuffer;
+
+    return {
+      fileName: outputName,
+      demoCount: outputDemoIndex,
+      selectedKeyCount: selectedKeys.length,
+      fileBuffer,
+    };
+  } finally {
+    try {
+      outputFile.close();
+    } catch {
+      // Ignore repeated close attempts.
+    }
+
+    try {
+      FS.unlink(outputPath);
+    } catch {
+      // Ignore if the temp output file is already removed.
+    }
+  }
+}
+
 function listDemoVideoInfo(entry: OpenSourceEntry, demoName: string): DemoVideoInfo[] {
   const demoGroup = getDemoGroup(entry, demoName);
   const videos: DemoVideoInfo[] = [];
@@ -760,6 +1091,20 @@ async function handleRequest(message: PoseTraceWorkerRequest): Promise<WorkerSuc
         throw new Error('Pose Trace source is no longer available.');
       }
       return { result: buildDemoRows(entry, message.payload.demoName) };
+    }
+    case 'getDatasetProcessingInfo': {
+      const entry = openSources.get(message.payload.sourceId);
+      if (!entry) {
+        throw new Error('Pose Trace source is no longer available.');
+      }
+      return { result: listDatasetProcessingInfo(entry) };
+    }
+    case 'processDataset': {
+      const result = await processDataset(message.payload);
+      return {
+        result,
+        transfer: [result.fileBuffer],
+      };
     }
     case 'listDemoVideos': {
       const entry = openSources.get(message.payload.sourceId);

@@ -3,6 +3,9 @@ import { FileService, type H5File } from '../stores';
 import type {
   DemoInfo,
   DemoRow,
+  DatasetProcessingRequest,
+  DatasetProcessingResult,
+  DatasetProcessingSourceInfo,
   DemoVideoFrames,
   DemoVideoInfo,
   DemoVideoKey,
@@ -22,6 +25,12 @@ type LoadDemoRowsPayload = {
   sourceId: string;
   demoName: string;
 };
+
+type GetDatasetProcessingInfoPayload = {
+  sourceId: string;
+};
+
+type ProcessDatasetPayload = DatasetProcessingRequest;
 
 type ListDemoVideosPayload = {
   sourceId: string;
@@ -52,6 +61,8 @@ type PoseTraceWorkerRequest =
   | { id: number; type: 'openLocalSource'; payload: OpenLocalSourcePayload }
   | { id: number; type: 'openRemoteSource'; payload: OpenRemoteSourcePayload }
   | { id: number; type: 'loadDemoRows'; payload: LoadDemoRowsPayload }
+  | { id: number; type: 'getDatasetProcessingInfo'; payload: GetDatasetProcessingInfoPayload }
+  | { id: number; type: 'processDataset'; payload: ProcessDatasetPayload }
   | { id: number; type: 'listDemoVideos'; payload: ListDemoVideosPayload }
   | { id: number; type: 'loadDemoVideo'; payload: LoadDemoVideoPayload }
   | { id: number; type: 'closeSource'; payload: CloseSourcePayload };
@@ -60,7 +71,14 @@ type PoseTraceWorkerResponse =
   | {
       id: number;
       ok: true;
-      result: OpenSourceResult | DemoRow[] | DemoVideoInfo[] | LoadDemoVideoResult | null;
+      result:
+        | OpenSourceResult
+        | DemoRow[]
+        | DatasetProcessingSourceInfo
+        | DatasetProcessingResult
+        | DemoVideoInfo[]
+        | LoadDemoVideoResult
+        | null;
     }
   | { id: number; ok: false; error: string };
 
@@ -158,6 +176,24 @@ export function loadDemoRows(source: PoseTraceSource, demoName: string): Promise
     sourceId: source.sourceId,
     demoName,
   });
+}
+
+export function getDatasetProcessingInfo(
+  source: PoseTraceSource,
+): Promise<DatasetProcessingSourceInfo> {
+  return callWorker<DatasetProcessingSourceInfo>('getDatasetProcessingInfo', {
+    sourceId: source.sourceId,
+  });
+}
+
+export async function processDataset(
+  request: DatasetProcessingRequest,
+): Promise<DatasetProcessingResult> {
+  const result = await callWorker<DatasetProcessingResult>('processDataset', request);
+  return {
+    ...result,
+    fileBuffer: result.fileBuffer,
+  };
 }
 
 export function listDemoVideos(
