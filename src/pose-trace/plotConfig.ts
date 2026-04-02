@@ -12,9 +12,30 @@ import type { DemoRow } from './types';
 
 export type TraceSide = 'left' | 'right';
 type LegendId = 'legend' | 'legend2' | 'legend3';
+type SceneVector = { x?: number; y?: number; z?: number };
+
+export interface PlotSceneCamera {
+  center?: SceneVector;
+  eye?: SceneVector;
+  up?: SceneVector;
+  projection?: { type?: string };
+}
+
+type PlotTraceVisibility = true | false | 'legendonly';
+
+interface TracePoint3D {
+  rowIndex: number;
+  x: number;
+  y: number;
+  z: number;
+}
 
 const FONT_FAMILY = 'Roboto, sans-serif';
 const PLOTLY_WHITE_TEMPLATE = 'plotly_white' as unknown as Layout['template'];
+const FUTURE_TRACE_OPACITY = 0.22;
+const FUTURE_MARKER_OPACITY = 0.35;
+const DEFAULT_3D_CAMERA_EYE = { x: 0.0, y: -1.8, z: 0.5 };
+const DEFAULT_3D_CAMERA_UP = { x: 0, y: 0, z: 1 };
 
 const SUBPLOT_DOMAINS: [number, number][] = [
   [0.74, 1.0],
@@ -115,6 +136,59 @@ function buildLegendLayout(theme: PlotTheme, y: number): Partial<Layout['legend'
     borderwidth: 1,
     font: { color: theme.textColor, family: FONT_FAMILY, size: 10 },
   };
+}
+
+function build3DPoints(rows: DemoRow[], prefix: string): TracePoint3D[] {
+  const points: TracePoint3D[] = [];
+
+  rows.forEach((row, rowIndex) => {
+    const x = row[`${prefix}_x`];
+    const y = row[`${prefix}_y`];
+    const z = row[`${prefix}_z`];
+
+    if (typeof x !== 'number' || typeof y !== 'number' || typeof z !== 'number') {
+      return;
+    }
+
+    points.push({ rowIndex, x, y, z });
+  });
+
+  return points;
+}
+
+function split3DPoints(points: TracePoint3D[], stepIndex: number): {
+  past: TracePoint3D[];
+  future: TracePoint3D[];
+  current: TracePoint3D | undefined;
+} {
+  const past = points.filter((point) => point.rowIndex <= stepIndex);
+  const current = [...points].reverse().find((point) => point.rowIndex <= stepIndex);
+  const futureBase = points.filter((point) => point.rowIndex >= stepIndex);
+  const future = current && futureBase[0]?.rowIndex !== current.rowIndex
+    ? [current, ...futureBase]
+    : futureBase;
+
+  return { past, future, current };
+}
+
+function coordinates(points: TracePoint3D[]): { x: number[]; y: number[]; z: number[] } {
+  return {
+    x: points.map((point) => point.x),
+    y: points.map((point) => point.y),
+    z: points.map((point) => point.z),
+  };
+}
+
+function buildTraceVisibility(
+  hiddenLegendGroups: ReadonlySet<string> | undefined,
+  legendGroup: string,
+  showInLegend: boolean,
+): PlotTraceVisibility {
+  if (!hiddenLegendGroups?.has(legendGroup)) {
+    return true;
+  }
+
+  return showInLegend ? 'legendonly' : false;
 }
 
 export function build2DData(rows: DemoRow[], side: TraceSide): Data[] {
@@ -262,81 +336,137 @@ export function build3DData(rows: DemoRow[]): Data[] {
     return [];
   }
 
+  return build3DDataForStep(rows, rows.length - 1);
+}
+
+export function build3DDataForStep(
+  rows: DemoRow[],
+  stepIndex: number,
+  hiddenLegendGroups?: ReadonlySet<string>,
+): Data[] {
+  if (rows.length === 0) {
+    return [];
+  }
+
   const traces: Data[] = [];
+  const clampedStepIndex = Math.max(0, Math.min(stepIndex, rows.length - 1));
 
   for (const spec of TRACE_3D_SPECS) {
-    const xs: number[] = [];
-    const ys: number[] = [];
-    const zs: number[] = [];
-
-    for (const row of rows) {
-      const x = row[`${spec.prefix}_x`];
-      const y = row[`${spec.prefix}_y`];
-      const z = row[`${spec.prefix}_z`];
-
-      if (
-        typeof x !== 'number' ||
-        typeof y !== 'number' ||
-        typeof z !== 'number'
-      ) {
-        continue;
-      }
-
-      xs.push(x);
-      ys.push(y);
-      zs.push(z);
-    }
-
-    if (xs.length === 0) {
+    const points = build3DPoints(rows, spec.prefix);
+    if (points.length === 0) {
       continue;
     }
 
+    const legendGroup = spec.prefix;
+    const legendVisible = buildTraceVisibility(hiddenLegendGroups, legendGroup, true);
+    const groupVisible = buildTraceVisibility(hiddenLegendGroups, legendGroup, false);
+    const { past, future, current } = split3DPoints(points, clampedStepIndex);
+    const lastPoint = points[points.length - 1];
+    const startPoint = points[0];
+
+    if (past.length > 0) {
+      const { x, y, z } = coordinates(past);
+      traces.push({
+        type: 'scatter3d',
+        x,
+        y,
+        z,
+        mode: 'lines',
+        name: spec.label,
+        uid: `${legendGroup}-past`,
+        legendgroup: legendGroup,
+        visible: legendVisible,
+        line: { color: spec.color, dash: spec.dash as Plotly.Dash, width: 6 },
+      });
+    }
+
+    if (future.length > 1) {
+      const { x, y, z } = coordinates(future);
+      traces.push({
+        type: 'scatter3d',
+        x,
+        y,
+        z,
+        mode: 'lines',
+        name: `${spec.label} future`,
+        uid: `${legendGroup}-future`,
+        legendgroup: legendGroup,
+        visible: groupVisible,
+        line: { color: spec.color, dash: spec.dash as Plotly.Dash, width: 6 },
+        opacity: FUTURE_TRACE_OPACITY,
+        showlegend: false,
+      });
+    }
+
     traces.push({
       type: 'scatter3d',
-      x: xs,
-      y: ys,
-      z: zs,
-      mode: 'lines',
-      name: spec.label,
-      line: { color: spec.color, dash: spec.dash as Plotly.Dash, width: 6 },
-    });
-    traces.push({
-      type: 'scatter3d',
-      x: [xs[0]],
-      y: [ys[0]],
-      z: [zs[0]],
+      x: [startPoint.x],
+      y: [startPoint.y],
+      z: [startPoint.z],
       mode: 'markers',
       marker: { color: spec.color, size: spec.markerSize, symbol: 'circle' },
       name: `${spec.label} start`,
+      uid: `${legendGroup}-start`,
+      legendgroup: legendGroup,
+      visible: groupVisible,
       showlegend: false,
+      opacity: startPoint.rowIndex <= clampedStepIndex ? 1 : FUTURE_MARKER_OPACITY,
     });
+
+    if (current) {
+      traces.push({
+        type: 'scatter3d',
+        x: [current.x],
+        y: [current.y],
+        z: [current.z],
+        mode: 'markers',
+        marker: { color: spec.color, size: spec.markerSize + 2, symbol: 'diamond' },
+        name: `${spec.label} current`,
+        uid: `${legendGroup}-current`,
+        legendgroup: legendGroup,
+        visible: groupVisible,
+        showlegend: false,
+      });
+    }
+
     traces.push({
       type: 'scatter3d',
-      x: [xs[xs.length - 1]],
-      y: [ys[ys.length - 1]],
-      z: [zs[zs.length - 1]],
+      x: [lastPoint.x],
+      y: [lastPoint.y],
+      z: [lastPoint.z],
       mode: 'markers',
       marker: { color: spec.color, size: spec.markerSize + 1, symbol: 'x' },
       name: `${spec.label} end`,
+      uid: `${legendGroup}-end`,
+      legendgroup: legendGroup,
+      visible: groupVisible,
       showlegend: false,
+      opacity: lastPoint.rowIndex <= clampedStepIndex ? 1 : FUTURE_MARKER_OPACITY,
     });
   }
 
   return traces;
 }
 
-export function build3DLayout(_rows: DemoRow[]): Partial<Layout> {
+export function build3DLayout(rows: DemoRow[], camera?: PlotSceneCamera | null): Partial<Layout> {
   const theme = getPlotTheme();
+  const uirevision = `${rows[0]?.dataset_name ?? 'dataset'}-${rows[0]?.demo_name ?? 'demo'}-3d`;
+
   return {
     template: PLOTLY_WHITE_TEMPLATE,
     height: 760,
     paper_bgcolor: theme.paperBg,
     plot_bgcolor: theme.plotBg,
     font: { color: theme.textColor, family: FONT_FAMILY },
+    uirevision,
     margin: { l: 20, r: 20, t: 30, b: 90 },
     scene: {
       aspectmode: 'data',
       bgcolor: theme.plotBg,
+      camera: camera ?? {
+        eye: DEFAULT_3D_CAMERA_EYE,
+        up: DEFAULT_3D_CAMERA_UP,
+      },
       xaxis: {
         title: { text: 'x [m]' },
         backgroundcolor: theme.plotBg,
@@ -361,6 +491,7 @@ export function build3DLayout(_rows: DemoRow[]): Partial<Layout> {
     },
     legend: {
       orientation: 'h',
+      groupclick: 'togglegroup',
       yanchor: 'top',
       y: -0.12,
       xanchor: 'center',

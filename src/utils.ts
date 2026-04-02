@@ -7,7 +7,10 @@ import {
 } from './services/utils';
 import { FileService, type H5File, type RemoteFile } from './stores';
 
-export function getFileLink(pathname: '/view' | '/pose-trace', href: string): string {
+export function getFileLink(
+  pathname: '/view' | '/pose-trace' | '/video-converter',
+  href: string,
+): string {
   const urlParam = createSearchParams({ url: href });
   return `${pathname}?${urlParam.toString()}`;
 }
@@ -18,6 +21,10 @@ export function getViewerLink(href: string): string {
 
 export function getPoseTraceLink(href: string): string {
   return getFileLink('/pose-trace', href);
+}
+
+export function getVideoConverterLink(href: string): string {
+  return getFileLink('/video-converter', href);
 }
 
 function parseFilename(url: URL): string {

@@ -35,7 +35,7 @@
 }
 
 .subtitle {
-  max-width: 44rem;
+  max-width: 52rem;
   margin: 0.5rem 0 0;
   color: var(--color-gray);
 }
@@ -55,7 +55,7 @@
 
 .controlGrid {
   display: grid;
-  grid-template-columns: minmax(16rem, 1fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 1rem;
   align-items: end;
 }
@@ -104,63 +104,125 @@
 }
 
 .errorText {
+  margin: 0;
   color: var(--color-danger);
 }
 
-.chartStack {
-  display: flex;
-  flex-direction: column;
-  width: 100%;
-  gap: 1rem;
+.hintText {
+  margin: 0.9rem 0 0;
+  color: var(--color-gray);
+  opacity: 0.82;
 }
 
-.chartCard {
-  composes: card;
-  width: 100%;
-  padding: 1rem;
-}
-
-.stepSliderBlock {
-  margin-top: 1rem;
-  padding: 0 0.25rem;
-}
-
-.stepSliderHeader {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 1rem;
+.infoText {
+  margin: 0;
   color: var(--color-gray);
 }
 
-.stepSliderLabel {
-  font-size: 0.82em;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
-.stepSliderValue {
-  font-variant-numeric: tabular-nums;
-}
-
-.stepSlider {
+.previewCard {
+  composes: card;
   width: 100%;
-  margin-top: 0.5rem;
-  accent-color: #ffd000;
-  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
 }
 
-.stepSlider:disabled {
+.previewHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.previewTitle {
+  margin: 0;
+  color: var(--color-gray);
+  font-size: 1.15em;
+}
+
+.previewMeta {
+  margin: 0.35rem 0 0;
+  color: var(--color-gray);
+  opacity: 0.82;
+  word-break: break-word;
+}
+
+.previewSurface {
+  padding: 0.75rem;
+  background: #09090c;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 0.9rem;
+}
+
+.previewViewport {
+  width: min(100%, 52rem);
+  margin: 0 auto;
+}
+
+.previewCanvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  background: #000;
+  border-radius: 0.55rem;
+}
+
+.playerControls {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  margin-top: 0.9rem;
+}
+
+.playBtn {
+  composes: primaryBtn from './utils.module.css';
+  min-width: 5.5rem;
+}
+
+.playBtn:disabled {
   cursor: default;
   opacity: 0.6;
 }
 
-.splitCharts {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+.sliderBlock {
+  width: min(100%, 52rem);
+  min-width: 0;
+}
+
+.timelineSlider {
   width: 100%;
+  accent-color: #ffd000;
+  cursor: pointer;
+}
+
+.timelineSlider:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.sliderMeta {
+  display: flex;
+  justify-content: space-between;
   gap: 1rem;
+  margin-top: 0.35rem;
+  color: var(--color-gray);
+  font-size: 0.92em;
+  font-variant-numeric: tabular-nums;
+  flex-wrap: wrap;
+}
+
+.saveBtn {
+  composes: primaryBtn from './utils.module.css';
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.saveBtn:disabled {
+  cursor: default;
+  opacity: 0.6;
 }
 
 .emptyState {
@@ -193,12 +255,8 @@
   text-decoration: none;
 }
 
-@media (max-width: 90em) {
+@media (max-width: 72em) {
   .controlGrid {
-    grid-template-columns: 1fr;
-  }
-
-  .splitCharts {
     grid-template-columns: 1fr;
   }
 }

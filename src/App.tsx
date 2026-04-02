@@ -6,6 +6,7 @@ import HelpPage from './HelpPage';
 import Layout from './Layout';
 const PoseTracePage = lazy(() => import('./PoseTracePage'));
 import ServicesPage from './ServicesPage';
+const VideoConverterPage = lazy(() => import('./VideoConverterPage'));
 import ViewPage from './ViewPage';
 
 function App() {
@@ -21,6 +22,14 @@ function App() {
             element={(
               <Suspense fallback={null}>
                 <PoseTracePage />
+              </Suspense>
+            )}
+          />
+          <Route
+            path="/video-converter"
+            element={(
+              <Suspense fallback={null}>
+                <VideoConverterPage />
               </Suspense>
             )}
           />

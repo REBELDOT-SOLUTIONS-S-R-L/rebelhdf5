@@ -1,6 +1,13 @@
 import { fetchBuffer } from '../fetch-utils';
 import { FileService, type H5File } from '../stores';
-import type { DemoRow, PoseTraceSource, DemoInfo } from './types';
+import type {
+  DemoInfo,
+  DemoRow,
+  DemoVideoFrames,
+  DemoVideoInfo,
+  DemoVideoKey,
+  PoseTraceSource,
+} from './types';
 
 type OpenLocalSourcePayload = {
   file: File;
@@ -16,6 +23,17 @@ type LoadDemoRowsPayload = {
   demoName: string;
 };
 
+type ListDemoVideosPayload = {
+  sourceId: string;
+  demoName: string;
+};
+
+type LoadDemoVideoPayload = {
+  sourceId: string;
+  demoName: string;
+  videoKey: DemoVideoKey;
+};
+
 type CloseSourcePayload = {
   sourceId: string;
 };
@@ -26,14 +44,24 @@ type OpenSourceResult = {
   demos: DemoInfo[];
 };
 
+type LoadDemoVideoResult = DemoVideoInfo & {
+  framesBuffer: ArrayBuffer;
+};
+
 type PoseTraceWorkerRequest =
   | { id: number; type: 'openLocalSource'; payload: OpenLocalSourcePayload }
   | { id: number; type: 'openRemoteSource'; payload: OpenRemoteSourcePayload }
   | { id: number; type: 'loadDemoRows'; payload: LoadDemoRowsPayload }
+  | { id: number; type: 'listDemoVideos'; payload: ListDemoVideosPayload }
+  | { id: number; type: 'loadDemoVideo'; payload: LoadDemoVideoPayload }
   | { id: number; type: 'closeSource'; payload: CloseSourcePayload };
 
 type PoseTraceWorkerResponse =
-  | { id: number; ok: true; result: OpenSourceResult | DemoRow[] | null }
+  | {
+      id: number;
+      ok: true;
+      result: OpenSourceResult | DemoRow[] | DemoVideoInfo[] | LoadDemoVideoResult | null;
+    }
   | { id: number; ok: false; error: string };
 
 type PendingRequest = {
@@ -130,4 +158,31 @@ export function loadDemoRows(source: PoseTraceSource, demoName: string): Promise
     sourceId: source.sourceId,
     demoName,
   });
+}
+
+export function listDemoVideos(
+  source: PoseTraceSource,
+  demoName: string,
+): Promise<DemoVideoInfo[]> {
+  return callWorker<DemoVideoInfo[]>('listDemoVideos', {
+    sourceId: source.sourceId,
+    demoName,
+  });
+}
+
+export async function loadDemoVideoFrames(
+  source: PoseTraceSource,
+  demoName: string,
+  videoKey: DemoVideoKey,
+): Promise<DemoVideoFrames> {
+  const result = await callWorker<LoadDemoVideoResult>('loadDemoVideo', {
+    sourceId: source.sourceId,
+    demoName,
+    videoKey,
+  });
+
+  return {
+    ...result,
+    frames: new Uint8Array(result.framesBuffer),
+  };
 }

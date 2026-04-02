@@ -13,7 +13,13 @@ import {
   TRACE_KEYPOINT_NAMES,
   TRACE_SUCCESS_DISTANCE_SPECS,
 } from './schema';
-import type { DemoInfo, DemoRow } from './types';
+import { DEMO_VIDEO_KEYS } from './types';
+import type {
+  DemoInfo,
+  DemoRow,
+  DemoVideoInfo,
+  DemoVideoKey,
+} from './types';
 
 type PoseSeries = number[][][];
 type H5Module = Awaited<typeof h5wasm.ready>;
@@ -32,6 +38,17 @@ type LoadDemoRowsPayload = {
   demoName: string;
 };
 
+type ListDemoVideosPayload = {
+  sourceId: string;
+  demoName: string;
+};
+
+type LoadDemoVideoPayload = {
+  sourceId: string;
+  demoName: string;
+  videoKey: DemoVideoKey;
+};
+
 type CloseSourcePayload = {
   sourceId: string;
 };
@@ -40,15 +57,36 @@ type PoseTraceWorkerRequest =
   | { id: number; type: 'openLocalSource'; payload: OpenLocalSourcePayload }
   | { id: number; type: 'openRemoteSource'; payload: OpenRemoteSourcePayload }
   | { id: number; type: 'loadDemoRows'; payload: LoadDemoRowsPayload }
+  | { id: number; type: 'listDemoVideos'; payload: ListDemoVideosPayload }
+  | { id: number; type: 'loadDemoVideo'; payload: LoadDemoVideoPayload }
   | { id: number; type: 'closeSource'; payload: CloseSourcePayload };
+
+type LoadDemoVideoResult = DemoVideoInfo & {
+  framesBuffer: ArrayBuffer;
+};
 
 type PoseTraceWorkerResponse =
   | {
       id: number;
       ok: true;
-      result: { sourceId: string; datasetName: string; demos: DemoInfo[] } | DemoRow[] | null;
+      result:
+        | { sourceId: string; datasetName: string; demos: DemoInfo[] }
+        | DemoRow[]
+        | DemoVideoInfo[]
+        | LoadDemoVideoResult
+        | null;
     }
   | { id: number; ok: false; error: string };
+
+interface WorkerSuccessResult {
+  result:
+    | { sourceId: string; datasetName: string; demos: DemoInfo[] }
+    | DemoRow[]
+    | DemoVideoInfo[]
+    | LoadDemoVideoResult
+    | null;
+  transfer?: Transferable[];
+}
 
 interface OpenSourceEntry {
   datasetName: string;
@@ -72,6 +110,9 @@ const FILTER_PLUGIN_NAMES: Record<number, Plugin> = {
 
 const openSources = new Map<string, OpenSourceEntry>();
 let modulePromise: Promise<H5Module> | null = null;
+const workerScope = self as unknown as {
+  postMessage: (message: PoseTraceWorkerResponse, transfer?: Transferable[]) => void;
+};
 
 function sanitizeFilename(filename: string): string {
   return filename.replaceAll(/[^a-zA-Z0-9._-]/g, '_');
@@ -192,6 +233,11 @@ function maybeChildGroup(group: H5WasmGroup, name: string): H5WasmGroup | null {
   return isGroup(child) ? child : null;
 }
 
+function maybeChildDataset(group: H5WasmGroup, name: string): H5WasmDataset | null {
+  const child = group.get(name);
+  return isDataset(child) ? child : null;
+}
+
 function findDescendantGroup(group: H5WasmGroup, targetName: string): H5WasmGroup | null {
   const directChild = maybeChildGroup(group, targetName);
   if (directChild) {
@@ -209,6 +255,31 @@ function findDescendantGroup(group: H5WasmGroup, targetName: string): H5WasmGrou
     }
 
     const nestedMatch = findDescendantGroup(child, targetName);
+    if (nestedMatch) {
+      return nestedMatch;
+    }
+  }
+
+  return null;
+}
+
+function findDescendantDataset(group: H5WasmGroup, targetName: string): H5WasmDataset | null {
+  const directChild = maybeChildDataset(group, targetName);
+  if (directChild) {
+    return directChild;
+  }
+
+  for (const childName of group.keys()) {
+    const child = group.get(childName);
+    if (isDataset(child) && child.path.split('/').pop() === targetName) {
+      return child;
+    }
+
+    if (!isGroup(child)) {
+      continue;
+    }
+
+    const nestedMatch = findDescendantDataset(child, targetName);
     if (nestedMatch) {
       return nestedMatch;
     }
@@ -286,8 +357,33 @@ function findPoseGroup(demoGroup: H5WasmGroup, name: string): H5WasmGroup | null
   return null;
 }
 
+function findVideoDataset(demoGroup: H5WasmGroup, name: DemoVideoKey): H5WasmDataset | null {
+  const obsGroup = maybeChildGroup(demoGroup, 'obs');
+  if (!obsGroup) {
+    return null;
+  }
+
+  const directDataset = maybeChildDataset(obsGroup, name);
+  if (directDataset) {
+    return directDataset;
+  }
+
+  return findDescendantDataset(obsGroup, name);
+}
+
 function isPoseShape(shape: number[] | null): shape is [number, number, number] {
   return Array.isArray(shape) && shape.length === 3 && shape[1] === 4 && shape[2] === 4;
+}
+
+function isVideoShape(shape: number[] | null): shape is [number, number, number, number] {
+  return (
+    Array.isArray(shape)
+    && shape.length === 4
+    && Number.isInteger(shape[0])
+    && Number.isInteger(shape[1])
+    && Number.isInteger(shape[2])
+    && [1, 3, 4].includes(shape[3] ?? 0)
+  );
 }
 
 function loadPoseArrays(
@@ -386,12 +482,18 @@ function listDemos(h5File: H5WasmFile): DemoInfo[] {
   });
 }
 
-function buildDemoRows(entry: OpenSourceEntry, demoName: string): DemoRow[] {
+function getDemoGroup(entry: OpenSourceEntry, demoName: string): H5WasmGroup {
   const dataGroup = getDataGroup(entry.h5File);
   const demoGroup = dataGroup.get(demoName);
   if (!isGroup(demoGroup)) {
     throw new Error(`Demo '${demoName}' not found in ${entry.datasetName}.`);
   }
+
+  return demoGroup;
+}
+
+function buildDemoRows(entry: OpenSourceEntry, demoName: string): DemoRow[] {
+  const demoGroup = getDemoGroup(entry, demoName);
 
   const eefPoseGroup = findPoseGroup(demoGroup, 'eef_pose');
   const objectPoseGroup = findPoseGroup(demoGroup, 'object_pose');
@@ -480,6 +582,78 @@ function buildDemoRows(entry: OpenSourceEntry, demoName: string): DemoRow[] {
   }
 
   return rows;
+}
+
+function listDemoVideoInfo(entry: OpenSourceEntry, demoName: string): DemoVideoInfo[] {
+  const demoGroup = getDemoGroup(entry, demoName);
+  const videos: DemoVideoInfo[] = [];
+
+  for (const key of DEMO_VIDEO_KEYS) {
+    const dataset = findVideoDataset(demoGroup, key);
+    if (!dataset || !isVideoShape(dataset.shape)) {
+      continue;
+    }
+
+    const [frameCount, height, width, channels] = dataset.shape;
+    videos.push({
+      key,
+      path: dataset.path,
+      frameCount,
+      height,
+      width,
+      channels,
+    });
+  }
+
+  return videos;
+}
+
+function datasetToUint8Array(dataset: H5WasmDataset): Uint8Array {
+  const value = dataset.value;
+
+  if (value instanceof Uint8Array) {
+    return new Uint8Array(value);
+  }
+
+  if (ArrayBuffer.isView(value)) {
+    const copied = new Uint8Array(value.byteLength);
+    copied.set(new Uint8Array(value.buffer, value.byteOffset, value.byteLength));
+    return copied;
+  }
+
+  throw new Error(`Dataset '${dataset.path}' is not backed by byte data.`);
+}
+
+function loadDemoVideo(
+  entry: OpenSourceEntry,
+  demoName: string,
+  videoKey: DemoVideoKey,
+): LoadDemoVideoResult {
+  const demoGroup = getDemoGroup(entry, demoName);
+  const dataset = findVideoDataset(demoGroup, videoKey);
+
+  if (!dataset || !isVideoShape(dataset.shape)) {
+    throw new Error(
+      `Demo '${demoName}' does not contain a supported video dataset at obs/${videoKey}.`,
+    );
+  }
+
+  const [frameCount, height, width, channels] = dataset.shape;
+  const frames = datasetToUint8Array(dataset);
+  const framesBuffer = frames.buffer.slice(
+    frames.byteOffset,
+    frames.byteOffset + frames.byteLength,
+  ) as ArrayBuffer;
+
+  return {
+    key: videoKey,
+    path: dataset.path,
+    frameCount,
+    height,
+    width,
+    channels,
+    framesBuffer,
+  };
 }
 
 async function openLocalSource(file: File) {
@@ -574,21 +748,45 @@ async function closeSource(sourceId: string) {
   return null;
 }
 
-async function handleRequest(message: PoseTraceWorkerRequest) {
+async function handleRequest(message: PoseTraceWorkerRequest): Promise<WorkerSuccessResult> {
   switch (message.type) {
     case 'openLocalSource':
-      return openLocalSource(message.payload.file);
+      return { result: await openLocalSource(message.payload.file) };
     case 'openRemoteSource':
-      return openRemoteSource(message.payload.buffer, message.payload.name);
+      return { result: await openRemoteSource(message.payload.buffer, message.payload.name) };
     case 'loadDemoRows': {
       const entry = openSources.get(message.payload.sourceId);
       if (!entry) {
         throw new Error('Pose Trace source is no longer available.');
       }
-      return buildDemoRows(entry, message.payload.demoName);
+      return { result: buildDemoRows(entry, message.payload.demoName) };
+    }
+    case 'listDemoVideos': {
+      const entry = openSources.get(message.payload.sourceId);
+      if (!entry) {
+        throw new Error('Pose Trace source is no longer available.');
+      }
+      return { result: listDemoVideoInfo(entry, message.payload.demoName) };
+    }
+    case 'loadDemoVideo': {
+      const entry = openSources.get(message.payload.sourceId);
+      if (!entry) {
+        throw new Error('Pose Trace source is no longer available.');
+      }
+
+      const result = loadDemoVideo(
+        entry,
+        message.payload.demoName,
+        message.payload.videoKey,
+      );
+
+      return {
+        result,
+        transfer: [result.framesBuffer],
+      };
     }
     case 'closeSource':
-      return closeSource(message.payload.sourceId);
+      return { result: await closeSource(message.payload.sourceId) };
     default:
       throw new Error('Unsupported Pose Trace worker request.');
   }
@@ -598,13 +796,13 @@ self.onmessage = (event: MessageEvent<PoseTraceWorkerRequest>) => {
   const message = event.data;
 
   void handleRequest(message)
-    .then((result) => {
+    .then(({ result, transfer = [] }) => {
       const response: PoseTraceWorkerResponse = {
         id: message.id,
         ok: true,
         result,
       };
-      self.postMessage(response);
+      workerScope.postMessage(response, transfer);
     })
     .catch((error: unknown) => {
       const response: PoseTraceWorkerResponse = {

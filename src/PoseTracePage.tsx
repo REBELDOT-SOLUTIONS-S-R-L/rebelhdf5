@@ -1,4 +1,4 @@
-import { startTransition, useEffect, useMemo, useState } from 'react';
+import { startTransition, useEffect, useMemo, useRef, useState } from 'react';
 import { FiActivity } from 'react-icons/fi';
 import { Link, createSearchParams, useSearchParams } from 'react-router-dom';
 
@@ -7,9 +7,10 @@ import Plot from './pose-trace/PlotlyChart';
 import {
   build2DData,
   build2DLayout,
-  build3DData,
+  build3DDataForStep,
   build3DLayout,
   buildEmptyLayout,
+  type PlotSceneCamera,
 } from './pose-trace/plotConfig';
 import type { DemoInfo, DemoRow, PoseTraceSource } from './pose-trace/types';
 import { type H5File, useStore } from './stores';
@@ -26,6 +27,15 @@ interface SourceState {
   source: PoseTraceSource | null;
   loading: boolean;
   error: string | null;
+}
+
+interface PlotLegendTraceState {
+  legendgroup?: string;
+}
+
+interface PlotLegendClickEvent {
+  curveNumber?: number;
+  data?: PlotLegendTraceState[];
 }
 
 function usePrefersDarkMode(): boolean {
@@ -179,6 +189,19 @@ function formatDemoOption(demo: DemoInfo): string {
   return parts.join(' | ');
 }
 
+function clonePlotSceneCamera(camera: PlotSceneCamera | null | undefined): PlotSceneCamera | null {
+  if (!camera) {
+    return null;
+  }
+
+  return {
+    center: camera.center ? { ...camera.center } : undefined,
+    eye: camera.eye ? { ...camera.eye } : undefined,
+    up: camera.up ? { ...camera.up } : undefined,
+    projection: camera.projection ? { ...camera.projection } : undefined,
+  };
+}
+
 function PoseTraceCharts({
   rows,
   loading,
@@ -189,23 +212,108 @@ function PoseTraceCharts({
   themeKey: string;
 }) {
   const hasData = rows.length > 0;
+  const [selectedStepIndex, setSelectedStepIndex] = useState(0);
+  const [hiddenTraceGroupsVersion, setHiddenTraceGroupsVersion] = useState(0);
+  const sceneCameraRef = useRef<PlotSceneCamera | null>(null);
+  const sceneCameraIdentityRef = useRef<string | null>(null);
+  const hiddenTraceGroupsRef = useRef<Set<string>>(new Set());
   const emptyMessage = loading
     ? 'Loading pose-trace data…'
     : 'Select a demo to inspect its end-effector and garment trajectories.';
+  const maxStepIndex = Math.max(rows.length - 1, 0);
+  const currentStepIndex = Math.min(selectedStepIndex, maxStepIndex);
+  const currentStepRow = rows[currentStepIndex];
+  const currentStepLabel = currentStepRow?.episode_step ?? currentStepIndex;
+  const threeDimensionalChartKey = `${rows[0]?.dataset_name ?? 'dataset'}-${rows[0]?.demo_name ?? 'demo'}-3d-${themeKey}`;
+
+  if (sceneCameraIdentityRef.current !== threeDimensionalChartKey) {
+    sceneCameraIdentityRef.current = threeDimensionalChartKey;
+    sceneCameraRef.current = null;
+    hiddenTraceGroupsRef.current = new Set();
+  }
+
+  const threeDimensionalData = useMemo(
+    () => (hasData ? build3DDataForStep(rows, currentStepIndex, hiddenTraceGroupsRef.current) : []),
+    [currentStepIndex, hasData, hiddenTraceGroupsVersion, rows, threeDimensionalChartKey],
+  );
+
+  useEffect(() => {
+    setSelectedStepIndex(maxStepIndex);
+  }, [maxStepIndex, rows]);
 
   return (
     <div className={styles.chartStack}>
       <section className={styles.chartCard}>
         <Plot
-          key={`${rows[0]?.dataset_name ?? 'dataset'}-${rows[0]?.demo_name ?? 'demo'}-3d-${themeKey}`}
-          data={hasData ? build3DData(rows) : []}
+          key={threeDimensionalChartKey}
+          data={threeDimensionalData}
           layout={
-            hasData ? build3DLayout(rows) : buildEmptyLayout('3D Pose Trace', emptyMessage, true)
+            hasData
+              ? build3DLayout(rows, sceneCameraRef.current)
+              : buildEmptyLayout('3D Pose Trace', emptyMessage, true)
           }
+          onUpdate={(figure) => {
+            const nextCamera = clonePlotSceneCamera(figure.layout?.scene?.camera);
+            if (nextCamera) {
+              sceneCameraRef.current = nextCamera;
+            }
+          }}
+          onLegendClick={(event) => {
+            const clickEvent = event as PlotLegendClickEvent;
+            const clickedTrace = clickEvent.data?.[clickEvent.curveNumber ?? -1];
+            if (typeof clickedTrace?.legendgroup !== 'string') {
+              return false;
+            }
+
+            const nextHiddenTraceGroups = new Set(hiddenTraceGroupsRef.current);
+            if (nextHiddenTraceGroups.has(clickedTrace.legendgroup)) {
+              nextHiddenTraceGroups.delete(clickedTrace.legendgroup);
+            } else {
+              nextHiddenTraceGroups.add(clickedTrace.legendgroup);
+            }
+
+            hiddenTraceGroupsRef.current = nextHiddenTraceGroups;
+            startTransition(() => {
+              setHiddenTraceGroupsVersion((version) => version + 1);
+            });
+
+            return false;
+          }}
+          onLegendDoubleClick={() => {
+            return false;
+          }}
           useResizeHandler
           style={{ width: '100%' }}
           config={{ responsive: true }}
         />
+        {hasData && (
+          <div className={styles.stepSliderBlock}>
+            <div className={styles.stepSliderHeader}>
+              <label className={styles.stepSliderLabel} htmlFor="pose-trace-step-slider">
+                3D step
+              </label>
+              <span className={styles.stepSliderValue}>
+                {currentStepLabel} ({currentStepIndex + 1}/{rows.length})
+              </span>
+            </div>
+            <input
+              id="pose-trace-step-slider"
+              className={styles.stepSlider}
+              type="range"
+              min={0}
+              max={maxStepIndex}
+              step={1}
+              value={currentStepIndex}
+              onChange={(event) => {
+                const nextStepIndex = Number(event.target.value);
+                startTransition(() => {
+                  setSelectedStepIndex(nextStepIndex);
+                });
+              }}
+              disabled={rows.length <= 1}
+            />
+          </div>
+        )}
       </section>
 
       <section className={styles.splitCharts}>

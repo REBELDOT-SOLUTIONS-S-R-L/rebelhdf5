@@ -1,8 +1,8 @@
-import { FiActivity, FiEye, FiFileText, FiPlusCircle } from 'react-icons/fi';
+import { FiActivity, FiEye, FiFileText, FiFilm, FiPlusCircle } from 'react-icons/fi';
 import { NavLink, useMatch, useSearchParams } from 'react-router-dom';
 
 import { useStore } from '../stores';
-import { getPoseTraceLink, getViewerLink } from '../utils';
+import { getPoseTraceLink, getVideoConverterLink, getViewerLink } from '../utils';
 import Flyout from './Flyout';
 import OpenedFiles from './OpenedFiles';
 import styles from './Sidebar.module.css';
@@ -34,25 +34,74 @@ function Sidebar() {
             <span className={styles.label}>Open HDF5</span>
           </NavLink>
 
-          <NavLink
-            className={styles.mainNavItem}
-            to={activeFileUrl ? getViewerLink(activeFileUrl) : '/'}
-            aria-label="Viewer"
-            title="Viewer"
-          >
-            <FiEye className={styles.icon} />
-            <span className={styles.label}>Viewer</span>
-          </NavLink>
+          {activeFileUrl ? (
+            <NavLink
+              className={styles.mainNavItem}
+              to={getViewerLink(activeFileUrl)}
+              aria-label="Viewer"
+              title="Viewer"
+            >
+              <FiEye className={styles.icon} />
+              <span className={styles.label}>Viewer</span>
+            </NavLink>
+          ) : (
+            <button
+              type="button"
+              className={styles.navBtn}
+              aria-label="Viewer"
+              title="Viewer"
+              disabled
+            >
+              <FiEye className={styles.icon} />
+              <span className={styles.label}>Viewer</span>
+            </button>
+          )}
 
-          <NavLink
-            className={styles.mainNavItem}
-            to={activeFileUrl ? getPoseTraceLink(activeFileUrl) : '/pose-trace'}
-            aria-label="Pose Trace"
-            title="Pose Trace"
-          >
-            <FiActivity className={styles.icon} />
-            <span className={styles.label}>Pose Trace</span>
-          </NavLink>
+          {activeFileUrl ? (
+            <NavLink
+              className={styles.mainNavItem}
+              to={getPoseTraceLink(activeFileUrl)}
+              aria-label="Pose Trace"
+              title="Pose Trace"
+            >
+              <FiActivity className={styles.icon} />
+              <span className={styles.label}>Pose Trace</span>
+            </NavLink>
+          ) : (
+            <button
+              type="button"
+              className={styles.navBtn}
+              aria-label="Pose Trace"
+              title="Pose Trace"
+              disabled
+            >
+              <FiActivity className={styles.icon} />
+              <span className={styles.label}>Pose Trace</span>
+            </button>
+          )}
+
+          {activeFileUrl ? (
+            <NavLink
+              className={styles.mainNavItem}
+              to={getVideoConverterLink(activeFileUrl)}
+              aria-label="Video Converter"
+              title="Video Converter"
+            >
+              <FiFilm className={styles.icon} />
+              <span className={styles.label}>Video Converter</span>
+            </NavLink>
+          ) : (
+            <button
+              type="button"
+              className={styles.navBtn}
+              aria-label="Video Converter"
+              title="Video Converter"
+              disabled
+            >
+              <FiFilm className={styles.icon} />
+              <span className={styles.label}>Video Converter</span>
+            </button>
+          )}
 
           {isCollapsed ? (
             <div className={styles.flyoutWrapper}>

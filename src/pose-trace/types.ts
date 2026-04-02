@@ -6,6 +6,22 @@ export interface DemoInfo {
   source_episode_index: number | null;
 }
 
+export const DEMO_VIDEO_KEYS = ['left_wrist', 'right_wrist', 'top'] as const;
+export type DemoVideoKey = (typeof DEMO_VIDEO_KEYS)[number];
+
+export interface DemoVideoInfo {
+  key: DemoVideoKey;
+  path: string;
+  frameCount: number;
+  height: number;
+  width: number;
+  channels: number;
+}
+
+export interface DemoVideoFrames extends DemoVideoInfo {
+  frames: Uint8Array;
+}
+
 export interface DemoRow {
   dataset_name: string;
   demo_name: string;

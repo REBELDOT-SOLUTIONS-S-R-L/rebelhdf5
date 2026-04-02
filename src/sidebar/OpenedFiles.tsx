@@ -37,7 +37,13 @@ function OpenedFiles() {
   const location = useLocation();
   const [searchParams] = useSearchParams();
   const fileUrl = searchParams.get('url');
-  const fileRoute = location.pathname === '/pose-trace' ? '/pose-trace' : '/view';
+  const fileRoute = (
+    location.pathname === '/pose-trace'
+      ? '/pose-trace'
+      : location.pathname === '/video-converter'
+        ? '/video-converter'
+        : '/view'
+  );
 
   function removeFile(file: H5File, index: number, isActive: boolean) {
     if (isActive) {
