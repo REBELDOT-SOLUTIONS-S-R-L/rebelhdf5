@@ -4,6 +4,7 @@ import { H5WasmLocalFileProvider } from '@h5web/h5wasm';
 import { getPlugin } from './plugin-utils';
 import { type LocalFile } from './stores';
 import { buildMailto, FEEDBACK_MESSAGE } from './utils';
+import styles from './ViewerTheme.module.css';
 
 export const CACHE_KEY = Symbol('bufferFetcher');
 
@@ -17,14 +18,16 @@ function LocalFileViewer(props: Props) {
 
   return (
     <H5WasmLocalFileProvider file={rawFile} getPlugin={getPlugin}>
-      <App
-        key={resolvedUrl}
-        disableDarkMode
-        propagateErrors
-        getFeedbackURL={({ entityPath }) => {
-          return buildMailto('Feedback', FEEDBACK_MESSAGE, file, entityPath);
-        }}
-      />
+      <div className={styles.viewerTheme}>
+        <App
+          key={resolvedUrl}
+          initialPath="/data"
+          propagateErrors
+          getFeedbackURL={({ entityPath }) => {
+            return buildMailto('Feedback', FEEDBACK_MESSAGE, file, entityPath);
+          }}
+        />
+      </div>
     </H5WasmLocalFileProvider>
   );
 }

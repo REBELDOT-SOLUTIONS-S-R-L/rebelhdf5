@@ -11,19 +11,15 @@ import {
 import type { DemoRow } from './types';
 
 export type TraceSide = 'left' | 'right';
+type LegendId = 'legend' | 'legend2' | 'legend3';
 
-const PAPER_BG = '#ffffff';
-const PLOT_BG = '#f7f7fa';
-const GRID_COLOR = 'rgba(90, 90, 102, 0.14)';
-const TEXT_COLOR = '#5a5a66';
-const MUTED_TEXT = '#7b7b87';
 const FONT_FAMILY = 'Roboto, sans-serif';
 const PLOTLY_WHITE_TEMPLATE = 'plotly_white' as unknown as Layout['template'];
 
 const SUBPLOT_DOMAINS: [number, number][] = [
-  [0.72, 1.0],
-  [0.38, 0.64],
-  [0.0, 0.28],
+  [0.74, 1.0],
+  [0.4, 0.62],
+  [0.06, 0.28],
 ];
 
 const SUBPLOT_TITLES = [
@@ -31,6 +27,37 @@ const SUBPLOT_TITLES = [
   'Garment Fold-Term Distances',
   'EEF And Garment Keypoint Heights',
 ];
+
+interface PlotTheme {
+  paperBg: string;
+  plotBg: string;
+  gridColor: string;
+  textColor: string;
+  mutedText: string;
+  legendBg: string;
+  legendBorder: string;
+}
+
+function cssColor(name: string, fallback: string): string {
+  if (typeof window === 'undefined') {
+    return fallback;
+  }
+
+  const value = window.getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  return value || fallback;
+}
+
+function getPlotTheme(): PlotTheme {
+  return {
+    paperBg: cssColor('--color-plot-paper', '#ffffff'),
+    plotBg: cssColor('--color-plot-surface', '#f7f7fa'),
+    gridColor: cssColor('--color-plot-grid', 'rgba(90, 90, 102, 0.14)'),
+    textColor: cssColor('--color-text', '#5a5a66'),
+    mutedText: cssColor('--color-text-muted', '#7b7b87'),
+    legendBg: cssColor('--color-plot-legend-bg', 'rgba(255, 255, 255, 0.92)'),
+    legendBorder: cssColor('--color-plot-legend-border', 'rgba(90, 90, 102, 0.14)'),
+  };
+}
 
 function xAxis(rows: DemoRow[]): number[] {
   if (rows.length > 0 && rows.every((row) => row.episode_step != null)) {
@@ -51,15 +78,6 @@ function hasValues(values: Array<number | null>): boolean {
   return values.some((value) => value != null);
 }
 
-function buildTitle(rows: DemoRow[]): string {
-  if (rows.length === 0) {
-    return 'Pose Trace';
-  }
-
-  const first = rows[0];
-  return `${first.dataset_name} | ${first.demo_name} | steps=${rows.length}`;
-}
-
 function matchesSide(column: string, side: TraceSide): boolean {
   return column.includes(`_${side}_`);
 }
@@ -68,12 +86,35 @@ function sideLabel(side: TraceSide): string {
   return side === 'left' ? 'Left EEF' : 'Right EEF';
 }
 
-function build2DPanelTitle(rows: DemoRow[], side: TraceSide): string {
-  if (rows.length === 0) {
-    return `${sideLabel(side)} 2D traces`;
+function build2DLegendLabel(column: string, side: TraceSide): string {
+  let label = humanizeColumnName(column);
+
+  if (side === 'left') {
+    label = label.replace('left arm', 'eef');
+    label = label.replaceAll('garment left ', '');
+    label = label.replaceAll('left ', '');
+  } else {
+    label = label.replace('right arm', 'eef');
+    label = label.replaceAll('garment right ', '');
+    label = label.replaceAll('right ', '');
   }
 
-  return `${rows[0].demo_name} | ${sideLabel(side)}`;
+  label = label.replaceAll('garment ', '');
+  return label.trim();
+}
+
+function buildLegendLayout(theme: PlotTheme, y: number): Partial<Layout['legend']> {
+  return {
+    orientation: 'h',
+    yanchor: 'top',
+    y,
+    xanchor: 'center',
+    x: 0.5,
+    bgcolor: theme.legendBg,
+    bordercolor: theme.legendBorder,
+    borderwidth: 1,
+    font: { color: theme.textColor, family: FONT_FAMILY, size: 10 },
+  };
 }
 
 export function build2DData(rows: DemoRow[], side: TraceSide): Data[] {
@@ -82,7 +123,7 @@ export function build2DData(rows: DemoRow[], side: TraceSide): Data[] {
   }
 
   const x = xAxis(rows);
-  const traces: Data[] = [];
+  const traces: Array<Data & { legend?: LegendId }> = [];
 
   for (const column of TRACE_EEF_KEYPOINT_COLUMNS) {
     if (!matchesSide(column, side)) {
@@ -99,7 +140,8 @@ export function build2DData(rows: DemoRow[], side: TraceSide): Data[] {
       x,
       y: values,
       mode: 'lines',
-      name: humanizeColumnName(column),
+      name: build2DLegendLabel(column, side),
+      legend: 'legend',
       line: { width: 2.4 },
       yaxis: 'y',
     });
@@ -115,13 +157,14 @@ export function build2DData(rows: DemoRow[], side: TraceSide): Data[] {
       continue;
     }
 
-    const traceName = humanizeColumnName(distanceColumn);
+    const traceName = build2DLegendLabel(distanceColumn, side);
     traces.push({
       type: 'scatter',
       x,
       y: values,
       mode: 'lines',
       name: traceName,
+      legend: 'legend2',
       line: { width: 2.4 },
       xaxis: 'x2',
       yaxis: 'y2',
@@ -135,6 +178,7 @@ export function build2DData(rows: DemoRow[], side: TraceSide): Data[] {
         y: [thresholdValue, thresholdValue],
         mode: 'lines',
         name: `${traceName} threshold`,
+        legend: 'legend2',
         line: { dash: 'dash', width: 1.6 },
         showlegend: false,
         xaxis: 'x2',
@@ -158,55 +202,39 @@ export function build2DData(rows: DemoRow[], side: TraceSide): Data[] {
       x,
       y: values,
       mode: 'lines',
-      name: humanizeColumnName(column),
+      name: build2DLegendLabel(column, side),
+      legend: 'legend3',
       line: { width: 2.2 },
       xaxis: 'x3',
       yaxis: 'y3',
     });
   }
 
-  return traces;
+  return traces as Data[];
 }
 
-export function build2DLayout(rows: DemoRow[], side: TraceSide): Partial<Layout> {
+export function build2DLayout(_rows: DemoRow[], side: TraceSide): Partial<Layout> {
+  const theme = getPlotTheme();
   const axisBase = {
     showgrid: true,
-    gridcolor: GRID_COLOR,
-    zerolinecolor: GRID_COLOR,
-    color: TEXT_COLOR,
+    gridcolor: theme.gridColor,
+    zerolinecolor: theme.gridColor,
+    color: theme.textColor,
   };
   const sideTitles = SUBPLOT_TITLES.map((title) => `${sideLabel(side)} ${title}`);
-  const legend = {
-    title: { text: sideLabel(side), font: { color: TEXT_COLOR } },
-    orientation: 'h',
-    entrywidthmode: 'fraction' as const,
-    entrywidth: 0.32,
-    yanchor: 'top' as const,
-    y: -0.16,
-    xanchor: 'left' as const,
-    x: 0.0,
-    bgcolor: 'rgba(255, 255, 255, 0.92)',
-    bordercolor: 'rgba(90, 90, 102, 0.14)',
-    borderwidth: 1,
-  } as Partial<Layout['legend']> & {
-    entrywidthmode: 'fraction';
-    entrywidth: number;
-  };
-
-  return {
+  const layout: Partial<Layout> & {
+    legend2: Partial<Layout['legend']>;
+    legend3: Partial<Layout['legend']>;
+  } = {
     template: PLOTLY_WHITE_TEMPLATE,
-    title: {
-      text: build2DPanelTitle(rows, side),
-      x: 0.02,
-      xanchor: 'left',
-      font: { color: TEXT_COLOR, family: FONT_FAMILY, size: 20 },
-    },
-    height: 940,
-    paper_bgcolor: PAPER_BG,
-    plot_bgcolor: PLOT_BG,
-    font: { color: TEXT_COLOR, family: FONT_FAMILY },
-    legend,
-    margin: { l: 60, r: 30, t: 90, b: 130 },
+    height: 980,
+    paper_bgcolor: theme.paperBg,
+    plot_bgcolor: theme.plotBg,
+    font: { color: theme.textColor, family: FONT_FAMILY },
+    legend: buildLegendLayout(theme, 0.705),
+    legend2: buildLegendLayout(theme, 0.365),
+    legend3: buildLegendLayout(theme, -0.06),
+    margin: { l: 60, r: 30, t: 60, b: 160 },
     xaxis: { ...axisBase, domain: [0, 1], anchor: 'y', matches: 'x3' },
     yaxis: { ...axisBase, domain: SUBPLOT_DOMAINS[0], title: { text: 'distance [m]' } },
     xaxis2: { ...axisBase, domain: [0, 1], anchor: 'y2', matches: 'x3' },
@@ -222,9 +250,11 @@ export function build2DLayout(rows: DemoRow[], side: TraceSide): Partial<Layout>
       xanchor: 'center',
       yanchor: 'bottom',
       showarrow: false,
-      font: { color: TEXT_COLOR, family: FONT_FAMILY, size: 15 },
+      font: { color: theme.textColor, family: FONT_FAMILY, size: 14 },
     })),
   };
+
+  return layout;
 }
 
 export function build3DData(rows: DemoRow[]): Data[] {
@@ -295,53 +325,48 @@ export function build3DData(rows: DemoRow[]): Data[] {
   return traces;
 }
 
-export function build3DLayout(rows: DemoRow[]): Partial<Layout> {
+export function build3DLayout(_rows: DemoRow[]): Partial<Layout> {
+  const theme = getPlotTheme();
   return {
     template: PLOTLY_WHITE_TEMPLATE,
-    title: {
-      text: rows.length > 0 ? `${buildTitle(rows)} | 3D trajectories` : '3D Pose Trace',
-      x: 0.02,
-      xanchor: 'left',
-      font: { color: TEXT_COLOR, family: FONT_FAMILY, size: 20 },
-    },
     height: 760,
-    paper_bgcolor: PAPER_BG,
-    plot_bgcolor: PLOT_BG,
-    font: { color: TEXT_COLOR, family: FONT_FAMILY },
-    margin: { l: 20, r: 20, t: 80, b: 20 },
+    paper_bgcolor: theme.paperBg,
+    plot_bgcolor: theme.plotBg,
+    font: { color: theme.textColor, family: FONT_FAMILY },
+    margin: { l: 20, r: 20, t: 30, b: 90 },
     scene: {
       aspectmode: 'data',
-      bgcolor: PLOT_BG,
+      bgcolor: theme.plotBg,
       xaxis: {
         title: { text: 'x [m]' },
-        backgroundcolor: PLOT_BG,
-        gridcolor: GRID_COLOR,
-        zerolinecolor: GRID_COLOR,
-        color: TEXT_COLOR,
+        backgroundcolor: theme.plotBg,
+        gridcolor: theme.gridColor,
+        zerolinecolor: theme.gridColor,
+        color: theme.textColor,
       },
       yaxis: {
         title: { text: 'y [m]' },
-        backgroundcolor: PLOT_BG,
-        gridcolor: GRID_COLOR,
-        zerolinecolor: GRID_COLOR,
-        color: TEXT_COLOR,
+        backgroundcolor: theme.plotBg,
+        gridcolor: theme.gridColor,
+        zerolinecolor: theme.gridColor,
+        color: theme.textColor,
       },
       zaxis: {
         title: { text: 'z [m]' },
-        backgroundcolor: PLOT_BG,
-        gridcolor: GRID_COLOR,
-        zerolinecolor: GRID_COLOR,
-        color: TEXT_COLOR,
+        backgroundcolor: theme.plotBg,
+        gridcolor: theme.gridColor,
+        zerolinecolor: theme.gridColor,
+        color: theme.textColor,
       },
     },
     legend: {
       orientation: 'h',
-      yanchor: 'bottom',
-      y: 1.02,
-      xanchor: 'left',
-      x: 0.0,
-      bgcolor: 'rgba(255, 255, 255, 0.92)',
-      bordercolor: 'rgba(90, 90, 102, 0.14)',
+      yanchor: 'top',
+      y: -0.12,
+      xanchor: 'center',
+      x: 0.5,
+      bgcolor: theme.legendBg,
+      bordercolor: theme.legendBorder,
       borderwidth: 1,
     },
   };
@@ -352,17 +377,18 @@ export function buildEmptyLayout(
   message: string,
   is3d = false,
 ): Partial<Layout> {
+  const theme = getPlotTheme();
   const base: Partial<Layout> = {
     template: PLOTLY_WHITE_TEMPLATE,
     title: {
       text: title,
       x: 0.02,
       xanchor: 'left',
-      font: { color: TEXT_COLOR, family: FONT_FAMILY, size: 20 },
+      font: { color: theme.textColor, family: FONT_FAMILY, size: 20 },
     },
-    paper_bgcolor: PAPER_BG,
-    plot_bgcolor: PLOT_BG,
-    font: { color: TEXT_COLOR, family: FONT_FAMILY },
+    paper_bgcolor: theme.paperBg,
+    plot_bgcolor: theme.plotBg,
+    font: { color: theme.textColor, family: FONT_FAMILY },
     annotations: [
       {
         text: message,
@@ -371,7 +397,7 @@ export function buildEmptyLayout(
         xref: 'paper',
         yref: 'paper',
         showarrow: false,
-        font: { color: MUTED_TEXT, family: FONT_FAMILY, size: 16 },
+        font: { color: theme.mutedText, family: FONT_FAMILY, size: 16 },
       },
     ],
   };

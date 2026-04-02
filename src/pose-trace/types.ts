@@ -27,5 +27,3 @@ export interface PoseTraceSource {
   demos: DemoInfo[];
   cleanup: () => void;
 }
-
-export type GraphMode = 'both' | '2d' | '3d';

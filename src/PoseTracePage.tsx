@@ -1,5 +1,5 @@
 import { startTransition, useEffect, useMemo, useState } from 'react';
-import { FiArrowUpRight, FiActivity } from 'react-icons/fi';
+import { FiActivity } from 'react-icons/fi';
 import { Link, createSearchParams, useSearchParams } from 'react-router-dom';
 
 import { openPoseTraceSource, loadDemoRows } from './pose-trace/hdf5';
@@ -11,10 +11,10 @@ import {
   build3DLayout,
   buildEmptyLayout,
 } from './pose-trace/plotConfig';
-import type { DemoInfo, DemoRow, GraphMode, PoseTraceSource } from './pose-trace/types';
+import type { DemoInfo, DemoRow, PoseTraceSource } from './pose-trace/types';
 import { type H5File, useStore } from './stores';
 import styles from './PoseTracePage.module.css';
-import { getViewerLink, resolveFileUrl } from './utils';
+import { resolveFileUrl } from './utils';
 
 interface ResolvedFileState {
   file: H5File | null;
@@ -26,6 +26,35 @@ interface SourceState {
   source: PoseTraceSource | null;
   loading: boolean;
   error: string | null;
+}
+
+function usePrefersDarkMode(): boolean {
+  const [prefersDarkMode, setPrefersDarkMode] = useState(() => {
+    if (typeof window === 'undefined') {
+      return false;
+    }
+
+    return window.matchMedia('(prefers-color-scheme: dark)').matches;
+  });
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return undefined;
+    }
+
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    const updatePreference = (event: MediaQueryListEvent) => {
+      setPrefersDarkMode(event.matches);
+    };
+
+    setPrefersDarkMode(mediaQuery.matches);
+    mediaQuery.addEventListener('change', updatePreference);
+    return () => {
+      mediaQuery.removeEventListener('change', updatePreference);
+    };
+  }, []);
+
+  return prefersDarkMode;
 }
 
 function useResolvedFile(fileUrl: string | null): ResolvedFileState {
@@ -152,12 +181,12 @@ function formatDemoOption(demo: DemoInfo): string {
 
 function PoseTraceCharts({
   rows,
-  graphMode,
   loading,
+  themeKey,
 }: {
   rows: DemoRow[];
-  graphMode: GraphMode;
   loading: boolean;
+  themeKey: string;
 }) {
   const hasData = rows.length > 0;
   const emptyMessage = loading
@@ -166,47 +195,40 @@ function PoseTraceCharts({
 
   return (
     <div className={styles.chartStack}>
-      {(graphMode === 'both' || graphMode === '3d') && (
-        <section className={styles.chartCard}>
-          <Plot
-            data={hasData ? build3DData(rows) : []}
-            layout={
-              hasData
-                ? build3DLayout(rows)
-                : buildEmptyLayout('3D Pose Trace', emptyMessage, true)
-            }
-            useResizeHandler
-            style={{ width: '100%' }}
-            config={{ responsive: true }}
-          />
-        </section>
-      )}
+      <section className={styles.chartCard}>
+        <Plot
+          key={`${rows[0]?.dataset_name ?? 'dataset'}-${rows[0]?.demo_name ?? 'demo'}-3d-${themeKey}`}
+          data={hasData ? build3DData(rows) : []}
+          layout={
+            hasData ? build3DLayout(rows) : buildEmptyLayout('3D Pose Trace', emptyMessage, true)
+          }
+          useResizeHandler
+          style={{ width: '100%' }}
+          config={{ responsive: true }}
+        />
+      </section>
 
-      {(graphMode === 'both' || graphMode === '2d') && (
-        <section className={styles.splitCharts}>
-          {(['left', 'right'] as const).map((side) => (
-            <div key={side} className={styles.chartCard}>
-              <Plot
-                key={`${rows[0]?.dataset_name ?? 'dataset'}-${rows[0]?.demo_name ?? 'demo'}-${side}`}
-                data={hasData ? build2DData(rows, side) : []}
-                layout={
-                  hasData
-                    ? build2DLayout(rows, side)
-                    : buildEmptyLayout(
-                        side === 'left'
-                          ? 'Left EEF 2D Pose Trace'
-                          : 'Right EEF 2D Pose Trace',
-                        emptyMessage,
-                      )
-                }
-                useResizeHandler
-                style={{ width: '100%' }}
-                config={{ responsive: true }}
-              />
-            </div>
-          ))}
-        </section>
-      )}
+      <section className={styles.splitCharts}>
+        {(['left', 'right'] as const).map((side) => (
+          <div key={side} className={styles.chartCard}>
+            <Plot
+              key={`${rows[0]?.dataset_name ?? 'dataset'}-${rows[0]?.demo_name ?? 'demo'}-${side}-${themeKey}`}
+              data={hasData ? build2DData(rows, side) : []}
+              layout={
+                hasData
+                  ? build2DLayout(rows, side)
+                  : buildEmptyLayout(
+                      side === 'left' ? 'Left EEF 2D Pose Trace' : 'Right EEF 2D Pose Trace',
+                      emptyMessage,
+                    )
+              }
+              useResizeHandler
+              style={{ width: '100%' }}
+              config={{ responsive: true }}
+            />
+          </div>
+        ))}
+      </section>
     </div>
   );
 }
@@ -238,6 +260,7 @@ function PoseTracePage() {
   const [searchParams] = useSearchParams();
   const fileUrl = searchParams.get('url');
   const opened = useStore((state) => state.opened);
+  const prefersDarkMode = usePrefersDarkMode();
 
   const { file, loading: fileLoading, error: fileError } = useResolvedFile(fileUrl);
   const {
@@ -247,7 +270,6 @@ function PoseTracePage() {
   } = usePoseTraceSource(file);
 
   const [selectedDemo, setSelectedDemo] = useState<string | null>(null);
-  const [graphMode, setGraphMode] = useState<GraphMode>('both');
   const [rows, setRows] = useState<DemoRow[]>([]);
   const [rowsLoading, setRowsLoading] = useState(false);
   const [rowsError, setRowsError] = useState<string | null>(null);
@@ -326,7 +348,6 @@ function PoseTracePage() {
             Plot end-effector and garment trajectories directly from the currently opened HDF5 file.
           </p>
         </div>
-        {source && <p className={styles.datasetName}>{source.datasetName}</p>}
       </header>
 
       {!fileUrl && !file && !fileLoading && <EmptyState openedFileCount={opened.length} />}
@@ -377,40 +398,9 @@ function PoseTracePage() {
                   ))}
                 </select>
               </div>
-
-              <div className={styles.field}>
-                <span className={styles.fieldLabel}>Graph Mode</span>
-                <div className={styles.modeGroup} role="group" aria-label="Graph mode">
-                  {(['both', '3d', '2d'] as const).map((mode) => (
-                    <button
-                      key={mode}
-                      type="button"
-                      className={styles.modeButton}
-                      data-active={graphMode === mode || undefined}
-                      onClick={() => setGraphMode(mode)}
-                    >
-                      {mode === 'both' ? 'Both' : mode.toUpperCase()}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {file && (
-                <Link
-                  className={styles.viewerLink}
-                  to={getViewerLink(file.url)}
-                >
-                  Open In Viewer
-                  <FiArrowUpRight aria-hidden />
-                </Link>
-              )}
             </div>
 
             <div className={styles.statusRow}>
-              <div className={styles.statusItem}>
-                <span className={styles.statusKey}>File:</span>{' '}
-                {file?.name ?? source.datasetName}
-              </div>
               <div className={styles.statusItem}>
                 <span className={styles.statusKey}>Demos:</span> {demos.length}
               </div>
@@ -439,7 +429,11 @@ function PoseTracePage() {
             </section>
           )}
 
-          <PoseTraceCharts rows={rows} graphMode={graphMode} loading={rowsLoading} />
+          <PoseTraceCharts
+            rows={rows}
+            loading={rowsLoading}
+            themeKey={prefersDarkMode ? 'dark' : 'light'}
+          />
         </>
       )}
 

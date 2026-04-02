@@ -10,7 +10,7 @@
   overflow-x: hidden;
   overflow-y: scroll;
   scrollbar-width: thin;
-  color: #f8fbef;
+  color: var(--color-sidebar-text);
   transition: max-width 0.2s ease-out;
   accent-color: var(--color-five);
 }
@@ -50,6 +50,7 @@
 .logo {
   flex: none;
   margin: 0;
+  color: #ffd000;
   font-family: var(--font-logo);
   font-size: clamp(2.25em, 4vw, 3em);
   font-weight: normal;
@@ -57,7 +58,7 @@
 }
 
 .logo > span {
-  color: var(--color-five);
+  color: #ffffff;
 }
 
 .sidebar[data-collapsed] .logo {
@@ -111,17 +112,17 @@
 }
 
 :where(.sidebar[data-collapsed]) .navItem[data-primary] {
-  background-color: hsl(240, 6%, 45%);
+  background-color: var(--color-sidebar-collapsed-active);
 }
 
 .navItem[aria-current] {
-  background-color: hsl(240, 6%, 15%);
+  background-color: var(--color-sidebar-active);
   font-weight: 600;
 }
 
 .navItem:not([aria-current]):hover,
 .navListItem:hover > .navItem:not([aria-current]) {
-  background-color: hsl(240, 6%, 25%);
+  background-color: var(--color-sidebar-hover);
 }
 
 .icon {
@@ -181,9 +182,9 @@
   min-width: 18em;
   max-width: 40em;
   padding: 0.25rem 1.5rem 0.5rem;
-  background-color: var(--color-gray);
+  background-color: var(--color-shell-bg);
   border-radius: 1rem;
-  box-shadow: 0px 2px 8px rgba(90, 90, 102, 0.8);
+  box-shadow: 0px 2px 8px var(--color-shadow-strong);
 }
 
 .heading {
@@ -200,7 +201,7 @@
 .heading:not(:first-child)::before {
   content: '';
   display: block;
-  border-top: 1px solid rgba(248, 251, 239, 0.75);
+  border-top: 1px solid var(--color-divider-on-dark);
   margin-bottom: 1rem;
 }
 
@@ -241,7 +242,7 @@
 }
 
 .actionBtn:hover {
-  background-color: rgba(255, 255, 255, 0.2);
+  background-color: var(--color-action-hover);
   opacity: 1 !important;
 }
 
@@ -273,7 +274,7 @@
 }
 
 .credits > a {
-  color: powderblue;
+  color: var(--color-link-on-dark);
 }
 
 .credits > a:hover,

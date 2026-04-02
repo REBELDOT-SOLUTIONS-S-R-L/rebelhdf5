@@ -6,6 +6,7 @@ import { fetchBuffer } from './fetch-utils';
 import { getPlugin } from './plugin-utils';
 import { type RemoteFile } from './stores';
 import { buildMailto, FEEDBACK_MESSAGE } from './utils';
+import styles from './ViewerTheme.module.css';
 
 export const CACHE_KEY = Symbol('bufferFetcher');
 
@@ -21,14 +22,16 @@ function RemoteFileViewer(props: Props) {
 
   return (
     <H5WasmBufferProvider filename={name} buffer={buffer} getPlugin={getPlugin}>
-      <App
-        key={resolvedUrl}
-        disableDarkMode
-        propagateErrors
-        getFeedbackURL={({ entityPath }) => {
-          return buildMailto('Feedback', FEEDBACK_MESSAGE, file, entityPath);
-        }}
-      />
+      <div className={styles.viewerTheme}>
+        <App
+          key={resolvedUrl}
+          initialPath="/data"
+          propagateErrors
+          getFeedbackURL={({ entityPath }) => {
+            return buildMailto('Feedback', FEEDBACK_MESSAGE, file, entityPath);
+          }}
+        />
+      </div>
     </H5WasmBufferProvider>
   );
 }

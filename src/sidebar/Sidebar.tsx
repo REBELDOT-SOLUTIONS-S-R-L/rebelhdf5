@@ -1,8 +1,8 @@
-import { FiActivity, FiFileText, FiHelpCircle, FiPlusCircle } from 'react-icons/fi';
+import { FiActivity, FiEye, FiFileText, FiPlusCircle } from 'react-icons/fi';
 import { NavLink, useMatch, useSearchParams } from 'react-router-dom';
 
 import { useStore } from '../stores';
-import { getPoseTraceLink } from '../utils';
+import { getPoseTraceLink, getViewerLink } from '../utils';
 import Flyout from './Flyout';
 import OpenedFiles from './OpenedFiles';
 import styles from './Sidebar.module.css';
@@ -20,7 +20,7 @@ function Sidebar() {
     <div className={styles.sidebar} data-collapsed={isCollapsed || undefined}>
       <div className={styles.sidebarInner}>
         <h1 className={styles.logo} data-reveal>
-          myHDF<span>5</span>
+          rebelHDF<span>5</span>
         </h1>
         <nav className={styles.nav} data-reveal>
           <NavLink
@@ -36,12 +36,12 @@ function Sidebar() {
 
           <NavLink
             className={styles.mainNavItem}
-            to="help"
-            aria-label="Help"
-            title="Help"
+            to={activeFileUrl ? getViewerLink(activeFileUrl) : '/'}
+            aria-label="Viewer"
+            title="Viewer"
           >
-            <FiHelpCircle className={styles.icon} />
-            <span className={styles.label}>Help</span>
+            <FiEye className={styles.icon} />
+            <span className={styles.label}>Viewer</span>
           </NavLink>
 
           <NavLink
