@@ -183,22 +183,69 @@
   flex-direction: column;
 }
 
+.treeBranchRow {
+  display: flex;
+  align-items: center;
+  gap: 0.2rem;
+  min-height: 1.9rem;
+  padding-right: 0.5rem;
+}
+
+.treeBranchSelectBtn {
+  composes: btnClean from global;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 0.4rem;
+  color: var(--color-gray);
+}
+
+.treeBranchSelectBtn:hover {
+  background: rgba(255, 208, 0, 0.06);
+}
+
 .treeBranchLabel {
+  composes: btnClean from global;
   display: flex;
   align-items: center;
   gap: 0.45rem;
-  min-height: 1.9rem;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 1.75rem;
+  padding-right: 0.25rem;
   padding-top: 0.12rem;
   padding-bottom: 0.12rem;
   color: var(--color-gray);
   font-size: 0.95em;
   font-weight: 700;
+  border-radius: 0.45rem;
+  cursor: pointer;
+  text-align: left;
+}
+
+.treeBranchLabel:hover {
+  background: rgba(255, 208, 0, 0.06);
 }
 
 .treeBranchIcon {
   flex: 0 0 auto;
   color: #ffd000;
   opacity: 0.9;
+}
+
+.treeCollapseIcon {
+  flex: 0 0 auto;
+  opacity: 0.72;
+}
+
+.treeBranchName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .treeChildren {
@@ -243,6 +290,7 @@
 }
 
 .treeMeta {
+  margin-left: auto;
   color: var(--color-gray);
   opacity: 0.58;
   font-variant-numeric: tabular-nums;

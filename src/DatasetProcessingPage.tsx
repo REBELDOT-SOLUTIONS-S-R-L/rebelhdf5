@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { FiDownload, FiFile, FiFolder, FiRefreshCw } from 'react-icons/fi';
+import { FiChevronDown, FiChevronRight, FiDownload, FiFile, FiFolder, FiRefreshCw } from 'react-icons/fi';
+import { HiFolder } from 'react-icons/hi';
 import { Link, createSearchParams, useSearchParams } from 'react-router-dom';
 
 import {
@@ -42,6 +43,7 @@ interface KeyTreeNode {
   fullPath: string;
   children: KeyTreeNode[];
   keyInfo: DatasetProcessingKeyInfo | null;
+  leafKeyPaths: string[];
 }
 
 const OPERATION_LABELS: Record<DatasetProcessingOperation, string> = {
@@ -119,16 +121,19 @@ function buildKeyTree(keyInfos: DatasetProcessingKeyInfo[]): KeyTreeNode[] {
       fullPath,
       children: [],
       keyInfo,
+      leafKeyPaths: keyInfo ? [fullPath] : [],
       childrenByName: new Map<string, MutableKeyTreeNode>(),
     };
   }
 
   function finalizeNode(node: MutableKeyTreeNode): KeyTreeNode {
+    const children = [...node.childrenByName.values()].map(finalizeNode);
     return {
       name: node.name,
       fullPath: node.fullPath,
       keyInfo: node.keyInfo,
-      children: [...node.childrenByName.values()].map(finalizeNode),
+      children,
+      leafKeyPaths: node.keyInfo ? [node.fullPath] : children.flatMap((child) => child.leafKeyPaths),
     };
   }
 
@@ -164,12 +169,18 @@ function KeyTreeNodeItem({
   node,
   depth,
   selectedKeys,
+  collapsedGroups,
   onToggleKey,
+  onToggleGroup,
+  onToggleCollapse,
 }: {
   node: KeyTreeNode;
   depth: number;
   selectedKeys: ReadonlySet<string>;
+  collapsedGroups: ReadonlySet<string>;
   onToggleKey: (keyPath: string) => void;
+  onToggleGroup: (keyPaths: readonly string[]) => void;
+  onToggleCollapse: (groupPath: string) => void;
 }) {
   if (node.keyInfo) {
     return (
@@ -194,27 +205,62 @@ function KeyTreeNodeItem({
     );
   }
 
+  const selectedCount = node.leafKeyPaths.filter((keyPath) => selectedKeys.has(keyPath)).length;
+  const allSelected = selectedCount === node.leafKeyPaths.length;
+  const isCollapsed = collapsedGroups.has(node.fullPath);
+  const FolderIcon = allSelected ? HiFolder : FiFolder;
+
   return (
     <div className={styles.treeBranch}>
       <div
-        className={styles.treeBranchLabel}
+        className={styles.treeBranchRow}
         style={{ paddingLeft: `${depth * 1.1}rem` }}
-        title={node.fullPath}
       >
-        <FiFolder aria-hidden className={styles.treeBranchIcon} />
-        <span>{node.name}</span>
+        <button
+          type="button"
+          className={styles.treeBranchSelectBtn}
+          title={`Toggle all keys under ${node.fullPath}`}
+          aria-pressed={allSelected}
+          onClick={() => {
+            onToggleGroup(node.leafKeyPaths);
+          }}
+        >
+          <FolderIcon aria-hidden className={styles.treeBranchIcon} />
+        </button>
+        <button
+          type="button"
+          className={styles.treeBranchLabel}
+          title={node.fullPath}
+          aria-expanded={!isCollapsed}
+          onClick={() => {
+            onToggleCollapse(node.fullPath);
+          }}
+        >
+          {isCollapsed ? (
+            <FiChevronRight aria-hidden className={styles.treeCollapseIcon} />
+          ) : (
+            <FiChevronDown aria-hidden className={styles.treeCollapseIcon} />
+          )}
+          <span className={styles.treeBranchName}>{node.name}</span>
+        </button>
+        <small className={styles.treeMeta}>{selectedCount}/{node.leafKeyPaths.length}</small>
       </div>
-      <div className={styles.treeChildren}>
-        {node.children.map((child) => (
-          <KeyTreeNodeItem
-            key={child.fullPath}
-            node={child}
-            depth={depth + 1}
-            selectedKeys={selectedKeys}
-            onToggleKey={onToggleKey}
-          />
-        ))}
-      </div>
+      {!isCollapsed && (
+        <div className={styles.treeChildren}>
+          {node.children.map((child) => (
+            <KeyTreeNodeItem
+              key={child.fullPath}
+              node={child}
+              depth={depth + 1}
+              selectedKeys={selectedKeys}
+              collapsedGroups={collapsedGroups}
+              onToggleKey={onToggleKey}
+              onToggleGroup={onToggleGroup}
+              onToggleCollapse={onToggleCollapse}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -418,6 +464,7 @@ function DatasetProcessingPage() {
   const [cutStartDemoName, setCutStartDemoName] = useState<string | null>(null);
   const [cutEndDemoName, setCutEndDemoName] = useState<string | null>(null);
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
+  const [collapsedGroupPaths, setCollapsedGroupPaths] = useState<string[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingError, setProcessingError] = useState<string | null>(null);
   const [lastResult, setLastResult] = useState<ProcessResultState | null>(null);
@@ -558,6 +605,7 @@ function DatasetProcessingPage() {
   );
   const keyTreeNodes = useMemo(() => buildKeyTree(availableKeyInfos), [availableKeyInfos]);
   const selectedKeySet = useMemo(() => new Set(selectedKeys), [selectedKeys]);
+  const collapsedGroupSet = useMemo(() => new Set(collapsedGroupPaths), [collapsedGroupPaths]);
 
   useEffect(() => {
     setSelectedKeys((current) => {
@@ -667,6 +715,31 @@ function DatasetProcessingPage() {
       current.includes(keyPath)
         ? current.filter((key) => key !== keyPath)
         : [...current, keyPath].sort((left, right) => left.localeCompare(right)),
+    );
+  }
+
+  function toggleKeyGroup(keyPaths: readonly string[]) {
+    setSelectedKeys((current) => {
+      const next = new Set(current);
+      const shouldClear = keyPaths.every((keyPath) => next.has(keyPath));
+
+      for (const keyPath of keyPaths) {
+        if (shouldClear) {
+          next.delete(keyPath);
+        } else {
+          next.add(keyPath);
+        }
+      }
+
+      return [...next].sort((left, right) => left.localeCompare(right));
+    });
+  }
+
+  function toggleGroupCollapse(groupPath: string) {
+    setCollapsedGroupPaths((current) =>
+      current.includes(groupPath)
+        ? current.filter((path) => path !== groupPath)
+        : [...current, groupPath],
     );
   }
 
@@ -921,7 +994,10 @@ function DatasetProcessingPage() {
                     node={node}
                     depth={0}
                     selectedKeys={selectedKeySet}
+                    collapsedGroups={collapsedGroupSet}
                     onToggleKey={toggleKey}
+                    onToggleGroup={toggleKeyGroup}
+                    onToggleCollapse={toggleGroupCollapse}
                   />
                 ))}
               </div>
