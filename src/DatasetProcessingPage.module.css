@@ -395,6 +395,21 @@
   opacity: 0.86;
 }
 
+.progressBar {
+  margin-top: 0.65rem;
+  height: 0.5rem;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 0.25rem;
+  overflow: hidden;
+}
+
+.progressFill {
+  height: 100%;
+  background: #ffd000;
+  border-radius: 0.25rem;
+  transition: width 0.25s ease-out;
+}
+
 .primaryAction {
   composes: primaryBtn from './utils.module.css';
   background-color: #ffd000 !important;
@@ -452,6 +467,55 @@
 
 .openBtn:hover {
   background-color: #e1b800 !important;
+}
+
+.backendHeader {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+}
+
+.backendHeader > svg {
+  flex: 0 0 auto;
+  font-size: 1.3rem;
+  color: #a9e4a2;
+}
+
+.backendTitle {
+  margin: 0;
+  font-weight: 700;
+  color: var(--color-gray);
+}
+
+.backendSubtitle {
+  margin: 0.2rem 0 0;
+  color: var(--color-gray);
+  opacity: 0.72;
+  font-size: 0.9em;
+}
+
+.backendToggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-left: auto;
+  color: var(--color-gray);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.backendToggle input {
+  accent-color: #a9e4a2;
+}
+
+.downloadLink {
+  color: #ffd000;
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+
+.downloadLink:hover {
+  color: #e1b800;
 }
 
 @keyframes datasetProcessingSpin {

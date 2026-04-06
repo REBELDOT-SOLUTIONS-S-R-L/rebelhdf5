@@ -1,14 +1,94 @@
 :root {
   box-sizing: border-box;
+  color-scheme: light;
 
-  --color-gray: #5a5a66;
-  --color-btns: #f06f66;
+  --color-text: #5a5a66;
+  --color-text-muted: #7b7b87;
+  --color-heading: hsl(240, 6%, 15%);
+  --color-gray: var(--color-text);
+  --color-btns: #ffd000;
+  --color-primary-btn: #ffd000;
+  --color-primary-btn-hover: #e1b800;
+  --color-primary-btn-text: #111824;
   --color-five: lightgreen;
+  --color-shell-bg: #5a5a66;
+  --color-surface: #ffffff;
+  --color-surface-alt: #f7f7fa;
+  --color-border: rgba(90, 90, 102, 0.18);
+  --color-shadow-soft: rgba(90, 90, 102, 0.08);
+  --color-shadow-medium: rgba(90, 90, 102, 0.3);
+  --color-shadow-strong: rgba(90, 90, 102, 0.8);
+  --color-sidebar-text: #f8fbef;
+  --color-sidebar-active: hsl(240, 6%, 15%);
+  --color-sidebar-hover: hsl(240, 6%, 25%);
+  --color-sidebar-collapsed-active: hsl(240, 6%, 45%);
+  --color-divider-on-dark: rgba(248, 251, 239, 0.75);
+  --color-action-hover: rgba(255, 255, 255, 0.2);
+  --color-link-on-dark: powderblue;
+  --color-input-bg: #ffffff;
+  --color-input-shadow: rgba(90, 90, 102, 0.3);
+  --color-emphasis-bg: #5a5a66;
+  --color-emphasis-text: #ffffff;
+  --color-success-bg: rgba(144, 238, 144, 0.28);
+  --color-success-text: #2f6b2f;
+  --color-danger: crimson;
+  --color-danger-strong: brown;
+  --color-danger-bg: rgba(165, 42, 42, 0.1);
+  --color-overlay: rgba(28, 35, 33, 0.7);
+  --color-accent-filter: invert();
+  --color-plot-paper: #ffffff;
+  --color-plot-surface: #f7f7fa;
+  --color-plot-grid: rgba(90, 90, 102, 0.14);
+  --color-plot-legend-bg: rgba(255, 255, 255, 0.92);
+  --color-plot-legend-border: rgba(90, 90, 102, 0.14);
 
   --font-body:
     -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu',
     'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
   --font-logo: 'Lobster', var(--font-body);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+
+    --color-text: #e6ebf5;
+    --color-text-muted: #b7c0d4;
+    --color-heading: #eef2fb;
+    --color-primary-btn: #ffd000;
+    --color-primary-btn-hover: #e1b800;
+    --color-primary-btn-text: #111824;
+    --color-shell-bg: #0f141c;
+    --color-surface: #171d28;
+    --color-surface-alt: #1d2431;
+    --color-border: rgba(186, 197, 214, 0.18);
+    --color-shadow-soft: rgba(0, 0, 0, 0.32);
+    --color-shadow-medium: rgba(0, 0, 0, 0.45);
+    --color-shadow-strong: rgba(0, 0, 0, 0.55);
+    --color-sidebar-text: #e6ebf5;
+    --color-sidebar-active: rgba(230, 235, 245, 0.14);
+    --color-sidebar-hover: rgba(230, 235, 245, 0.08);
+    --color-sidebar-collapsed-active: rgba(230, 235, 245, 0.18);
+    --color-divider-on-dark: rgba(230, 235, 245, 0.25);
+    --color-action-hover: rgba(255, 255, 255, 0.12);
+    --color-link-on-dark: #9ed6ff;
+    --color-input-bg: #111824;
+    --color-input-shadow: rgba(0, 0, 0, 0.42);
+    --color-emphasis-bg: #e6ebf5;
+    --color-emphasis-text: #111824;
+    --color-success-bg: rgba(144, 238, 144, 0.16);
+    --color-success-text: #9be39b;
+    --color-danger: #ff8ea1;
+    --color-danger-strong: #f5a2a2;
+    --color-danger-bg: rgba(255, 120, 120, 0.12);
+    --color-overlay: rgba(5, 8, 12, 0.75);
+    --color-accent-filter: none;
+    --color-plot-paper: #171d28;
+    --color-plot-surface: #1d2431;
+    --color-plot-grid: rgba(186, 197, 214, 0.16);
+    --color-plot-legend-bg: rgba(23, 29, 40, 0.92);
+    --color-plot-legend-border: rgba(186, 197, 214, 0.14);
+  }
 }
 
 *,
@@ -22,9 +102,11 @@ body {
   margin: 0;
   overflow-x: auto;
   scrollbar-width: thin;
+  background-color: var(--color-shell-bg);
+  color: var(--color-text);
   font-family: var(--font-body);
   line-height: 1.4;
-  accent-color: var(--color-gray);
+  accent-color: var(--color-text);
 }
 
 @media (min-width: 80em) {

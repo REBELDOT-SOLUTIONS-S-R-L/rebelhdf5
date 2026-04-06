@@ -46,10 +46,28 @@ export interface DatasetProcessingRequest {
   cutRange?: DatasetProcessingCutRange;
 }
 
-export interface DatasetProcessingResult {
+export interface DatasetProcessingProgress {
+  phase: 'copying' | 'flushing' | 'streaming';
+  overallDemoIndex: number;
+  overallDemoCount: number;
+  currentSourceName: string;
+  currentDemoName: string;
+  /** Present when a large dataset is being copied in chunks within a demo. */
+  datasetDetail?: {
+    path: string;
+    copiedRows: number;
+    totalRows: number;
+  };
+}
+
+export interface DatasetProcessingResultMeta {
   fileName: string;
   demoCount: number;
   selectedKeyCount: number;
+}
+
+/** @deprecated Use DatasetProcessingResultMeta + chunk streaming instead. */
+export interface DatasetProcessingResult extends DatasetProcessingResultMeta {
   fileBuffer: ArrayBuffer;
 }
 

@@ -7,6 +7,7 @@ import {
   FiFolder,
   FiLoader,
   FiRefreshCw,
+  FiServer,
 } from 'react-icons/fi';
 import { HiFolder } from 'react-icons/hi';
 import { Link, createSearchParams, useSearchParams } from 'react-router-dom';
@@ -19,10 +20,20 @@ import {
 import type {
   DatasetProcessingKeyInfo,
   DatasetProcessingOperation,
+  DatasetProcessingProgress,
   DatasetProcessingSourceInfo,
   PoseTraceSource,
 } from './pose-trace/types';
-import { type H5File, useStore } from './stores';
+import {
+  checkBackend,
+  listFiles,
+  runProcess,
+  scanFiles,
+  type PythonFileEntry,
+  type PythonBackendStatus,
+  type PythonScanResult,
+} from './python-backend';
+import { FileService, type H5File, useStore } from './stores';
 import styles from './DatasetProcessingPage.module.css';
 import { resolveFileUrl } from './utils';
 
@@ -44,6 +55,27 @@ interface ProcessResultState {
   fileName: string;
   demoCount: number;
   selectedKeyCount: number;
+  downloadUrl?: string;
+  downloadBlob?: Blob;
+}
+
+interface BackendSourceResolution {
+  sourceUrl: string;
+  file: H5File;
+  backendPath: string;
+  backendRelativePath?: string;
+}
+
+interface BackendSourceResolutionError {
+  sourceUrl: string;
+  file: H5File | null;
+  error: string;
+}
+
+function isBackendSourceResolution(
+  entry: BackendSourceResolution | BackendSourceResolutionError,
+): entry is BackendSourceResolution {
+  return 'backendPath' in entry;
 }
 
 interface KeyTreeNode {
@@ -64,8 +96,7 @@ function stripExtension(filename: string): string {
   return filename.replace(/\.(hdf5|h5)$/i, '');
 }
 
-function triggerDownload(fileName: string, buffer: ArrayBuffer) {
-  const blob = new Blob([buffer], { type: 'application/x-hdf5' });
+function triggerDownloadBlob(fileName: string, blob: Blob) {
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
@@ -74,6 +105,13 @@ function triggerDownload(fileName: string, buffer: ArrayBuffer) {
   window.setTimeout(() => {
     URL.revokeObjectURL(url);
   }, 0);
+}
+
+function triggerDownloadUrl(fileName: string, downloadUrl: string) {
+  const link = document.createElement('a');
+  link.href = downloadUrl;
+  link.download = fileName;
+  link.click();
 }
 
 function buildDefaultOutputName(
@@ -476,6 +514,70 @@ function DatasetProcessingPage() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingError, setProcessingError] = useState<string | null>(null);
   const [lastResult, setLastResult] = useState<ProcessResultState | null>(null);
+  const [progress, setProgress] = useState<DatasetProcessingProgress | null>(null);
+
+  // Python backend state.
+  const [backend, setBackend] = useState<PythonBackendStatus>({
+    available: false,
+    rootDir: null,
+    version: null,
+  });
+  const [useBackend, setUseBackend] = useState(false);
+  const [backendFiles, setBackendFiles] = useState<PythonFileEntry[] | null>(null);
+  const [backendFilesLoading, setBackendFilesLoading] = useState(false);
+  const [backendScan, setBackendScan] = useState<PythonScanResult | null>(null);
+  const [backendLoading, setBackendLoading] = useState(false);
+  const [backendError, setBackendError] = useState<string | null>(null);
+
+  // Detect Python backend on mount.
+  useEffect(() => {
+    let cancelled = false;
+    void checkBackend().then((status) => {
+      if (!cancelled) {
+        setBackend(status);
+        if (status.available) {
+          setUseBackend(true);
+        }
+      }
+    });
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    if (!useBackend || !backend.available || !backend.rootDir) {
+      setBackendFiles(null);
+      setBackendFilesLoading(false);
+      setBackendScan(null);
+      setBackendLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setBackendFilesLoading(true);
+    setBackendError(null);
+    setBackendFiles(null);
+
+    void listFiles(backend.rootDir, true)
+      .then((result) => {
+        if (!cancelled) {
+          setBackendFiles(result.files);
+        }
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setBackendError(error instanceof Error ? error.message : String(error));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setBackendFilesLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [backend.available, backend.rootDir, useBackend]);
 
   const availableFiles = useMemo(() => {
     const byUrl = new Map<string, H5File>();
@@ -491,27 +593,33 @@ function DatasetProcessingPage() {
     return [...byUrl.values()];
   }, [file, opened]);
 
+  // Unified source option IDs.
+  const sourceOptions = useMemo(
+    () => availableFiles.map((f) => ({ id: f.url, name: f.name })),
+    [availableFiles],
+  );
+
   useEffect(() => {
-    if (availableFiles.length === 0) {
+    if (sourceOptions.length === 0) {
       setPrimarySourceUrl(null);
       return;
     }
 
-    const activeUrl = fileUrl ?? file?.url ?? availableFiles[0]?.url ?? null;
+    const activeId = (!useBackend ? (fileUrl ?? file?.url) : null) ?? sourceOptions[0]?.id ?? null;
     setPrimarySourceUrl((current) =>
-      current && availableFiles.some((entry) => entry.url === current)
+      current && sourceOptions.some((entry) => entry.id === current)
         ? current
-        : activeUrl,
+        : activeId,
     );
-  }, [availableFiles, file, fileUrl]);
+  }, [file, fileUrl, sourceOptions, useBackend]);
 
   useEffect(() => {
-    const availableUrls = new Set(availableFiles.map((entry) => entry.url));
-    const activeUrl = primarySourceUrl ?? availableFiles[0]?.url ?? null;
-    const firstOther = availableFiles.find((entry) => entry.url !== activeUrl)?.url;
+    const availableIds = new Set(sourceOptions.map((entry) => entry.id));
+    const activeId = primarySourceUrl ?? sourceOptions[0]?.id ?? null;
+    const firstOther = sourceOptions.find((entry) => entry.id !== activeId)?.id;
 
     setMergeSourceUrls((current) => {
-      const valid = current.filter((url) => availableUrls.has(url) && url !== activeUrl);
+      const valid = current.filter((url) => availableIds.has(url) && url !== activeId);
       if (valid.length > 0) {
         return valid;
       }
@@ -520,33 +628,180 @@ function DatasetProcessingPage() {
     });
 
     setAppendSourceUrls((current) => {
-      const valid = current.filter((url) => availableUrls.has(url) && url !== activeUrl);
+      const valid = current.filter((url) => availableIds.has(url) && url !== activeId);
       if (valid.length > 0) {
         return valid;
       }
 
       return firstOther ? [firstOther] : [];
     });
-  }, [availableFiles, primarySourceUrl]);
+  }, [primarySourceUrl, sourceOptions]);
 
   const orderedSelectedSourceUrls = useMemo(() => {
     if (operation === 'cut') {
       return primarySourceUrl ? [primarySourceUrl] : [];
     }
 
-    return availableFiles
-      .map((entry) => entry.url)
-      .filter((url) =>
-        url === primarySourceUrl
-          || (operation === 'append' ? appendSourceUrls.includes(url) : mergeSourceUrls.includes(url)),
+    return sourceOptions
+      .map((entry) => entry.id)
+      .filter((id) =>
+        id === primarySourceUrl
+          || (operation === 'append' ? appendSourceUrls.includes(id) : mergeSourceUrls.includes(id)),
       );
-  }, [appendSourceUrls, availableFiles, mergeSourceUrls, operation, primarySourceUrl]);
+  }, [appendSourceUrls, mergeSourceUrls, operation, primarySourceUrl, sourceOptions]);
+
+  const backendSourceResolutions = useMemo(() => {
+    if (!useBackend || !backend.available || !backend.rootDir || !backendFiles) {
+      return [] as Array<BackendSourceResolution | BackendSourceResolutionError>;
+    }
+
+    return orderedSelectedSourceUrls.map((sourceUrl) => {
+      const file = availableFiles.find((entry) => entry.url === sourceUrl) ?? null;
+      if (!file) {
+        return {
+          sourceUrl,
+          file,
+          error: 'The selected source is no longer available in this session.',
+        } satisfies BackendSourceResolutionError;
+      }
+
+      if (file.service !== FileService.Local) {
+        return {
+          sourceUrl,
+          file,
+          error: `${file.name} is not a local file. The Python backend can only process datasets that exist on disk under the backend server directory.`,
+        } satisfies BackendSourceResolutionError;
+      }
+
+      const exactMatches = backendFiles.filter(
+        (entry) => entry.name === file.name && entry.size === file.file.size,
+      );
+      if (exactMatches.length === 1) {
+        return {
+          sourceUrl,
+          file,
+          backendPath: exactMatches[0].path,
+          backendRelativePath: exactMatches[0].relativePath,
+        } satisfies BackendSourceResolution;
+      }
+
+      const sameNameMatches = backendFiles.filter((entry) => entry.name === file.name);
+      if (exactMatches.length === 0) {
+        if (sameNameMatches.length > 0) {
+          return {
+            sourceUrl,
+            file,
+            error: `Found ${file.name} on the Python backend, but none of the candidates match the local file size (${file.file.size} bytes).`,
+          } satisfies BackendSourceResolutionError;
+        }
+
+        return {
+          sourceUrl,
+          file,
+          error: `Could not find ${file.name} on the Python backend.`,
+        } satisfies BackendSourceResolutionError;
+      }
+
+      return {
+        sourceUrl,
+        file,
+        error: `Multiple backend files match ${file.name}: ${exactMatches
+          .map((entry) => entry.relativePath ?? entry.path)
+          .join(', ')}. Remove the duplicate or open a unique file.`,
+      } satisfies BackendSourceResolutionError;
+    });
+  }, [availableFiles, backend.available, backend.rootDir, backendFiles, orderedSelectedSourceUrls, useBackend]);
+
+  const backendSourceResolutionError = backendSourceResolutions.find(
+    (entry): entry is BackendSourceResolutionError => 'error' in entry,
+  )?.error ?? null;
+  const backendScanPaths = useMemo(
+    () => backendSourceResolutionError
+      ? []
+      : backendSourceResolutions.filter(isBackendSourceResolution).map((entry) => entry.backendPath),
+    [backendSourceResolutionError, backendSourceResolutions],
+  );
+
+  // Demo names for the primary source in backend mode.
+  const backendPrimaryDemos = useMemo(() => {
+    if (!useBackend || !backendScan || !primarySourceUrl) {
+      return [];
+    }
+
+    const primaryResolution = backendSourceResolutions.find(
+      (entry): entry is BackendSourceResolution =>
+        'backendPath' in entry && entry.sourceUrl === primarySourceUrl,
+    );
+    if (!primaryResolution) {
+      return [];
+    }
+
+    const fileInfo = backendScan.files.find((f) => f.path === primaryResolution.backendPath);
+    return fileInfo?.demoNames ?? [];
+  }, [backendScan, backendSourceResolutions, primarySourceUrl, useBackend]);
+
+  useEffect(() => {
+    if (!useBackend || !backend.available || !backend.rootDir) {
+      setBackendScan(null);
+      setBackendLoading(false);
+      return;
+    }
+
+    if (backendFiles === null) {
+      setBackendScan(null);
+      return;
+    }
+
+    if (backendSourceResolutionError) {
+      setBackendScan(null);
+      setBackendError(backendSourceResolutionError);
+      setBackendLoading(false);
+      return;
+    }
+
+    if (backendScanPaths.length === 0) {
+      setBackendScan(null);
+      setBackendLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setBackendLoading(true);
+    setBackendError(null);
+
+    void scanFiles(backendScanPaths)
+      .then((result) => {
+        if (!cancelled) {
+          setBackendScan(result);
+          setBackendLoading(false);
+          setSelectedKeys((current) => current.length > 0 ? current : result.commonKeys);
+        }
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setBackendScan(null);
+          setBackendError(error instanceof Error ? error.message : String(error));
+          setBackendLoading(false);
+        }
+      });
+
+    return () => { cancelled = true; };
+  }, [
+    backend.available,
+    backend.rootDir,
+    backendFiles,
+    backendScanPaths,
+    backendSourceResolutionError,
+    useBackend,
+  ]);
 
   const sourceStates = useDatasetProcessingSources(availableFiles, orderedSelectedSourceUrls);
 
   const primarySourceState = primarySourceUrl ? sourceStates[primarySourceUrl] ?? null : null;
   const primarySource = primarySourceState?.source ?? null;
-  const primaryDemos = primarySource?.demos ?? [];
+  const primaryDemos = useBackend
+    ? backendPrimaryDemos.map((name) => ({ name }))
+    : primarySource?.demos ?? [];
 
   useEffect(() => {
     if (primaryDemos.length === 0) {
@@ -589,10 +844,45 @@ function DatasetProcessingPage() {
     && selectedSourceStates.every((entry) => entry.source && entry.info && !entry.loading && !entry.error);
 
   const availableKeyInfos = useMemo(() => {
-    const keyMap = new Map<string, DatasetProcessingKeyInfo>();
+    // When using the Python backend, derive keys from its scan result.
+    if (useBackend && backendScan) {
+      const totalDemos = backendScan.files.reduce((sum, f) => sum + f.demoCount, 0);
+      return backendScan.commonKeys.map((path) => ({
+        path,
+        availableInDemoCount: totalDemos,
+      }));
+    }
 
-    for (const entry of selectedSourceStates) {
+    if (useBackend) {
+      return [];
+    }
+
+    const readySources = selectedSourceStates.filter((entry) => entry.info);
+    if (readySources.length === 0) {
+      return [];
+    }
+
+    // Inner join: only include keys present in every selected source.
+    const firstKeyPaths = new Set(
+      (readySources[0].info?.keyPaths ?? []).map((keyInfo) => keyInfo.path),
+    );
+
+    const commonPaths = new Set(
+      [...firstKeyPaths].filter((path) =>
+        readySources.every((entry) =>
+          entry.info?.keyPaths.some((keyInfo) => keyInfo.path === path),
+        ),
+      ),
+    );
+
+    // Use the highest demo count across sources for display.
+    const keyMap = new Map<string, DatasetProcessingKeyInfo>();
+    for (const entry of readySources) {
       for (const keyInfo of entry.info?.keyPaths ?? []) {
+        if (!commonPaths.has(keyInfo.path)) {
+          continue;
+        }
+
         const existing = keyMap.get(keyInfo.path);
         if (!existing || existing.availableInDemoCount < keyInfo.availableInDemoCount) {
           keyMap.set(keyInfo.path, keyInfo);
@@ -601,7 +891,7 @@ function DatasetProcessingPage() {
     }
 
     return [...keyMap.values()].sort((left, right) => left.path.localeCompare(right.path));
-  }, [selectedSourceStates]);
+  }, [backendScan, selectedSourceStates, useBackend]);
 
   const availableKeySet = useMemo(
     () => new Set(availableKeyInfos.map((keyInfo) => keyInfo.path)),
@@ -657,7 +947,21 @@ function DatasetProcessingPage() {
   }, [appendSourceUrls.length, cutDemoNames.length, operation, orderedSelectedSourceUrls.length]);
 
   const canProcess = useMemo(() => {
-    if (selectedSourceLoading || !selectedSourcesReady || selectedKeys.length === 0) {
+    if (selectedKeys.length === 0) {
+      return false;
+    }
+
+    // Python backend: need selected sources and not loading.
+    if (useBackend && backend.available) {
+      return Boolean(backendScan)
+        && orderedSelectedSourceUrls.length > 0
+        && backendScanPaths.length === orderedSelectedSourceUrls.length
+        && !backendLoading
+        && !backendFilesLoading
+        && !backendSourceResolutionError;
+    }
+
+    if (selectedSourceLoading || !selectedSourcesReady) {
       return false;
     }
 
@@ -672,14 +976,47 @@ function DatasetProcessingPage() {
     return Boolean(primarySourceUrl) && cutDemoNames.length > 0;
   }, [
     appendSourceUrls.length,
+    backend.available,
+    backendLoading,
+    backendFilesLoading,
     cutDemoNames.length,
+    backendScan,
+    backendScanPaths.length,
+    backendSourceResolutionError,
     mergeSourceUrls.length,
     operation,
+    orderedSelectedSourceUrls.length,
     primarySourceUrl,
     selectedKeys.length,
     selectedSourceLoading,
     selectedSourcesReady,
+    useBackend,
   ]);
+  const resultResetKey = useMemo(
+    () => JSON.stringify({
+      operation,
+      primarySourceUrl,
+      mergeSourceUrls,
+      appendSourceUrls,
+      cutStartDemoName,
+      cutEndDemoName,
+      selectedKeys,
+    }),
+    [
+      appendSourceUrls,
+      cutEndDemoName,
+      cutStartDemoName,
+      mergeSourceUrls,
+      operation,
+      primarySourceUrl,
+      selectedKeys,
+    ],
+  );
+  const hasDownloadReady = Boolean(lastResult?.downloadUrl || lastResult?.downloadBlob);
+
+  useEffect(() => {
+    setLastResult(null);
+  }, [resultResetKey]);
 
   async function handleProcess() {
     if (!canProcess) {
@@ -688,36 +1025,94 @@ function DatasetProcessingPage() {
 
     setProcessingError(null);
     setLastResult(null);
+    setProgress(null);
     setIsProcessing(true);
 
     try {
-      const orderedSourceIds = selectedSourceStates.map((entry) => entry.source?.sourceId).filter(
-        (sourceId): sourceId is string => Boolean(sourceId),
-      );
+      if (useBackend && backend.available) {
+        // Python backend processing.
+        const resolvedPaths = backendSourceResolutions
+          .filter(isBackendSourceResolution)
+          .map((entry) => entry.backendPath);
+        if (resolvedPaths.length !== orderedSelectedSourceUrls.length) {
+          throw new Error(backendSourceResolutionError
+            ?? 'Could not resolve every selected source on the Python backend.');
+        }
 
-      const result = await processDataset({
-        operation,
-        orderedSourceIds,
-        selectedKeys,
-        fileName: defaultOutputName,
-        cutRange: operation === 'cut' && cutStartDemoName && cutEndDemoName
-          ? {
-              startDemoName: cutStartDemoName,
-              endDemoName: cutEndDemoName,
-            }
-          : undefined,
-      });
+        const result = await runProcess(
+          {
+            paths: resolvedPaths,
+            selectedKeys,
+            outputName: defaultOutputName,
+            operation,
+            cutRange: operation === 'cut' && cutStartDemoName && cutEndDemoName
+              ? { startDemoName: cutStartDemoName, endDemoName: cutEndDemoName }
+              : undefined,
+          },
+          { onProgress: setProgress },
+        );
 
-      triggerDownload(result.fileName, result.fileBuffer);
-      setLastResult({
-        fileName: result.fileName,
-        demoCount: result.demoCount,
-        selectedKeyCount: result.selectedKeyCount,
-      });
+        setLastResult({
+          fileName: result.fileName,
+          demoCount: result.demoCount,
+          selectedKeyCount: result.selectedKeyCount,
+          downloadUrl: result.downloadUrl,
+        });
+      } else {
+        // WASM worker processing.
+        const chunks: ArrayBuffer[] = [];
+        const orderedSourceIds = selectedSourceStates.map((entry) => entry.source?.sourceId).filter(
+          (sourceId): sourceId is string => Boolean(sourceId),
+        );
+
+        const result = await processDataset(
+          {
+            operation,
+            orderedSourceIds,
+            selectedKeys,
+            fileName: defaultOutputName,
+            cutRange: operation === 'cut' && cutStartDemoName && cutEndDemoName
+              ? {
+                  startDemoName: cutStartDemoName,
+                  endDemoName: cutEndDemoName,
+                }
+              : undefined,
+          },
+          {
+            onProgress: setProgress,
+            onChunk: (chunk) => {
+              chunks.push(chunk);
+            },
+          },
+        );
+
+        setLastResult({
+          fileName: result.fileName,
+          demoCount: result.demoCount,
+          selectedKeyCount: result.selectedKeyCount,
+          downloadBlob: new Blob(chunks, { type: 'application/x-hdf5' }),
+        });
+      }
     } catch (error: unknown) {
       setProcessingError(error instanceof Error ? error.message : String(error));
     } finally {
       setIsProcessing(false);
+      setProgress(null);
+    }
+  }
+
+  function handleDownload() {
+    if (!lastResult) {
+      return;
+    }
+
+    if (lastResult.downloadUrl) {
+      triggerDownloadUrl(lastResult.fileName, lastResult.downloadUrl);
+      return;
+    }
+
+    if (lastResult.downloadBlob) {
+      triggerDownloadBlob(lastResult.fileName, lastResult.downloadBlob);
     }
   }
 
@@ -769,20 +1164,51 @@ function DatasetProcessingPage() {
           <p className={styles.eyebrow}>Processing</p>
           <h1 className={styles.title}>Dataset Processing</h1>
           <p className={styles.subtitle}>
-            Cut demos, merge multiple datasets, or append one dataset to another. Processing always creates a new HDF5 download and leaves the original files unchanged.
+            Cut demos, merge multiple datasets, or append one dataset to another. Processing always creates a new HDF5 file and leaves the original files unchanged.
           </p>
         </div>
       </header>
 
-      {!fileUrl && !file && !fileLoading && <EmptyState openedFileCount={opened.length} />}
+      {backend.available && (
+        <section className={styles.controlsCard}>
+          <div className={styles.backendHeader}>
+            <FiServer aria-hidden />
+            <div>
+              <p className={styles.backendTitle}>Python Processing Server</p>
+              <p className={styles.backendSubtitle}>
+                Native processing — orders of magnitude faster for large files with video data.
+                {backend.rootDir && <> Serving <code>{backend.rootDir}</code></>}
+              </p>
+            </div>
+            <label className={styles.backendToggle}>
+              <input
+                type="checkbox"
+                checked={useBackend}
+                onChange={(event) => {
+                  setUseBackend(event.target.checked);
+                }}
+              />
+              <span>{useBackend ? 'Active' : 'Off'}</span>
+            </label>
+          </div>
+          {useBackend && backendError && (
+            <p className={styles.errorText} style={{ marginTop: '0.75rem' }}>{backendError}</p>
+          )}
+          {useBackend && (backendFilesLoading || backendLoading) && !backendError && (
+            <p className={styles.infoText} style={{ marginTop: '0.75rem' }}>Scanning files…</p>
+          )}
+        </section>
+      )}
 
-      {fileError && (
+      {!useBackend && !fileUrl && !file && !fileLoading && <EmptyState openedFileCount={opened.length} />}
+
+      {!useBackend && fileError && (
         <section className={styles.messageCard}>
           <p className={styles.errorText}>{fileError}</p>
         </section>
       )}
 
-      {fileLoading && (
+      {!useBackend && fileLoading && (
         <section className={styles.messageCard}>
           <p>Loading dataset-processing context…</p>
         </section>
@@ -825,10 +1251,10 @@ function DatasetProcessingPage() {
                     const nextUrl = event.target.value;
                     setPrimarySourceUrl(nextUrl || null);
                   }}
-                  disabled={availableFiles.length === 0}
+                  disabled={sourceOptions.length === 0}
                 >
-                  {availableFiles.map((entry) => (
-                    <option key={entry.url} value={entry.url}>
+                  {sourceOptions.map((entry) => (
+                    <option key={entry.id} value={entry.id}>
                       {entry.name}
                     </option>
                   ))}
@@ -889,15 +1315,15 @@ function DatasetProcessingPage() {
               <>
                 <p className={styles.sectionLabel}>Datasets To Merge</p>
                 <div className={styles.checkboxGrid}>
-                  {availableFiles
-                    .filter((entry) => entry.url !== primarySourceUrl)
+                  {sourceOptions
+                    .filter((entry) => entry.id !== primarySourceUrl)
                     .map((entry) => (
-                    <label key={entry.url} className={styles.checkboxItem}>
+                    <label key={entry.id} className={styles.checkboxItem}>
                       <input
                         type="checkbox"
-                        checked={mergeSourceUrls.includes(entry.url)}
+                        checked={mergeSourceUrls.includes(entry.id)}
                         onChange={() => {
-                          toggleSource(entry.url, mergeSourceUrls, setMergeSourceUrls);
+                          toggleSource(entry.id, mergeSourceUrls, setMergeSourceUrls);
                         }}
                       />
                       <span>{entry.name}</span>
@@ -911,15 +1337,15 @@ function DatasetProcessingPage() {
               <>
                 <p className={styles.sectionLabel}>Datasets To Append</p>
                 <div className={styles.checkboxGrid}>
-                  {availableFiles
-                    .filter((entry) => entry.url !== primarySourceUrl)
+                  {sourceOptions
+                    .filter((entry) => entry.id !== primarySourceUrl)
                     .map((entry) => (
-                      <label key={entry.url} className={styles.checkboxItem}>
+                      <label key={entry.id} className={styles.checkboxItem}>
                         <input
                           type="checkbox"
-                          checked={appendSourceUrls.includes(entry.url)}
+                          checked={appendSourceUrls.includes(entry.id)}
                           onChange={() => {
-                            toggleSource(entry.url, appendSourceUrls, setAppendSourceUrls);
+                            toggleSource(entry.id, appendSourceUrls, setAppendSourceUrls);
                           }}
                         />
                         <span>{entry.name}</span>
@@ -954,7 +1380,11 @@ function DatasetProcessingPage() {
               ))}
             </section>
           )}
+        </>
+      )}
 
+      {availableFiles.length > 0 && (
+        <>
           <section className={styles.keysCard}>
             <div className={styles.keysHeader}>
               <div>
@@ -1027,24 +1457,52 @@ function DatasetProcessingPage() {
             <div>
               <h2 className={styles.sectionTitle}>Create Output</h2>
               <p className={styles.sectionText}>
-                The processed output will download as <code>{defaultOutputName}</code>.
+                The processed output will be created as <code>{defaultOutputName}</code>.
               </p>
             </div>
 
             {processingError && <p className={styles.errorText}>{processingError}</p>}
             {lastResult && (
               <p className={styles.successText}>
-                Downloaded {lastResult.fileName} with {lastResult.demoCount} demos and {lastResult.selectedKeyCount} keys.
+                Created {lastResult.fileName} with {lastResult.demoCount} demos and {lastResult.selectedKeyCount} keys. Ready to download.
               </p>
             )}
             {isProcessing && (
               <div className={styles.processingStatus} role="status" aria-live="polite">
                 <FiLoader aria-hidden className={styles.processingSpinner} />
                 <div className={styles.processingCopy}>
-                  <p className={styles.processingTitle}>Processing dataset operation…</p>
-                  <p className={styles.processingText}>
-                    {processingDescription} The download will start automatically when the output file is ready.
+                  <p className={styles.processingTitle}>
+                    {progress?.phase === 'flushing'
+                      ? 'Flushing output file…'
+                      : progress?.phase === 'streaming'
+                        ? 'Preparing download…'
+                        : 'Processing dataset operation…'}
                   </p>
+                  {progress?.phase === 'copying' ? (
+                    <>
+                      <p className={styles.processingText}>
+                        Copying <strong>{progress.currentDemoName}</strong> from{' '}
+                        <strong>{progress.currentSourceName}</strong>
+                        {' — '}demo {progress.overallDemoIndex + 1} of {progress.overallDemoCount}
+                        {progress.datasetDetail && (
+                          <>
+                            {' — '}<code>{progress.datasetDetail.path}</code>
+                            {' '}{progress.datasetDetail.copiedRows}/{progress.datasetDetail.totalRows} rows
+                          </>
+                        )}
+                      </p>
+                      <div className={styles.progressBar}>
+                        <div
+                          className={styles.progressFill}
+                          style={{ width: `${((progress.overallDemoIndex + 1) / progress.overallDemoCount) * 100}%` }}
+                        />
+                      </div>
+                    </>
+                  ) : (
+                    <p className={styles.processingText}>
+                      {processingDescription} The output will be ready to download when processing finishes.
+                    </p>
+                  )}
                 </div>
               </div>
             )}
@@ -1064,12 +1522,19 @@ function DatasetProcessingPage() {
                 type="button"
                 className={styles.primaryAction}
                 onClick={() => {
+                  if (hasDownloadReady) {
+                    handleDownload();
+                    return;
+                  }
+
                   void handleProcess();
                 }}
-                disabled={!canProcess || isProcessing}
+                disabled={isProcessing || (!hasDownloadReady && !canProcess)}
               >
-                <FiDownload aria-hidden />
-                <span>{isProcessing ? 'Processing…' : 'Create & Download'}</span>
+                {hasDownloadReady ? <FiDownload aria-hidden /> : <FiFile aria-hidden />}
+                <span>
+                  {isProcessing ? 'Processing…' : hasDownloadReady ? 'Download' : 'Create'}
+                </span>
               </button>
               <button
                 type="button"

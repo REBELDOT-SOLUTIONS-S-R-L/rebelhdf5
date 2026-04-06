@@ -17,9 +17,10 @@ import { DEMO_VIDEO_KEYS } from './types';
 import type {
   DemoInfo,
   DemoRow,
+  DatasetProcessingProgress,
   DatasetProcessingRequest,
-  DatasetProcessingResult,
   DatasetProcessingSourceInfo,
+  DatasetProcessingResultMeta,
   DemoVideoInfo,
   DemoVideoKey,
 } from './types';
@@ -78,9 +79,7 @@ type LoadDemoVideoResult = DemoVideoInfo & {
   framesBuffer: ArrayBuffer;
 };
 
-type ProcessDatasetResult = Omit<DatasetProcessingResult, 'fileBuffer'> & {
-  fileBuffer: ArrayBuffer;
-};
+type ProcessDatasetResult = DatasetProcessingResultMeta;
 
 type PoseTraceWorkerResponse =
   | {
@@ -95,7 +94,9 @@ type PoseTraceWorkerResponse =
         | LoadDemoVideoResult
         | null;
     }
-  | { id: number; ok: false; error: string };
+  | { id: number; ok: false; error: string }
+  | { id: number; type: 'progress'; progress: DatasetProcessingProgress }
+  | { id: number; type: 'chunk'; data: ArrayBuffer; index: number; total: number };
 
 interface WorkerSuccessResult {
   result:
@@ -756,7 +757,7 @@ function ensureTargetGroupPath(
 ): {
   sourceGroup: H5WasmGroup;
   targetGroup: H5WasmGroup;
-} {
+} | null {
   let targetGroup = targetDemoGroup;
   let sourceGroup = sourceDemoGroup;
 
@@ -767,9 +768,8 @@ function ensureTargetGroupPath(
   for (const segment of relativeGroupSegments) {
     const nextSource = sourceGroup.get(segment);
     if (!isGroup(nextSource)) {
-      throw new Error(
-        `Expected '${sourceGroup.path}/${segment}' to be a group while copying dataset structure.`,
-      );
+      // Group does not exist in this demo — caller should skip this dataset.
+      return null;
     }
 
     targetGroup = ensureChildGroup(targetGroup, segment);
@@ -855,20 +855,99 @@ function getDatasetCompressionConfig(dataset: H5WasmDataset): H5WasmCompressionC
   return {};
 }
 
+// Datasets larger than this threshold (in bytes) are copied in chunks along
+// the first axis to avoid allocating the entire dataset in WASM memory at once.
+const CHUNKED_COPY_BYTE_THRESHOLD = 50 * 1024 * 1024; // 50 MB
+const CHUNKED_COPY_ROW_BATCH = 50;
+
+function estimateDatasetBytes(dataset: H5WasmDataset): number {
+  const { shape, size } = dataset.metadata;
+  if (!shape || shape.length === 0) {
+    return 0;
+  }
+
+  const totalElements = shape.reduce((acc, dim) => acc * dim, 1);
+  return totalElements * size;
+}
+
+function copyDatasetChunked(
+  source: H5WasmDataset,
+  targetGroup: H5WasmGroup,
+  name: string,
+  onSliceProgress?: (copiedRows: number, totalRows: number) => void,
+) {
+  const metadata = source.metadata;
+  const { shape } = metadata;
+  if (!shape || shape.length === 0 || shape[0] === 0) {
+    return;
+  }
+
+  const totalRows = shape[0];
+  const restShape = shape.slice(1);
+  const compressionConfig = getDatasetCompressionConfig(source);
+
+  // Read the first batch to create the dataset.
+  const firstBatchSize = Math.min(CHUNKED_COPY_ROW_BATCH, totalRows);
+  const firstSlice = source.slice([[0, firstBatchSize]]);
+  if (firstSlice == null) {
+    return;
+  }
+
+  const targetDataset = targetGroup.create_dataset({
+    name,
+    data: firstSlice as H5WasmCreateDatasetArgs['data'],
+    shape: [firstBatchSize, ...restShape],
+    dtype: source.dtype,
+    maxshape: [null, ...restShape],
+    chunks: metadata.chunks,
+    track_order: true,
+    ...compressionConfig,
+  });
+
+  onSliceProgress?.(firstBatchSize, totalRows);
+
+  // Write remaining batches by resizing and writing slices.
+  for (let offset = firstBatchSize; offset < totalRows; offset += CHUNKED_COPY_ROW_BATCH) {
+    const end = Math.min(offset + CHUNKED_COPY_ROW_BATCH, totalRows);
+    const batchData = source.slice([[offset, end]]);
+    if (batchData == null) {
+      break;
+    }
+
+    targetDataset.resize([end, ...restShape]);
+    targetDataset.write_slice([[offset, end]], batchData);
+    onSliceProgress?.(end, totalRows);
+  }
+
+  // Resize to the exact final shape (in case maxshape was unlimited).
+  targetDataset.resize(shape);
+  copyAttributes(source, targetDataset);
+}
+
+type SliceProgressCallback = (datasetPath: string, copiedRows: number, totalRows: number) => void;
+
 function copySelectedDatasetsForDemo(
   sourceDemoGroup: H5WasmGroup,
   targetDemoGroup: H5WasmGroup,
   copyPlan: readonly DatasetCopyPlanGroup[],
+  onSliceProgress?: SliceProgressCallback,
 ) {
   const copiedGroupPaths = new Set<string>([targetDemoGroup.path]);
 
   for (const groupPlan of copyPlan) {
-    const { sourceGroup, targetGroup } = ensureTargetGroupPath(
+    const resolved = ensureTargetGroupPath(
       targetDemoGroup,
       sourceDemoGroup,
       groupPlan.parentGroupSegments,
       copiedGroupPaths,
     );
+
+    if (!resolved) {
+      // Parent group does not exist in this demo — skip all datasets under it.
+      continue;
+    }
+
+    const { sourceGroup, targetGroup } = resolved;
 
     for (const datasetPlan of groupPlan.datasets) {
       const sourceEntity = sourceGroup.get(datasetPlan.datasetName);
@@ -876,19 +955,36 @@ function copySelectedDatasetsForDemo(
         continue;
       }
 
+      const estimatedBytes = estimateDatasetBytes(sourceEntity);
       const metadata = sourceEntity.metadata;
-      const targetDataset = targetGroup.create_dataset({
-        name: datasetPlan.datasetName,
-        data: getDatasetCopyValue(sourceEntity),
-        shape: metadata.shape,
-        dtype: sourceEntity.dtype,
-        maxshape: metadata.maxshape,
-        chunks: metadata.chunks,
-        track_order: true,
-        ...getDatasetCompressionConfig(sourceEntity),
-      });
 
-      copyAttributes(sourceEntity, targetDataset);
+      if (estimatedBytes > CHUNKED_COPY_BYTE_THRESHOLD && metadata.shape && metadata.shape.length > 0 && metadata.chunks) {
+        // Large dataset: copy in chunks along the first axis.
+        copyDatasetChunked(
+          sourceEntity,
+          targetGroup,
+          datasetPlan.datasetName,
+          onSliceProgress
+            ? (copiedRows, totalRows) => {
+                onSliceProgress(datasetPlan.datasetName, copiedRows, totalRows);
+              }
+            : undefined,
+        );
+      } else {
+        // Small dataset: copy in one shot.
+        const targetDataset = targetGroup.create_dataset({
+          name: datasetPlan.datasetName,
+          data: getDatasetCopyValue(sourceEntity),
+          shape: metadata.shape,
+          dtype: sourceEntity.dtype,
+          maxshape: metadata.maxshape,
+          chunks: metadata.chunks,
+          track_order: true,
+          ...getDatasetCompressionConfig(sourceEntity),
+        });
+
+        copyAttributes(sourceEntity, targetDataset);
+      }
     }
   }
 }
@@ -902,8 +998,11 @@ function normalizeOutputFileName(fileName: string): string {
   return /\.(hdf5|h5)$/i.test(trimmed) ? trimmed : `${trimmed}.hdf5`;
 }
 
+const OUTPUT_CHUNK_SIZE = 64 * 1024 * 1024; // 64 MB
+
 async function processDataset(
   request: DatasetProcessingRequest,
+  messageId: number,
 ): Promise<ProcessDatasetResult> {
   const module = await ensureModule();
   const { FS } = module;
@@ -913,6 +1012,21 @@ async function processDataset(
 
   if (selectedKeys.length === 0) {
     throw new Error('Select at least one key to include in the processed dataset.');
+  }
+
+  // Pre-count total demos for accurate progress reporting.
+  let overallDemoCount = 0;
+  const demoNamesByEntry: string[][] = [];
+  for (const entry of entries) {
+    const names = request.operation === 'cut'
+      ? getCutDemoNames(entry, request.cutRange)
+      : entry.demos.map((demo) => demo.name);
+    demoNamesByEntry.push(names);
+    overallDemoCount += names.length;
+  }
+
+  function reportProgress(progress: DatasetProcessingProgress) {
+    workerScope.postMessage({ id: messageId, type: 'progress', progress });
   }
 
   const outputName = normalizeOutputFileName(request.fileName);
@@ -928,22 +1042,43 @@ async function processDataset(
 
     let outputDemoIndex = 0;
     let totalSamples = 0;
+    let overallDemoIndex = 0;
 
-    for (const entry of entries) {
-      const sourceDemoNames = request.operation === 'cut'
-        ? getCutDemoNames(entry, request.cutRange)
-        : entry.demos.map((demo) => demo.name);
+    for (const [entryIndex, entry] of entries.entries()) {
+      const sourceDemoNames = demoNamesByEntry[entryIndex];
 
       for (const sourceDemoName of sourceDemoNames) {
+        reportProgress({
+          phase: 'copying',
+          overallDemoIndex,
+          overallDemoCount,
+          currentSourceName: entry.datasetName,
+          currentDemoName: sourceDemoName,
+        });
+
         const sourceDemoGroup = getDemoGroup(entry, sourceDemoName);
         const targetDemoGroup = outputDataGroup.create_group(`demo_${outputDemoIndex}`, true);
 
         copyAttributes(sourceDemoGroup, targetDemoGroup);
-        copySelectedDatasetsForDemo(sourceDemoGroup, targetDemoGroup, copyPlan);
+        const capturedDemoIndex = overallDemoIndex;
+        copySelectedDatasetsForDemo(sourceDemoGroup, targetDemoGroup, copyPlan, (datasetPath, copiedRows, totalRows) => {
+          reportProgress({
+            phase: 'copying',
+            overallDemoIndex: capturedDemoIndex,
+            overallDemoCount,
+            currentSourceName: entry.datasetName,
+            currentDemoName: sourceDemoName,
+            datasetDetail: { path: datasetPath, copiedRows, totalRows },
+          });
+        });
 
         totalSamples += optionalInt(getAttributeValue(sourceDemoGroup, 'num_samples')) ?? 0;
         outputDemoIndex += 1;
+        overallDemoIndex += 1;
       }
+
+      // Flush after each source file's demos to reduce memory pressure.
+      outputFile.flush();
     }
 
     if (outputDemoIndex === 0) {
@@ -954,20 +1089,56 @@ async function processDataset(
       outputDataGroup.create_attribute('total', totalSamples);
     }
 
+    reportProgress({
+      phase: 'flushing',
+      overallDemoIndex: overallDemoCount,
+      overallDemoCount,
+      currentSourceName: '',
+      currentDemoName: '',
+    });
+
     outputFile.flush();
     outputFile.close();
 
-    const fileBytes = FS.readFile(outputPath);
-    const fileBuffer = fileBytes.buffer.slice(
-      fileBytes.byteOffset,
-      fileBytes.byteOffset + fileBytes.byteLength,
-    ) as ArrayBuffer;
+    // Stream the output file in chunks instead of loading it all at once.
+    reportProgress({
+      phase: 'streaming',
+      overallDemoIndex: overallDemoCount,
+      overallDemoCount,
+      currentSourceName: '',
+      currentDemoName: '',
+    });
+
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access -- Emscripten FS.stat is untyped
+    const totalSize: number = FS.stat(outputPath).size;
+    const totalChunks = Math.ceil(totalSize / OUTPUT_CHUNK_SIZE);
+    const stream = FS.open(outputPath, 'r');
+
+    try {
+      for (let i = 0; i < totalChunks; i++) {
+        const position = i * OUTPUT_CHUNK_SIZE;
+        const size = Math.min(OUTPUT_CHUNK_SIZE, totalSize - position);
+        const buffer = new Uint8Array(size);
+        FS.read(stream, buffer, 0, size, position);
+
+        const arrayBuffer: ArrayBuffer = buffer.buffer.slice(
+          buffer.byteOffset,
+          buffer.byteOffset + buffer.byteLength,
+        );
+
+        workerScope.postMessage(
+          { id: messageId, type: 'chunk', data: arrayBuffer, index: i, total: totalChunks },
+          [arrayBuffer],
+        );
+      }
+    } finally {
+      FS.close(stream);
+    }
 
     return {
       fileName: outputName,
       demoCount: outputDemoIndex,
       selectedKeyCount: selectedKeys.length,
-      fileBuffer,
     };
   } finally {
     try {
@@ -1169,11 +1340,8 @@ async function handleRequest(message: PoseTraceWorkerRequest): Promise<WorkerSuc
       return { result: listDatasetProcessingInfo(entry) };
     }
     case 'processDataset': {
-      const result = await processDataset(message.payload);
-      return {
-        result,
-        transfer: [result.fileBuffer],
-      };
+      const result = await processDataset(message.payload, message.id);
+      return { result };
     }
     case 'listDemoVideos': {
       const entry = openSources.get(message.payload.sourceId);

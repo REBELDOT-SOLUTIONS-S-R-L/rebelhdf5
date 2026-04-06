@@ -1,7 +1,7 @@
 .root {
   display: flex;
   min-height: 100%;
-  background-color: var(--color-gray);
+  background-color: var(--color-shell-bg);
 }
 
 .root[data-viewer] {
@@ -20,7 +20,7 @@
   flex: 1 1 0%;
   min-width: 0;
   display: flex;
-  background-color: white;
+  background-color: var(--color-surface);
   border-radius: 1rem;
   overflow: hidden;
   z-index: 0; /* stacking context for main content */

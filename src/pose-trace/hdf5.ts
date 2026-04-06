@@ -3,8 +3,9 @@ import { FileService, type H5File } from '../stores';
 import type {
   DemoInfo,
   DemoRow,
+  DatasetProcessingProgress,
   DatasetProcessingRequest,
-  DatasetProcessingResult,
+  DatasetProcessingResultMeta,
   DatasetProcessingSourceInfo,
   DemoVideoFrames,
   DemoVideoInfo,
@@ -75,16 +76,20 @@ type PoseTraceWorkerResponse =
         | OpenSourceResult
         | DemoRow[]
         | DatasetProcessingSourceInfo
-        | DatasetProcessingResult
+        | DatasetProcessingResultMeta
         | DemoVideoInfo[]
         | LoadDemoVideoResult
         | null;
     }
-  | { id: number; ok: false; error: string };
+  | { id: number; ok: false; error: string }
+  | { id: number; type: 'progress'; progress: DatasetProcessingProgress }
+  | { id: number; type: 'chunk'; data: ArrayBuffer; index: number; total: number };
 
 type PendingRequest = {
   resolve: (value: unknown) => void;
   reject: (reason?: unknown) => void;
+  onProgress?: (progress: DatasetProcessingProgress) => void;
+  onChunk?: (chunk: ArrayBuffer, index: number, total: number) => void;
 };
 
 let worker: Worker | null = null;
@@ -102,19 +107,29 @@ function ensureWorker(): Worker {
 
   worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' });
   worker.onmessage = (event: MessageEvent<PoseTraceWorkerResponse>) => {
-    const { id } = event.data;
-    const pending = pendingRequests.get(id);
+    const data = event.data;
+    const pending = pendingRequests.get(data.id);
     if (!pending) {
       return;
     }
 
-    pendingRequests.delete(id);
-    if (event.data.ok) {
-      pending.resolve(event.data.result);
+    if ('type' in data && data.type === 'progress') {
+      pending.onProgress?.(data.progress);
       return;
     }
 
-    pending.reject(new Error(event.data.error));
+    if ('type' in data && data.type === 'chunk') {
+      pending.onChunk?.(data.data, data.index, data.total);
+      return;
+    }
+
+    pendingRequests.delete(data.id);
+    if (data.ok) {
+      pending.resolve(data.result);
+      return;
+    }
+
+    pending.reject(new Error(data.error));
   };
   worker.onerror = (event) => {
     const message = event.message || 'Pose Trace worker failed.';
@@ -186,14 +201,26 @@ export function getDatasetProcessingInfo(
   });
 }
 
-export async function processDataset(
+export function processDataset(
   request: DatasetProcessingRequest,
-): Promise<DatasetProcessingResult> {
-  const result = await callWorker<DatasetProcessingResult>('processDataset', request);
-  return {
-    ...result,
-    fileBuffer: result.fileBuffer,
-  };
+  callbacks: {
+    onProgress?: (progress: DatasetProcessingProgress) => void;
+    onChunk?: (chunk: ArrayBuffer, index: number, total: number) => void;
+  },
+): Promise<DatasetProcessingResultMeta> {
+  const instance = ensureWorker();
+  const id = nextRequestId;
+  nextRequestId += 1;
+
+  return new Promise<DatasetProcessingResultMeta>((resolve, reject) => {
+    pendingRequests.set(id, {
+      resolve: (value) => resolve(value as DatasetProcessingResultMeta),
+      reject,
+      onProgress: callbacks.onProgress,
+      onChunk: callbacks.onChunk,
+    });
+    instance.postMessage({ id, type: 'processDataset', payload: request } as never);
+  });
 }
 
 export function listDemoVideos(

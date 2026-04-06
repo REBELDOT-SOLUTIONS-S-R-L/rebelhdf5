@@ -12,3 +12,19 @@ declare module 'plotly.js-dist-min' {
   const Plotly: PlotlyStatic;
   export default Plotly;
 }
+
+// File System Access API (not yet in all TypeScript lib definitions)
+interface FilePickerAcceptType {
+  description?: string;
+  accept: Record<string, string[]>;
+}
+
+interface SaveFilePickerOptions {
+  suggestedName?: string;
+  types?: FilePickerAcceptType[];
+}
+
+// eslint-disable-next-line no-var -- required for global augmentation
+declare var showSaveFilePicker:
+  | ((options?: SaveFilePickerOptions) => Promise<FileSystemFileHandle>)
+  | undefined;
