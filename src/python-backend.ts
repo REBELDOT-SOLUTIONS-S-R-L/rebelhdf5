@@ -15,7 +15,7 @@ import type {
 
 const DEFAULT_PORT = 4095;
 const BASE_URL = `http://localhost:${DEFAULT_PORT}`;
-const HEALTH_TIMEOUT_MS = 1500;
+const HEALTH_TIMEOUT_MS = 5000;
 
 export interface PythonBackendStatus {
   available: boolean;
@@ -126,6 +126,24 @@ export async function listFiles(
 
   const data: PythonFileListingResult = await response.json();
   return data;
+}
+
+/** Resolve filenames to absolute paths on the server. */
+export async function resolveFiles(
+  names: string[],
+): Promise<Record<string, string | null>> {
+  const response = await fetch(`${BASE_URL}/api/resolve-files`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ names }),
+  });
+
+  if (!response.ok) {
+    throw new Error(await parseErrorResponse(response));
+  }
+
+  const data: { resolved: Record<string, string | null> } = await response.json();
+  return data.resolved;
 }
 
 /** Scan files for their keys and demo counts. */

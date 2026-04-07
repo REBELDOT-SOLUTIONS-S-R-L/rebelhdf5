@@ -1,0 +1,415 @@
+.root {
+  composes: page from './utils.module.css';
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  padding-left: clamp(1.75rem, 3vw, 3.5rem);
+  padding-right: clamp(1.75rem, 3vw, 3.5rem);
+  gap: 1.5rem;
+  overflow-y: auto;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+}
+
+.eyebrow {
+  margin: 0;
+  color: var(--color-gray);
+  font-size: 0.82em;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.title {
+  margin: 0.25rem 0 0;
+  color: var(--color-gray);
+  font-family: var(--font-logo);
+  font-size: clamp(2.1em, 3vw, 2.8em);
+  font-weight: normal;
+}
+
+.subtitle {
+  max-width: 54rem;
+  margin: 0.5rem 0 0;
+  color: var(--color-gray);
+}
+
+.card {
+  padding: 1.25rem 1.5rem;
+  background: var(--color-surface-alt);
+  border: 1px solid var(--color-border);
+  border-radius: 1rem;
+  box-shadow: 0 0.75rem 1.75rem var(--color-shadow-soft);
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.sectionTitle {
+  margin: 0;
+  color: var(--color-gray);
+  font-size: 1.1em;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.sectionText {
+  margin: 0;
+  color: var(--color-gray);
+  opacity: 0.86;
+}
+
+.secretsGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.controlGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.fieldLabel {
+  display: block;
+  margin-bottom: 0.4rem;
+  color: var(--color-gray);
+  font-size: 0.82em;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.input {
+  composes: input from './utils.module.css';
+  width: 100%;
+  min-height: 2.75rem;
+  color: var(--color-gray);
+  background: var(--color-input-bg);
+}
+
+.actionRow {
+  display: flex;
+  gap: 0.85rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.primaryBtn {
+  composes: primaryBtn from './utils.module.css';
+  background-color: #ffd000 !important;
+  color: #111824 !important;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.primaryBtn:hover:not(:disabled) {
+  background-color: #e1b800 !important;
+}
+
+.primaryBtn:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.resultText {
+  color: var(--color-gray);
+  opacity: 0.86;
+}
+
+.successText {
+  color: #a9e4a2;
+}
+
+.errorText {
+  margin: 0;
+  color: var(--color-danger);
+}
+
+.infoText {
+  margin: 0;
+  color: var(--color-gray);
+  opacity: 0.86;
+}
+
+/* Pipelines */
+
+.pipelineGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: 0.5rem;
+}
+
+.pipelineBtn {
+  composes: btnClean from global;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--color-border);
+  border-radius: 0.75rem;
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--color-gray);
+  font-size: 0.88em;
+  font-weight: 600;
+  text-align: left;
+  transition:
+    border-color 0.18s ease,
+    background-color 0.18s ease;
+}
+
+.pipelineBtn:hover:not(:disabled) {
+  border-color: rgba(255, 208, 0, 0.38);
+  background: rgba(255, 208, 0, 0.08);
+}
+
+.pipelineBtn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.runList {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  max-height: 20rem;
+  overflow-y: auto;
+}
+
+.runItem {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  padding: 0.55rem 0.75rem;
+  border: 1px solid var(--color-border);
+  border-radius: 0.65rem;
+  background: rgba(255, 255, 255, 0.015);
+  color: var(--color-gray);
+  font-size: 0.9em;
+}
+
+.runInfo {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.runInfo strong {
+  font-size: 0.88em;
+}
+
+.runInfo span {
+  font-size: 0.82em;
+  opacity: 0.72;
+  font-variant-numeric: tabular-nums;
+}
+
+.runInfo small {
+  font-size: 0.78em;
+  opacity: 0.58;
+  word-break: break-word;
+}
+
+/* Volume browser */
+
+.browserBar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0;
+}
+
+.backBtn {
+  composes: btnClean from global;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 0.5rem;
+  color: var(--color-gray);
+  border: 1px solid var(--color-border);
+}
+
+.backBtn:hover:not(:disabled) {
+  background: rgba(255, 208, 0, 0.08);
+}
+
+.backBtn:disabled {
+  opacity: 0.35;
+}
+
+.breadcrumb {
+  color: var(--color-gray);
+  opacity: 0.72;
+  font-size: 0.88em;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fileList {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  max-height: 28rem;
+  overflow-y: auto;
+  border: 1px solid var(--color-border);
+  border-radius: 0.75rem;
+  padding: 0.35rem;
+}
+
+.fileRow {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0.65rem;
+  border-radius: 0.55rem;
+  color: var(--color-gray);
+  font-size: 0.9em;
+}
+
+.fileRow:hover {
+  background: rgba(255, 208, 0, 0.04);
+}
+
+.fileLink {
+  composes: btnClean from global;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--color-gray);
+  font-weight: 600;
+}
+
+.fileLink:hover {
+  color: #ffd000;
+}
+
+.fileName {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fileSize {
+  flex: 0 0 auto;
+  opacity: 0.58;
+  font-variant-numeric: tabular-nums;
+  margin-left: auto;
+}
+
+.dlBtn {
+  composes: btnClean from global;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.8rem;
+  height: 1.8rem;
+  border-radius: 0.4rem;
+  color: var(--color-gray);
+}
+
+.dlBtn:hover:not(:disabled) {
+  background: rgba(255, 208, 0, 0.12);
+  color: #ffd000;
+}
+
+.dlBtn:disabled {
+  opacity: 0.35;
+}
+
+.logBox {
+  margin: 0;
+  padding: 0.75rem 1rem;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid var(--color-border);
+  border-radius: 0.65rem;
+  color: var(--color-gray);
+  font-size: 0.82em;
+  line-height: 1.5;
+  max-height: 12rem;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.uploadProgressRow {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.progressBar {
+  flex: 1 1 auto;
+  height: 0.5rem;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 0.25rem;
+  overflow: hidden;
+}
+
+.progressFill {
+  height: 100%;
+  background: #ffd000;
+  border-radius: 0.25rem;
+  transition: width 0.3s ease-out;
+}
+
+.uploadPercentText {
+  flex: 0 0 auto;
+  color: var(--color-gray);
+  font-size: 0.88em;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  min-width: 3em;
+  text-align: right;
+}
+
+.uploadStatusText {
+  margin: 0.25rem 0 0;
+  color: var(--color-gray);
+  opacity: 0.72;
+  font-size: 0.82em;
+}
+
+.spin {
+  animation: databricksSpin 0.9s linear infinite;
+}
+
+@keyframes databricksSpin {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 60em) {
+  .secretsGrid,
+  .controlGrid {
+    grid-template-columns: 1fr;
+  }
+}

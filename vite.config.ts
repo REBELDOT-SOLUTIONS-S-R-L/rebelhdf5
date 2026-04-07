@@ -16,7 +16,7 @@ import { checker } from 'vite-plugin-checker';
 function mergeServer(): Plugin {
   let child: ChildProcess | null = null;
   const port = Number(process.env.MERGE_SERVER_PORT) || 4095;
-  const dir = process.env.MERGE_SERVER_DIR || '.';
+  const dir = process.env.MERGE_SERVER_DIR || path.resolve(__dirname, '..');
 
   function kill() {
     if (!child) {

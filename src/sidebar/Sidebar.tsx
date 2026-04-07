@@ -1,4 +1,4 @@
-import { FiActivity, FiEye, FiFileText, FiFilm, FiLayers, FiPlusCircle } from 'react-icons/fi';
+import { FiActivity, FiCloud, FiEye, FiFileText, FiFilm, FiLayers, FiPlusCircle } from 'react-icons/fi';
 import { NavLink, useMatch, useSearchParams } from 'react-router-dom';
 
 import { useStore } from '../stores';
@@ -130,6 +130,16 @@ function Sidebar() {
               <span className={styles.label}>Dataset Processing</span>
             </button>
           )}
+
+          <NavLink
+            className={styles.mainNavItem}
+            to="/databricks"
+            aria-label="Databricks"
+            title="Databricks"
+          >
+            <FiCloud className={styles.icon} />
+            <span className={styles.label}>Databricks</span>
+          </NavLink>
 
           {isCollapsed ? (
             <div className={styles.flyoutWrapper}>

@@ -4,6 +4,7 @@ import { Route, Routes } from 'react-router-dom';
 import Dropzone from './Dropzone';
 import HelpPage from './HelpPage';
 import Layout from './Layout';
+const DatabricksPage = lazy(() => import('./DatabricksPage'));
 const DatasetProcessingPage = lazy(() => import('./DatasetProcessingPage'));
 const PoseTracePage = lazy(() => import('./PoseTracePage'));
 import ServicesPage from './ServicesPage';
@@ -39,6 +40,14 @@ function App() {
             element={(
               <Suspense fallback={null}>
                 <DatasetProcessingPage />
+              </Suspense>
+            )}
+          />
+          <Route
+            path="/databricks"
+            element={(
+              <Suspense fallback={null}>
+                <DatabricksPage />
               </Suspense>
             )}
           />

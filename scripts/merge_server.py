@@ -18,6 +18,7 @@ Requires: pip install h5py
 from __future__ import annotations
 
 import argparse
+import subprocess
 import json
 import sys
 import threading
@@ -255,6 +256,12 @@ def process_with_progress(
 class MergeHandler(BaseHTTPRequestHandler):
     server: "MergeServer"
 
+    def handle(self) -> None:
+        try:
+            super().handle()
+        except BrokenPipeError:
+            pass  # Client disconnected before response was sent (e.g. health check timeout).
+
     def log_message(self, fmt: str, *args: Any) -> None:
         if args and str(args[1]) == "200" and str(args[0]).startswith("GET"):
             return
@@ -307,14 +314,48 @@ class MergeHandler(BaseHTTPRequestHandler):
             filename = path[len("/api/download/"):]
             return self._handle_download(filename)
 
+        if path == "/api/databricks/job-status":
+            qs = parse_qs(parsed.query)
+            run_id = qs.get("run_id", [None])[0]
+            return self._handle_databricks_job_status(run_id)
+
+        if path == "/api/databricks/active-runs":
+            qs = parse_qs(parsed.query)
+            job_ids = qs.get("job_ids", [None])[0]
+            return self._handle_databricks_active_runs(job_ids)
+
+        if path == "/api/databricks/volume-files":
+            qs = parse_qs(parsed.query)
+            volume = qs.get("volume", [None])[0]
+            volume_path = qs.get("path", [""])[0]
+            return self._handle_databricks_volume_files(volume, volume_path)
+
+        if path == "/api/databricks/volume-download":
+            qs = parse_qs(parsed.query)
+            src = qs.get("src", [None])[0]
+            dst = qs.get("dst", [None])[0]
+            return self._handle_databricks_volume_download(src, dst)
+
         self._error(404, "Not found")
 
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/")
 
+        if path == "/api/resolve-files":
+            return self._handle_resolve_files()
+
         if path == "/api/scan":
             return self._handle_scan()
+
+        if path == "/api/databricks/put-secrets":
+            return self._handle_databricks_put_secrets()
+
+        if path == "/api/databricks/upload-dataset":
+            return self._handle_databricks_upload_dataset()
+
+        if path == "/api/databricks/run-pipeline":
+            return self._handle_databricks_run_pipeline()
 
         if path == "/api/process":
             return self._handle_process()
@@ -327,8 +368,12 @@ class MergeHandler(BaseHTTPRequestHandler):
         self._json_response({
             "status": "ok",
             "rootDir": self.server.root_dir,
-            "version": 2,
+            "version": 3,
         })
+
+    def _resolve_file(self, filename: str) -> Path | None:
+        """Find a file by name using the server's cached index."""
+        return self.server.resolve_file(filename)
 
     def _handle_files(self, directory: str, *, recursive: bool = False) -> None:
         try:
@@ -358,6 +403,21 @@ class MergeHandler(BaseHTTPRequestHandler):
                 "recursive": recursive,
                 "files": files,
             })
+        except Exception as exc:
+            self._error(500, str(exc))
+
+    def _handle_resolve_files(self) -> None:
+        """Resolve a list of filenames to absolute paths under the server root."""
+        try:
+            body = self._read_json_body()
+            names: list[str] = body.get("names", [])
+
+            resolved = {}
+            for name in names:
+                path = self._resolve_file(name)
+                resolved[name] = str(path) if path else None
+
+            self._json_response({"resolved": resolved})
         except Exception as exc:
             self._error(500, str(exc))
 
@@ -489,6 +549,281 @@ class MergeHandler(BaseHTTPRequestHandler):
                     break
                 self.wfile.write(chunk)
 
+    # -- Databricks handlers ------------------------------------------------
+
+    def _handle_databricks_put_secrets(self) -> None:
+        try:
+            body = self._read_json_body()
+            secrets: dict[str, str] = body.get("secrets", {})
+            scope = body.get("scope", "brev")
+
+            if not secrets:
+                return self._error(400, "No secrets provided.")
+
+            results = []
+            for key, value in secrets.items():
+                proc = subprocess.run(
+                    ["databricks", "secrets", "put-secret", scope, key, "--string-value", str(value)],
+                    capture_output=True, text=True, timeout=30,
+                )
+                results.append({
+                    "key": key,
+                    "ok": proc.returncode == 0,
+                    "error": proc.stderr.strip() if proc.returncode != 0 else None,
+                })
+
+            failed = [r for r in results if not r["ok"]]
+            self._json_response({
+                "results": results,
+                "allOk": len(failed) == 0,
+            })
+        except Exception as exc:
+            self._error(500, str(exc))
+
+    def _handle_databricks_upload_dataset(self) -> None:
+        try:
+            body = self._read_json_body()
+            file_path = body.get("filePath")
+            volume = body.get("volume", "/Volumes/workspace/default/mimicgen_annotated_hdf5_datasets/")
+
+            if not file_path:
+                return self._error(400, "No filePath provided.")
+
+            p = Path(file_path)
+            if not p.exists():
+                resolved = self._resolve_file(Path(file_path).name)
+                if resolved:
+                    p = resolved
+                else:
+                    return self._error(400, f"File not found: {file_path}")
+
+            volume_path = volume.rstrip("/") + "/" + p.name
+
+            upload_script = Path(__file__).resolve().parent.parent.parent / "ROBOTICS-lehome-challenge/scripts/utils/databricks_upload_dataset.py"
+            if not upload_script.exists():
+                return self._error(500, f"Upload script not found: {upload_script}")
+
+            size_gb = p.stat().st_size / (1024 ** 3)
+
+            # Stream SSE response for upload progress.
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-cache")
+            self._cors_headers()
+            self.end_headers()
+
+            def send_event(data: dict[str, Any]) -> None:
+                line = f"data: {json.dumps(data)}\n\n"
+                self.wfile.write(line.encode())
+                self.wfile.flush()
+
+            send_event({"type": "start", "fileName": p.name, "dest": volume_path, "sizeGb": round(size_gb, 2), "sizeBytes": p.stat().st_size})
+            send_event({"type": "output", "line": f"Uploading {p.name} ({size_gb:.2f} GB) to {volume_path}"})
+
+            proc = subprocess.Popen(
+                ["python3", "-u", str(upload_script), str(p), volume_path],
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+            )
+
+            import re
+            progress_re = re.compile(r"Upload progress:\s*(\d+)%")
+
+            for raw_line in iter(proc.stdout.readline, ""):
+                line = raw_line.strip()
+                if not line:
+                    continue
+
+                match = progress_re.search(line)
+                if match:
+                    send_event({"type": "progress", "percent": int(match.group(1)), "line": line})
+                else:
+                    send_event({"type": "output", "line": line})
+
+            proc.wait()
+            if proc.returncode == 0:
+                send_event({"type": "progress", "percent": 100, "line": "Upload complete."})
+                send_event({"type": "done"})
+            else:
+                send_event({"type": "error", "message": f"Upload exited with code {proc.returncode}"})
+
+        except Exception as exc:
+            try:
+                send_event({"type": "error", "message": str(exc)})
+            except Exception:
+                pass
+
+    def _handle_databricks_run_pipeline(self) -> None:
+        try:
+            body = self._read_json_body()
+            job_id = body.get("jobId")
+
+            if not job_id:
+                return self._error(400, "No jobId provided.")
+
+            proc = subprocess.run(
+                ["databricks", "jobs", "run-now", str(job_id), "--no-wait", "--output", "json"],
+                capture_output=True, text=True, timeout=60,
+            )
+
+            if proc.returncode != 0:
+                return self._error(500, f"Failed to start job: {proc.stderr.strip()}")
+
+            output = json.loads(proc.stdout) if proc.stdout.strip() else {}
+            self._json_response({
+                "ok": True,
+                "runId": output.get("run_id"),
+                "output": output,
+            })
+        except json.JSONDecodeError:
+            self._json_response({"ok": True, "runId": None, "rawOutput": proc.stdout.strip()})
+        except Exception as exc:
+            self._error(500, str(exc))
+
+    def _handle_databricks_job_status(self, run_id: str | None) -> None:
+        if not run_id:
+            return self._error(400, "No run_id provided.")
+
+        try:
+            proc = subprocess.run(
+                ["databricks", "jobs", "get-run", str(run_id), "--output", "json"],
+                capture_output=True, text=True, timeout=30,
+            )
+
+            if proc.returncode != 0:
+                return self._error(500, f"Failed to get job status: {proc.stderr.strip()}")
+
+            output = json.loads(proc.stdout) if proc.stdout.strip() else {}
+            state = output.get("state", {})
+            self._json_response({
+                "runId": run_id,
+                "lifeCycleState": state.get("life_cycle_state"),
+                "resultState": state.get("result_state"),
+                "stateMessage": state.get("state_message", ""),
+            })
+        except Exception as exc:
+            self._error(500, str(exc))
+
+    def _handle_databricks_active_runs(self, job_ids_csv: str | None) -> None:
+        if not job_ids_csv:
+            return self._error(400, "No job_ids provided.")
+
+        try:
+            job_ids = [jid.strip() for jid in job_ids_csv.split(",") if jid.strip()]
+            all_runs = []
+
+            for job_id in job_ids:
+                proc = subprocess.run(
+                    ["databricks", "jobs", "list-runs", "--job-id", job_id, "--active-only", "--output", "json"],
+                    capture_output=True, text=True, timeout=30,
+                )
+
+                if proc.returncode != 0:
+                    continue
+
+                runs = json.loads(proc.stdout) if proc.stdout.strip() else []
+                for run in runs:
+                    state = run.get("state", {})
+                    all_runs.append({
+                        "jobId": str(run.get("job_id", job_id)),
+                        "runId": str(run.get("run_id", "")),
+                        "runName": run.get("run_name", ""),
+                        "lifeCycleState": state.get("life_cycle_state", ""),
+                        "resultState": state.get("result_state", ""),
+                        "stateMessage": state.get("state_message", ""),
+                        "runPageUrl": run.get("run_page_url", ""),
+                    })
+
+            self._json_response({"runs": all_runs})
+        except Exception as exc:
+            self._error(500, str(exc))
+
+    def _handle_databricks_volume_files(self, volume: str | None, volume_path: str = "") -> None:
+        if not volume:
+            return self._error(400, "No volume provided.")
+
+        try:
+            volume_fs = volume.replace(".", "/")
+            full_path = f"dbfs:/Volumes/{volume_fs}"
+            if volume_path:
+                full_path = f"{full_path}/{volume_path.strip('/')}"
+
+            proc = subprocess.run(
+                ["databricks", "fs", "ls", full_path, "--long"],
+                capture_output=True, text=True, timeout=30,
+            )
+
+            if proc.returncode != 0:
+                return self._error(500, f"Failed to list volume: {proc.stderr.strip()}")
+
+            files = []
+            for raw_line in proc.stdout.strip().splitlines():
+                # Format: TYPE SIZE DATE NAME
+                parts = raw_line.split(None, 3)
+                if len(parts) >= 4:
+                    file_type = parts[0]
+                    size_str = parts[1]
+                    name = parts[3]
+                    files.append({
+                        "name": name,
+                        "type": file_type,
+                        "size": int(size_str) if size_str.isdigit() else 0,
+                    })
+                elif len(parts) >= 1:
+                    files.append({
+                        "name": parts[-1],
+                        "type": "FILE",
+                        "size": 0,
+                    })
+
+            self._json_response({"path": full_path, "files": files})
+        except Exception as exc:
+            self._error(500, str(exc))
+
+    def _handle_databricks_volume_download(self, src: str | None, dst: str | None) -> None:
+        if not src or not dst:
+            return self._error(400, "Both src and dst are required.")
+
+        try:
+            # Ensure the source has the dbfs: prefix.
+            dbfs_src = src if src.startswith("dbfs:") else f"dbfs:{src}"
+
+            # Stream SSE for download progress.
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-cache")
+            self._cors_headers()
+            self.end_headers()
+
+            def send_event(data: dict[str, Any]) -> None:
+                line = f"data: {json.dumps(data)}\n\n"
+                self.wfile.write(line.encode())
+                self.wfile.flush()
+
+            Path(dst).parent.mkdir(parents=True, exist_ok=True)
+            send_event({"type": "start", "src": dbfs_src, "dst": dst})
+
+            proc = subprocess.Popen(
+                ["databricks", "fs", "cp", dbfs_src, dst],
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+            )
+
+            for raw_line in iter(proc.stdout.readline, ""):
+                stripped = raw_line.strip()
+                if stripped:
+                    send_event({"type": "output", "line": stripped})
+
+            proc.wait()
+            if proc.returncode == 0:
+                send_event({"type": "done", "dst": dst})
+            else:
+                send_event({"type": "error", "message": f"Download exited with code {proc.returncode}"})
+
+        except Exception as exc:
+            try:
+                send_event({"type": "error", "message": str(exc)})
+            except Exception:
+                pass
+
 
 class MergeServer(HTTPServer):
     def __init__(self, port: int, root_dir: str, output_dir: str) -> None:
@@ -496,7 +831,38 @@ class MergeServer(HTTPServer):
         self.output_dir = output_dir
         self._outputs: dict[str, Path] = {}
         self._lock = threading.Lock()
+        self._file_index: dict[str, Path] = {}
         super().__init__(("0.0.0.0", port), MergeHandler)
+        self._build_file_index()
+
+    def _build_file_index(self) -> None:
+        """Build an index mapping filenames to paths for fast lookups."""
+        root = Path(self.root_dir)
+        index: dict[str, Path] = {}
+        for ext in ("*.hdf5", "*.h5"):
+            for p in root.rglob(ext):
+                if p.is_file():
+                    # First match wins — don't overwrite.
+                    if p.name not in index:
+                        index[p.name] = p
+
+        self._file_index = index
+        print(f"  Indexed {len(index)} HDF5 file(s) under {self.root_dir}")
+
+    def resolve_file(self, filename: str) -> Path | None:
+        """Resolve a filename to a path using the cached index."""
+        cached = self._file_index.get(filename)
+        if cached and cached.is_file():
+            return cached
+
+        # Fallback: direct path check (in case filename is actually a full path).
+        p = Path(filename)
+        if p.is_file():
+            # Add to index for next time.
+            self._file_index[p.name] = p
+            return p
+
+        return None
 
     def register_output(self, path: Path) -> None:
         with self._lock:

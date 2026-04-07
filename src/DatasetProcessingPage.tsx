@@ -26,10 +26,9 @@ import type {
 } from './pose-trace/types';
 import {
   checkBackend,
-  listFiles,
+  resolveFiles,
   runProcess,
   scanFiles,
-  type PythonFileEntry,
   type PythonBackendStatus,
   type PythonScanResult,
 } from './python-backend';
@@ -59,24 +58,7 @@ interface ProcessResultState {
   downloadBlob?: Blob;
 }
 
-interface BackendSourceResolution {
-  sourceUrl: string;
-  file: H5File;
-  backendPath: string;
-  backendRelativePath?: string;
-}
 
-interface BackendSourceResolutionError {
-  sourceUrl: string;
-  file: H5File | null;
-  error: string;
-}
-
-function isBackendSourceResolution(
-  entry: BackendSourceResolution | BackendSourceResolutionError,
-): entry is BackendSourceResolution {
-  return 'backendPath' in entry;
-}
 
 interface KeyTreeNode {
   name: string;
@@ -523,8 +505,8 @@ function DatasetProcessingPage() {
     version: null,
   });
   const [useBackend, setUseBackend] = useState(false);
-  const [backendFiles, setBackendFiles] = useState<PythonFileEntry[] | null>(null);
-  const [backendFilesLoading, setBackendFilesLoading] = useState(false);
+
+
   const [backendScan, setBackendScan] = useState<PythonScanResult | null>(null);
   const [backendLoading, setBackendLoading] = useState(false);
   const [backendError, setBackendError] = useState<string | null>(null);
@@ -544,40 +526,11 @@ function DatasetProcessingPage() {
   }, []);
 
   useEffect(() => {
-    if (!useBackend || !backend.available || !backend.rootDir) {
-      setBackendFiles(null);
-      setBackendFilesLoading(false);
+    if (!useBackend || !backend.available) {
       setBackendScan(null);
       setBackendLoading(false);
-      return;
     }
-
-    let cancelled = false;
-    setBackendFilesLoading(true);
-    setBackendError(null);
-    setBackendFiles(null);
-
-    void listFiles(backend.rootDir, true)
-      .then((result) => {
-        if (!cancelled) {
-          setBackendFiles(result.files);
-        }
-      })
-      .catch((error: unknown) => {
-        if (!cancelled) {
-          setBackendError(error instanceof Error ? error.message : String(error));
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setBackendFilesLoading(false);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [backend.available, backend.rootDir, useBackend]);
+  }, [backend.available, useBackend]);
 
   const availableFiles = useMemo(() => {
     const byUrl = new Map<string, H5File>();
@@ -650,76 +603,64 @@ function DatasetProcessingPage() {
       );
   }, [appendSourceUrls, mergeSourceUrls, operation, primarySourceUrl, sourceOptions]);
 
-  const backendSourceResolutions = useMemo(() => {
-    if (!useBackend || !backend.available || !backend.rootDir || !backendFiles) {
-      return [] as Array<BackendSourceResolution | BackendSourceResolutionError>;
+  // Resolve opened file names to server-side paths via the resolve-files endpoint.
+  const [resolvedPaths, setResolvedPaths] = useState<Record<string, string | null>>({});
+  const [resolveError, setResolveError] = useState<string | null>(null);
+
+  const namesToResolve = useMemo(
+    () => {
+      if (!useBackend || !backend.available) {
+        return [];
+      }
+
+      return orderedSelectedSourceUrls
+        .map((url) => availableFiles.find((f) => f.url === url)?.name)
+        .filter((name): name is string => Boolean(name));
+    },
+    [availableFiles, backend.available, orderedSelectedSourceUrls, useBackend],
+  );
+
+  useEffect(() => {
+    if (namesToResolve.length === 0) {
+      setResolvedPaths({});
+      setResolveError(null);
+      return;
     }
 
-    return orderedSelectedSourceUrls.map((sourceUrl) => {
-      const file = availableFiles.find((entry) => entry.url === sourceUrl) ?? null;
-      if (!file) {
-        return {
-          sourceUrl,
-          file,
-          error: 'The selected source is no longer available in this session.',
-        } satisfies BackendSourceResolutionError;
-      }
+    let cancelled = false;
 
-      if (file.service !== FileService.Local) {
-        return {
-          sourceUrl,
-          file,
-          error: `${file.name} is not a local file. The Python backend can only process datasets that exist on disk under the backend server directory.`,
-        } satisfies BackendSourceResolutionError;
-      }
-
-      const exactMatches = backendFiles.filter(
-        (entry) => entry.name === file.name && entry.size === file.file.size,
-      );
-      if (exactMatches.length === 1) {
-        return {
-          sourceUrl,
-          file,
-          backendPath: exactMatches[0].path,
-          backendRelativePath: exactMatches[0].relativePath,
-        } satisfies BackendSourceResolution;
-      }
-
-      const sameNameMatches = backendFiles.filter((entry) => entry.name === file.name);
-      if (exactMatches.length === 0) {
-        if (sameNameMatches.length > 0) {
-          return {
-            sourceUrl,
-            file,
-            error: `Found ${file.name} on the Python backend, but none of the candidates match the local file size (${file.file.size} bytes).`,
-          } satisfies BackendSourceResolutionError;
+    void resolveFiles(namesToResolve)
+      .then((result) => {
+        if (!cancelled) {
+          setResolvedPaths(result);
+          const missing = namesToResolve.filter((n) => !result[n]);
+          setResolveError(
+            missing.length > 0
+              ? `Could not find on server: ${missing.join(', ')}. Check MERGE_SERVER_DIR.`
+              : null,
+          );
         }
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setResolveError(error instanceof Error ? error.message : String(error));
+        }
+      });
 
-        return {
-          sourceUrl,
-          file,
-          error: `Could not find ${file.name} on the Python backend.`,
-        } satisfies BackendSourceResolutionError;
+    return () => { cancelled = true; };
+  }, [namesToResolve]);
+
+  const backendScanPaths = useMemo(
+    () => {
+      if (resolveError || namesToResolve.length === 0) {
+        return [];
       }
 
-      return {
-        sourceUrl,
-        file,
-        error: `Multiple backend files match ${file.name}: ${exactMatches
-          .map((entry) => entry.relativePath ?? entry.path)
-          .join(', ')}. Remove the duplicate or open a unique file.`,
-      } satisfies BackendSourceResolutionError;
-    });
-  }, [availableFiles, backend.available, backend.rootDir, backendFiles, orderedSelectedSourceUrls, useBackend]);
-
-  const backendSourceResolutionError = backendSourceResolutions.find(
-    (entry): entry is BackendSourceResolutionError => 'error' in entry,
-  )?.error ?? null;
-  const backendScanPaths = useMemo(
-    () => backendSourceResolutionError
-      ? []
-      : backendSourceResolutions.filter(isBackendSourceResolution).map((entry) => entry.backendPath),
-    [backendSourceResolutionError, backendSourceResolutions],
+      return namesToResolve
+        .map((name) => resolvedPaths[name])
+        .filter((p): p is string => p !== null);
+    },
+    [namesToResolve, resolveError, resolvedPaths],
   );
 
   // Demo names for the primary source in backend mode.
@@ -728,17 +669,19 @@ function DatasetProcessingPage() {
       return [];
     }
 
-    const primaryResolution = backendSourceResolutions.find(
-      (entry): entry is BackendSourceResolution =>
-        'backendPath' in entry && entry.sourceUrl === primarySourceUrl,
-    );
-    if (!primaryResolution) {
+    const primaryFile = availableFiles.find((f) => f.url === primarySourceUrl);
+    if (!primaryFile) {
       return [];
     }
 
-    const fileInfo = backendScan.files.find((f) => f.path === primaryResolution.backendPath);
+    const resolvedPath = resolvedPaths[primaryFile.name];
+    if (!resolvedPath) {
+      return [];
+    }
+
+    const fileInfo = backendScan.files.find((f) => f.path === resolvedPath);
     return fileInfo?.demoNames ?? [];
-  }, [backendScan, backendSourceResolutions, primarySourceUrl, useBackend]);
+  }, [availableFiles, backendScan, primarySourceUrl, resolvedPaths, useBackend]);
 
   useEffect(() => {
     if (!useBackend || !backend.available || !backend.rootDir) {
@@ -747,14 +690,9 @@ function DatasetProcessingPage() {
       return;
     }
 
-    if (backendFiles === null) {
+    if (resolveError) {
       setBackendScan(null);
-      return;
-    }
-
-    if (backendSourceResolutionError) {
-      setBackendScan(null);
-      setBackendError(backendSourceResolutionError);
+      setBackendError(resolveError);
       setBackendLoading(false);
       return;
     }
@@ -789,9 +727,8 @@ function DatasetProcessingPage() {
   }, [
     backend.available,
     backend.rootDir,
-    backendFiles,
     backendScanPaths,
-    backendSourceResolutionError,
+    resolveError,
     useBackend,
   ]);
 
@@ -957,8 +894,7 @@ function DatasetProcessingPage() {
         && orderedSelectedSourceUrls.length > 0
         && backendScanPaths.length === orderedSelectedSourceUrls.length
         && !backendLoading
-        && !backendFilesLoading
-        && !backendSourceResolutionError;
+        && !resolveError;
     }
 
     if (selectedSourceLoading || !selectedSourcesReady) {
@@ -978,11 +914,10 @@ function DatasetProcessingPage() {
     appendSourceUrls.length,
     backend.available,
     backendLoading,
-    backendFilesLoading,
     cutDemoNames.length,
     backendScan,
     backendScanPaths.length,
-    backendSourceResolutionError,
+    resolveError,
     mergeSourceUrls.length,
     operation,
     orderedSelectedSourceUrls.length,
@@ -1031,17 +966,13 @@ function DatasetProcessingPage() {
     try {
       if (useBackend && backend.available) {
         // Python backend processing.
-        const resolvedPaths = backendSourceResolutions
-          .filter(isBackendSourceResolution)
-          .map((entry) => entry.backendPath);
-        if (resolvedPaths.length !== orderedSelectedSourceUrls.length) {
-          throw new Error(backendSourceResolutionError
-            ?? 'Could not resolve every selected source on the Python backend.');
+        if (backendScanPaths.length === 0 || resolveError) {
+          throw new Error(resolveError ?? 'Could not resolve file paths on the Python backend.');
         }
 
         const result = await runProcess(
           {
-            paths: resolvedPaths,
+            paths: backendScanPaths,
             selectedKeys,
             outputName: defaultOutputName,
             operation,
@@ -1194,7 +1125,7 @@ function DatasetProcessingPage() {
           {useBackend && backendError && (
             <p className={styles.errorText} style={{ marginTop: '0.75rem' }}>{backendError}</p>
           )}
-          {useBackend && (backendFilesLoading || backendLoading) && !backendError && (
+          {useBackend && backendLoading && !backendError && (
             <p className={styles.infoText} style={{ marginTop: '0.75rem' }}>Scanning files…</p>
           )}
         </section>
