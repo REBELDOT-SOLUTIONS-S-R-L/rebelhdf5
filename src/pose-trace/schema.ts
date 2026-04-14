@@ -59,6 +59,10 @@ export interface Trace3DSpec {
 export const TRACE_3D_SPECS: Trace3DSpec[] = [
   { label: 'left eef', prefix: 'eef_left_arm', color: '#1f77b4', dash: 'solid', markerSize: 6 },
   { label: 'right eef', prefix: 'eef_right_arm', color: '#d62728', dash: 'solid', markerSize: 6 },
+  { label: 'left ik input', prefix: 'ik_input_eef_left_arm', color: '#4fb6ff', dash: 'dot', markerSize: 5 },
+  { label: 'right ik input', prefix: 'ik_input_eef_right_arm', color: '#ff8f70', dash: 'dot', markerSize: 5 },
+  { label: 'left post step', prefix: 'eef_post_step_left_arm', color: '#ffd000', dash: 'dashdot', markerSize: 5 },
+  { label: 'right post step', prefix: 'eef_post_step_right_arm', color: '#ffe27a', dash: 'dashdot', markerSize: 5 },
   { label: 'left upper', prefix: 'keypoint_garment_left_upper', color: '#9467bd', dash: 'dash', markerSize: 4 },
   { label: 'left middle', prefix: 'keypoint_garment_left_middle', color: '#17becf', dash: 'dash', markerSize: 4 },
   { label: 'left lower', prefix: 'keypoint_garment_left_lower', color: '#2ca02c', dash: 'dash', markerSize: 4 },

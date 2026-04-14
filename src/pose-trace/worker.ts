@@ -527,16 +527,30 @@ function buildDemoRows(entry: OpenSourceEntry, demoName: string): DemoRow[] {
   const demoGroup = getDemoGroup(entry, demoName);
 
   const eefPoseGroup = findPoseGroup(demoGroup, 'eef_pose');
+  const ikInputEefPoseGroup = findPoseGroup(demoGroup, 'ik_input_eef_pose');
+  const eefPosePostStepGroup = findPoseGroup(demoGroup, 'eef_pose_post_step');
   const objectPoseGroup = findPoseGroup(demoGroup, 'object_pose');
 
   const eefPose = loadPoseArrays(eefPoseGroup, TRACE_EEF_NAMES);
+  const ikInputEefPose = loadPoseArrays(ikInputEefPoseGroup, TRACE_EEF_NAMES);
+  const eefPosePostStep = loadPoseArrays(eefPosePostStepGroup, TRACE_EEF_NAMES);
   const objectPose = loadPoseArrays(objectPoseGroup, TRACE_KEYPOINT_NAMES);
 
-  if (Object.keys(eefPose).length === 0 && Object.keys(objectPose).length === 0) {
+  if (
+    Object.keys(eefPose).length === 0
+    && Object.keys(ikInputEefPose).length === 0
+    && Object.keys(eefPosePostStep).length === 0
+    && Object.keys(objectPose).length === 0
+  ) {
     throw new Error(`Demo '${demoName}' does not contain usable pose datasets.`);
   }
 
-  const poseArrays = [...Object.values(eefPose), ...Object.values(objectPose)];
+  const poseArrays = [
+    ...Object.values(eefPose),
+    ...Object.values(ikInputEefPose),
+    ...Object.values(eefPosePostStep),
+    ...Object.values(objectPose),
+  ];
   const validLengths = poseArrays
     .filter((series) => series.every((frame) => Array.isArray(frame) && frame.length === 4))
     .map((series) => series.length);
@@ -578,6 +592,16 @@ function buildDemoRows(entry: OpenSourceEntry, demoName: string): DemoRow[] {
       row[`eef_${eefName}_x`] = xyz?.[0] ?? null;
       row[`eef_${eefName}_y`] = xyz?.[1] ?? null;
       row[`eef_${eefName}_z`] = xyz?.[2] ?? null;
+
+      const ikInputXYZ = extractXYZAtStep(ikInputEefPose[eefName], stepIdx);
+      row[`ik_input_eef_${eefName}_x`] = ikInputXYZ?.[0] ?? null;
+      row[`ik_input_eef_${eefName}_y`] = ikInputXYZ?.[1] ?? null;
+      row[`ik_input_eef_${eefName}_z`] = ikInputXYZ?.[2] ?? null;
+
+      const postStepXYZ = extractXYZAtStep(eefPosePostStep[eefName], stepIdx);
+      row[`eef_post_step_${eefName}_x`] = postStepXYZ?.[0] ?? null;
+      row[`eef_post_step_${eefName}_y`] = postStepXYZ?.[1] ?? null;
+      row[`eef_post_step_${eefName}_z`] = postStepXYZ?.[2] ?? null;
     }
 
     for (const keypointName of TRACE_KEYPOINT_NAMES) {

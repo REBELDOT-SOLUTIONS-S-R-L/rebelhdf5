@@ -38,6 +38,13 @@ interface PlotLegendClickEvent {
   data?: PlotLegendTraceState[];
 }
 
+const DEFAULT_HIDDEN_3D_TRACE_GROUPS = new Set([
+  'ik_input_eef_left_arm',
+  'ik_input_eef_right_arm',
+  'eef_post_step_left_arm',
+  'eef_post_step_right_arm',
+]);
+
 function usePrefersDarkMode(): boolean {
   const [prefersDarkMode, setPrefersDarkMode] = useState(() => {
     if (typeof window === 'undefined') {
@@ -229,7 +236,7 @@ function PoseTraceCharts({
   if (sceneCameraIdentityRef.current !== threeDimensionalChartKey) {
     sceneCameraIdentityRef.current = threeDimensionalChartKey;
     sceneCameraRef.current = null;
-    hiddenTraceGroupsRef.current = new Set();
+    hiddenTraceGroupsRef.current = new Set(DEFAULT_HIDDEN_3D_TRACE_GROUPS);
   }
 
   const threeDimensionalData = useMemo(
