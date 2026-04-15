@@ -1,6 +1,7 @@
 import type Plotly from 'plotly.js';
 import type { Data, Layout } from 'plotly.js';
 
+import type { FailurePlane, FailureSlice } from './clothAnalysis';
 import {
   TRACE_3D_SPECS,
   TRACE_EEF_KEYPOINT_COLUMNS,
@@ -8,7 +9,13 @@ import {
   TRACE_Z_COLUMNS,
   humanizeColumnName,
 } from './schema';
-import type { DemoRow } from './types';
+import type {
+  ClothDistributionAnchor,
+  ClothDistributionPoint,
+  ClothDistributionResult,
+  ClothDistributionSourceDetail,
+  DemoRow,
+} from './types';
 
 export type TraceSide = 'left' | 'right';
 type LegendId = 'legend' | 'legend2' | 'legend3';
@@ -36,6 +43,11 @@ const FUTURE_TRACE_OPACITY = 0.22;
 const FUTURE_MARKER_OPACITY = 0.35;
 const DEFAULT_3D_CAMERA_EYE = { x: 0.0, y: -1.8, z: 0.5 };
 const DEFAULT_3D_CAMERA_UP = { x: 0, y: 0, z: 1 };
+const FAILURE_COLORSCALE: Plotly.ColorScale = [
+  [0, '#2ca02c'],
+  [0.5, '#ffd000'],
+  [1, '#d62728'],
+];
 
 const SUBPLOT_DOMAINS: [number, number][] = [
   [0.74, 1.0],
@@ -189,6 +201,551 @@ function buildTraceVisibility(
   }
 
   return showInLegend ? 'legendonly' : false;
+}
+
+function formatClothScalar(value: number | null): string {
+  return value == null ? '-' : value.toFixed(4);
+}
+
+function buildClothHoverTemplate(category: string): string {
+  return [
+    '<b>%{customdata[0]}</b>',
+    'episode: %{customdata[1]}',
+    `category: ${category}`,
+    'anchor x: %{x:.4f} m',
+    'anchor y: %{y:.4f} m',
+    'initial x: %{customdata[2]}',
+    'initial y: %{customdata[3]}',
+    'initial rx: %{customdata[4]}',
+    'initial ry: %{customdata[5]}',
+    'num samples: %{customdata[6]}',
+    'source left: %{customdata[7]}',
+    'source right: %{customdata[8]}',
+    '<extra></extra>',
+  ].join('<br>');
+}
+
+function buildClothScatterTrace(
+  points: ClothDistributionPoint[],
+  name: 'Success' | 'Failed' | 'Teleop',
+  color: string,
+  opacity: number,
+  hoverEnabled: boolean,
+): Data | null {
+  if (points.length === 0) {
+    return null;
+  }
+
+  return {
+    type: 'scatter',
+    x: points.map((point) => point.x),
+    y: points.map((point) => point.y),
+    mode: 'markers',
+    name,
+    marker: {
+      color,
+      size: 11,
+      opacity,
+      line: { color: 'rgba(255,255,255,0.7)', width: 0.6 },
+    },
+    customdata: points.map((point) => [
+      point.datasetName,
+      point.demoName,
+      formatClothScalar(point.initialX),
+      formatClothScalar(point.initialY),
+      formatClothScalar(point.initialRx),
+      formatClothScalar(point.initialRy),
+      point.numSamples == null ? '-' : String(point.numSamples),
+      point.sourceLeft,
+      point.sourceRight,
+    ]),
+    hovertemplate: hoverEnabled ? buildClothHoverTemplate(name.toLowerCase()) : '<extra></extra>',
+    hoverinfo: hoverEnabled ? 'all' : 'skip',
+  };
+}
+
+function buildClothSelectedEpisodeHover(point: ClothDistributionPoint): string {
+  return [
+    `<b>${point.datasetName}</b>`,
+    `episode: ${point.demoName}`,
+    `category: ${point.category}`,
+    `anchor x: ${point.x.toFixed(4)} m`,
+    `anchor y: ${point.y.toFixed(4)} m`,
+    `initial x: ${formatClothScalar(point.initialX)}`,
+    `initial y: ${formatClothScalar(point.initialY)}`,
+    `initial rx: ${formatClothScalar(point.initialRx)}`,
+    `initial ry: ${formatClothScalar(point.initialRy)}`,
+    `num samples: ${point.numSamples == null ? '-' : String(point.numSamples)}`,
+    `source left: ${point.sourceLeft}`,
+    `source right: ${point.sourceRight}`,
+  ].join('<br>');
+}
+
+function buildClothSourceHoverText(detail: ClothDistributionSourceDetail): string {
+  return [
+    `<b>${detail.datasetName}</b>`,
+    `episode: ${detail.demoName}`,
+    detail.hoverLabel,
+    `anchor x: ${detail.x.toFixed(4)} m`,
+    `anchor y: ${detail.y.toFixed(4)} m`,
+  ].join('<br>');
+}
+
+function buildClothSourceOverlay(
+  details: ClothDistributionSourceDetail[],
+  selectedPoint: ClothDistributionPoint,
+  markerColor: string,
+  textColor: string,
+  lineColor: string,
+  markerName: string,
+  lineName: string,
+): Data[] {
+  if (details.length === 0) {
+    return [];
+  }
+
+  return [
+    {
+      type: 'scatter',
+      x: details.flatMap((detail) => [selectedPoint.x, detail.x, null]),
+      y: details.flatMap((detail) => [selectedPoint.y, detail.y, null]),
+      mode: 'lines',
+      name: lineName,
+      showlegend: false,
+      hoverinfo: 'skip',
+      line: { color: lineColor, width: 2.4 },
+    },
+    {
+      type: 'scatter',
+      x: details.map((detail) => detail.x),
+      y: details.map((detail) => detail.y),
+      mode: 'text+markers',
+      name: markerName,
+      showlegend: false,
+      text: details.map((detail) => detail.textLabel),
+      textposition: 'top center',
+      textfont: { color: textColor, size: 12, family: FONT_FAMILY },
+      hovertext: details.map(buildClothSourceHoverText),
+      hovertemplate: '%{hovertext}<extra></extra>',
+      marker: {
+        size: 16,
+        color: markerColor,
+        opacity: 0.98,
+        line: { color: 'rgba(0,0,0,0.7)', width: 1.5 },
+      },
+    },
+  ];
+}
+
+export function buildClothDistributionData(
+  result: ClothDistributionResult | null,
+  selectedPoint: ClothDistributionPoint | null,
+): Data[] {
+  if (!result) {
+    return [];
+  }
+
+  const baseOpacity = selectedPoint ? 0.14 : 0.82;
+  const baseHoverEnabled = !selectedPoint;
+  const traces: Data[] = [];
+
+  const successTrace = buildClothScatterTrace(
+    result.successPoints,
+    'Success',
+    '#2ca02c',
+    baseOpacity,
+    baseHoverEnabled,
+  );
+  const failedTrace = buildClothScatterTrace(
+    result.failedPoints,
+    'Failed',
+    '#d62728',
+    baseOpacity,
+    baseHoverEnabled,
+  );
+  const teleopTrace = buildClothScatterTrace(
+    result.teleopPoints,
+    'Teleop',
+    '#1f77b4',
+    baseOpacity,
+    baseHoverEnabled,
+  );
+
+  if (successTrace) traces.push(successTrace);
+  if (failedTrace) traces.push(failedTrace);
+  if (teleopTrace) traces.push(teleopTrace);
+
+  if (!selectedPoint || selectedPoint.category === 'teleop') {
+    return traces;
+  }
+
+  traces.push({
+    type: 'scatter',
+    x: [selectedPoint.x],
+    y: [selectedPoint.y],
+    mode: 'text+markers',
+    name: 'Selected Episode',
+    showlegend: false,
+    text: [selectedPoint.demoName],
+    textposition: 'top center',
+    textfont: { color: 'rgba(0, 90, 130, 1)', size: 12, family: FONT_FAMILY },
+    hovertext: [buildClothSelectedEpisodeHover(selectedPoint)],
+    hovertemplate: '%{hovertext}<extra></extra>',
+    marker: {
+      size: 16,
+      color: 'rgba(0, 190, 255, 0.95)',
+      opacity: 0.95,
+      line: { color: 'rgba(0,0,0,0.7)', width: 1.5 },
+    },
+  });
+
+  traces.push(
+    ...buildClothSourceOverlay(
+      selectedPoint.sourceLeftDetails,
+      selectedPoint,
+      'rgba(255, 215, 0, 0.98)',
+      'rgba(125, 95, 0, 1)',
+      'rgba(240, 200, 0, 0.95)',
+      'Selected Left Sources',
+      'Selected Left Links',
+    ),
+    ...buildClothSourceOverlay(
+      selectedPoint.sourceRightDetails,
+      selectedPoint,
+      'rgba(255, 140, 0, 0.98)',
+      'rgba(145, 70, 0, 1)',
+      'rgba(255, 140, 0, 0.95)',
+      'Selected Right Sources',
+      'Selected Right Links',
+    ),
+  );
+
+  return traces;
+}
+
+export function buildClothDistributionLayout(
+  _result: ClothDistributionResult | null,
+  anchor: ClothDistributionAnchor,
+): Partial<Layout> {
+  const theme = getPlotTheme();
+
+  return {
+    template: PLOTLY_WHITE_TEMPLATE,
+    height: 820,
+    paper_bgcolor: theme.paperBg,
+    plot_bgcolor: theme.plotBg,
+    font: { color: theme.textColor, family: FONT_FAMILY },
+    hovermode: 'closest',
+    margin: { l: 70, r: 30, t: 40, b: 70 },
+    legend: {
+      orientation: 'h',
+      yanchor: 'bottom',
+      y: 1.02,
+      xanchor: 'left',
+      x: 0,
+      bgcolor: theme.legendBg,
+      bordercolor: theme.legendBorder,
+      borderwidth: 1,
+    },
+    xaxis: {
+      title: { text: `${anchor} x [m]` },
+      gridcolor: theme.gridColor,
+      zeroline: true,
+      zerolinewidth: 1,
+      zerolinecolor: theme.gridColor,
+      color: theme.textColor,
+    },
+    yaxis: {
+      title: { text: `${anchor} y [m]` },
+      gridcolor: theme.gridColor,
+      zeroline: true,
+      zerolinewidth: 1,
+      zerolinecolor: theme.gridColor,
+      scaleanchor: 'x',
+      scaleratio: 1,
+      color: theme.textColor,
+    },
+  };
+}
+
+function buildFailureHeatmapTrace(
+  plane: FailurePlane,
+  axisRefs?: { x: string; y: string },
+  showScale = true,
+): Data {
+  const trace: Record<string, unknown> = {
+    type: 'heatmap',
+    x: plane.bins[0]?.map((bin) => bin.xCenter) ?? [],
+    y: plane.bins.map((row) => row[0]?.yCenter ?? 0),
+    z: plane.bins.map((row) => row.map((bin) => (bin.masked ? null : bin.failureRate))),
+    customdata: plane.bins.map((row) => row.map((bin) => [
+      bin.xStart,
+      bin.xEnd,
+      bin.yStart,
+      bin.yEnd,
+      bin.failedCount,
+      bin.successCount,
+      bin.totalGeneratedCount,
+      bin.teleopCount,
+      bin.failureRate,
+    ])),
+    hoverongaps: false,
+    hovertemplate: [
+      `${plane.xLabel} range: %{customdata[0]:.4f} to %{customdata[1]:.4f}`,
+      `${plane.yLabel} range: %{customdata[2]:.4f} to %{customdata[3]:.4f}`,
+      'failure rate: %{customdata[8]:.1%}',
+      'failed: %{customdata[4]}',
+      'success: %{customdata[5]}',
+      'total generated: %{customdata[6]}',
+      'teleop: %{customdata[7]}',
+      '<extra></extra>',
+    ].join('<br>'),
+    coloraxis: 'coloraxis',
+    showscale: showScale,
+    xaxis: axisRefs?.x,
+    yaxis: axisRefs?.y,
+  };
+
+  return trace as unknown as Data;
+}
+
+function buildFailureOverlayTrace(
+  plane: FailurePlane,
+  axisRefs?: { x: string; y: string },
+  showLegend = true,
+): Data | null {
+  if (plane.overlayPoints.length === 0) {
+    return null;
+  }
+
+  return {
+    type: 'scatter',
+    x: plane.overlayPoints.map((point) => point.x),
+    y: plane.overlayPoints.map((point) => point.y),
+    mode: 'markers',
+    name: 'Teleop',
+    showlegend: showLegend,
+    marker: {
+      color: '#1f77b4',
+      size: 7,
+      opacity: 0.55,
+      line: { color: 'rgba(255,255,255,0.6)', width: 0.6 },
+    },
+    hovertemplate: [
+      'Teleop coverage',
+      `${plane.xLabel}: %{x:.4f}`,
+      `${plane.yLabel}: %{y:.4f}`,
+      '<extra></extra>',
+    ].join('<br>'),
+    xaxis: axisRefs?.x,
+    yaxis: axisRefs?.y,
+  };
+}
+
+function buildFailureAxisBase(theme: PlotTheme): Partial<Layout['xaxis']> {
+  return {
+    showgrid: true,
+    gridcolor: theme.gridColor,
+    zeroline: false,
+    color: theme.textColor,
+  };
+}
+
+export function buildFailureMapData(
+  plane: FailurePlane,
+  showTeleopOverlay: boolean,
+): Data[] {
+  const traces: Data[] = [buildFailureHeatmapTrace(plane)];
+  const overlayTrace = showTeleopOverlay ? buildFailureOverlayTrace(plane) : null;
+  if (overlayTrace) {
+    traces.push(overlayTrace);
+  }
+
+  return traces;
+}
+
+export function buildFailureMapLayout(
+  plane: FailurePlane,
+): Partial<Layout> {
+  const theme = getPlotTheme();
+  const axisBase = buildFailureAxisBase(theme);
+
+  const layout: Partial<Layout> & Record<string, unknown> = {
+    template: PLOTLY_WHITE_TEMPLATE,
+    height: 820,
+    paper_bgcolor: theme.paperBg,
+    plot_bgcolor: theme.plotBg,
+    font: { color: theme.textColor, family: FONT_FAMILY },
+    hovermode: 'closest',
+    margin: { l: 70, r: 80, t: 30, b: 70 },
+    legend: {
+      orientation: 'h',
+      yanchor: 'bottom',
+      y: 1.01,
+      xanchor: 'right',
+      x: 1,
+      bgcolor: theme.legendBg,
+      bordercolor: theme.legendBorder,
+      borderwidth: 1,
+    },
+    xaxis: {
+      ...axisBase,
+      title: { text: plane.xLabel },
+      range: [plane.xBounds.min, plane.xBounds.max],
+    },
+    yaxis: {
+      ...axisBase,
+      title: { text: plane.yLabel },
+      range: [plane.yBounds.min, plane.yBounds.max],
+      scaleanchor: 'x',
+      scaleratio: 1,
+    },
+  };
+
+  layout.coloraxis = {
+    cmin: 0,
+    cmax: 1,
+    colorscale: FAILURE_COLORSCALE,
+    colorbar: {
+      title: { text: 'failure rate' },
+      tickformat: '.0%',
+    },
+  };
+
+  return layout;
+}
+
+function sliceAxisName(prefix: 'x' | 'y', index: number): string {
+  return `${prefix}${index === 0 ? '' : index + 1}`;
+}
+
+function sliceDomain(index: number, total: number, start: number, end: number, gap: number): [number, number] {
+  const width = (end - start - (gap * (total - 1))) / total;
+  const domainStart = start + (index * (width + gap));
+  return [domainStart, domainStart + width];
+}
+
+function formatSliceAnnotation(slice: FailureSlice): string {
+  return [
+    `rot x: ${slice.rotXStart.toFixed(2)} to ${slice.rotXEnd.toFixed(2)} deg`,
+    `rot y: ${slice.rotYStart.toFixed(2)} to ${slice.rotYEnd.toFixed(2)} deg`,
+  ].join('<br>');
+}
+
+export function buildFailureSliceData(
+  slices: FailureSlice[],
+  showTeleopOverlay: boolean,
+): Data[] {
+  const traces: Data[] = [];
+
+  for (const slice of slices) {
+    const axisRefs = {
+      x: sliceAxisName('x', (slice.rowIndex * 3) + slice.colIndex),
+      y: sliceAxisName('y', (slice.rowIndex * 3) + slice.colIndex),
+    };
+
+    traces.push(buildFailureHeatmapTrace(slice.plane, axisRefs, false));
+
+    const overlayTrace = showTeleopOverlay
+      ? buildFailureOverlayTrace(slice.plane, axisRefs, slice.rowIndex === 0 && slice.colIndex === 0)
+      : null;
+    if (overlayTrace) {
+      traces.push(overlayTrace);
+    }
+  }
+
+  return traces;
+}
+
+export function buildFailureSliceLayout(
+  slices: FailureSlice[],
+): Partial<Layout> {
+  const theme = getPlotTheme();
+  const axisBase = buildFailureAxisBase(theme);
+  const layout: Partial<Layout> & Record<string, unknown> = {
+    template: PLOTLY_WHITE_TEMPLATE,
+    height: 1220,
+    paper_bgcolor: theme.paperBg,
+    plot_bgcolor: theme.plotBg,
+    font: { color: theme.textColor, family: FONT_FAMILY },
+    hovermode: 'closest',
+    margin: { l: 70, r: 90, t: 40, b: 80 },
+    legend: {
+      orientation: 'h',
+      yanchor: 'bottom',
+      y: 1.01,
+      xanchor: 'right',
+      x: 1,
+      bgcolor: theme.legendBg,
+      bordercolor: theme.legendBorder,
+      borderwidth: 1,
+    },
+    annotations: [] as NonNullable<Layout['annotations']>,
+  };
+
+  layout.coloraxis = {
+    cmin: 0,
+    cmax: 1,
+    colorscale: FAILURE_COLORSCALE,
+    colorbar: {
+      title: { text: 'failure rate' },
+      tickformat: '.0%',
+    },
+  };
+
+  const xDomains = [
+    sliceDomain(0, 3, 0.05, 0.97, 0.04),
+    sliceDomain(1, 3, 0.05, 0.97, 0.04),
+    sliceDomain(2, 3, 0.05, 0.97, 0.04),
+  ];
+  const yDomains = [
+    sliceDomain(0, 3, 0.06, 0.94, 0.04),
+    sliceDomain(1, 3, 0.06, 0.94, 0.04),
+    sliceDomain(2, 3, 0.06, 0.94, 0.04),
+  ].reverse() as [number, number][];
+
+  for (const slice of slices) {
+    const axisIndex = (slice.rowIndex * 3) + slice.colIndex;
+    const xAxisName = sliceAxisName('x', axisIndex);
+    const yAxisName = sliceAxisName('y', axisIndex);
+    const xDomain = xDomains[slice.colIndex];
+    const yDomain = yDomains[slice.rowIndex];
+
+    layout[xAxisName] = {
+      ...axisBase,
+      domain: xDomain,
+      anchor: yAxisName,
+      range: [slice.plane.xBounds.min, slice.plane.xBounds.max],
+      title: slice.rowIndex === 2 ? { text: slice.plane.xLabel } : undefined,
+    };
+    layout[yAxisName] = {
+      ...axisBase,
+      domain: yDomain,
+      anchor: xAxisName,
+      range: [slice.plane.yBounds.min, slice.plane.yBounds.max],
+      title: slice.colIndex === 0 ? { text: slice.plane.yLabel } : undefined,
+      scaleanchor: xAxisName,
+      scaleratio: 1,
+    };
+
+    layout.annotations = [
+      ...((layout.annotations as NonNullable<Layout['annotations']>) ?? []),
+      {
+        text: formatSliceAnnotation(slice),
+        x: (xDomain[0] + xDomain[1]) / 2,
+        y: yDomain[1] + 0.018,
+        xref: 'paper',
+        yref: 'paper',
+        xanchor: 'center',
+        yanchor: 'bottom',
+        showarrow: false,
+        align: 'center',
+        font: { color: theme.textColor, family: FONT_FAMILY, size: 12 },
+      },
+    ];
+  }
+
+  return layout;
 }
 
 export function build2DData(rows: DemoRow[], side: TraceSide): Data[] {

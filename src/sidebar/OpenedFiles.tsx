@@ -44,6 +44,8 @@ function OpenedFiles() {
         ? '/video-converter'
         : location.pathname === '/dataset-processing'
           ? '/dataset-processing'
+          : location.pathname === '/cloth-distribution'
+            ? '/cloth-distribution'
         : '/view'
   );
 

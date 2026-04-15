@@ -4,6 +4,7 @@ import { Route, Routes } from 'react-router-dom';
 import Dropzone from './Dropzone';
 import HelpPage from './HelpPage';
 import Layout from './Layout';
+const ClothDistributionPage = lazy(() => import('./ClothDistributionPage'));
 const DatabricksPage = lazy(() => import('./DatabricksPage'));
 const DatasetProcessingPage = lazy(() => import('./DatasetProcessingPage'));
 const PoseTracePage = lazy(() => import('./PoseTracePage'));
@@ -40,6 +41,14 @@ function App() {
             element={(
               <Suspense fallback={null}>
                 <DatasetProcessingPage />
+              </Suspense>
+            )}
+          />
+          <Route
+            path="/cloth-distribution"
+            element={(
+              <Suspense fallback={null}>
+                <ClothDistributionPage />
               </Suspense>
             )}
           />

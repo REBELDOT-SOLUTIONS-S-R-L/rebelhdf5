@@ -13,8 +13,19 @@ import {
   TRACE_KEYPOINT_NAMES,
   TRACE_SUCCESS_DISTANCE_SPECS,
 } from './schema';
-import { DEMO_VIDEO_KEYS } from './types';
+import {
+  CLOTH_DISTRIBUTION_ANCHORS,
+  CLOTH_DISTRIBUTION_DERIVED_ANCHORS,
+  CLOTH_DISTRIBUTION_DIRECT_ANCHORS,
+  DEMO_VIDEO_KEYS,
+} from './types';
 import type {
+  ClothDistributionAnchor,
+  ClothDistributionCategory,
+  ClothDistributionPoint,
+  ClothDistributionRequest,
+  ClothDistributionResult,
+  ClothDistributionSourceDetail,
   DemoInfo,
   DemoRow,
   DatasetProcessingProgress,
@@ -48,6 +59,7 @@ type GetDatasetProcessingInfoPayload = {
   sourceId: string;
 };
 
+type LoadClothDistributionPayload = ClothDistributionRequest;
 type ProcessDatasetPayload = DatasetProcessingRequest;
 
 type ListDemoVideosPayload = {
@@ -70,6 +82,7 @@ type PoseTraceWorkerRequest =
   | { id: number; type: 'openRemoteSource'; payload: OpenRemoteSourcePayload }
   | { id: number; type: 'loadDemoRows'; payload: LoadDemoRowsPayload }
   | { id: number; type: 'getDatasetProcessingInfo'; payload: GetDatasetProcessingInfoPayload }
+  | { id: number; type: 'loadClothDistribution'; payload: LoadClothDistributionPayload }
   | { id: number; type: 'processDataset'; payload: ProcessDatasetPayload }
   | { id: number; type: 'listDemoVideos'; payload: ListDemoVideosPayload }
   | { id: number; type: 'loadDemoVideo'; payload: LoadDemoVideoPayload }
@@ -89,6 +102,7 @@ type PoseTraceWorkerResponse =
         | { sourceId: string; datasetName: string; demos: DemoInfo[] }
         | DemoRow[]
         | DatasetProcessingSourceInfo
+        | ClothDistributionResult
         | ProcessDatasetResult
         | DemoVideoInfo[]
         | LoadDemoVideoResult
@@ -103,6 +117,7 @@ interface WorkerSuccessResult {
     | { sourceId: string; datasetName: string; demos: DemoInfo[] }
     | DemoRow[]
     | DatasetProcessingSourceInfo
+    | ClothDistributionResult
     | ProcessDatasetResult
     | DemoVideoInfo[]
     | LoadDemoVideoResult
@@ -125,6 +140,59 @@ interface DatasetCopyPlanGroup {
   parentGroupSegments: string[];
   datasets: DatasetCopyPlanItem[];
 }
+
+interface TeleopSource {
+  teleopId: string;
+  datasetName: string;
+  demoName: string;
+  x: number;
+  y: number;
+  objectPositions: Record<string, [number, number, number]>;
+}
+
+const COMMON_CLOTH_KEYPOINTS = [
+  'garment_left_middle',
+  'garment_right_middle',
+  'garment_left_lower',
+  'garment_right_lower',
+  'garment_left_upper',
+  'garment_right_upper',
+] as const;
+
+const CLOTH_DISTRIBUTION_DERIVED_ANCHOR_GROUPS: Record<
+  (typeof CLOTH_DISTRIBUTION_DERIVED_ANCHORS)[number],
+  readonly (typeof CLOTH_DISTRIBUTION_DIRECT_ANCHORS)[number][]
+> = {
+  garment_center: [
+    'garment_left_middle',
+    'garment_right_middle',
+    'garment_left_lower',
+    'garment_right_lower',
+    'garment_left_upper',
+    'garment_right_upper',
+  ],
+  garment_lower_center: ['garment_left_lower', 'garment_right_lower'],
+  garment_upper_center: ['garment_left_upper', 'garment_right_upper'],
+};
+
+const CLOTH_SUBTASK_SELECTION_SPECS = {
+  left: [
+    { signal: 'grasp_left_middle', objectRef: 'garment_left_middle', strategy: 'nearest_neighbor_object' },
+    { signal: 'left_middle_to_lower', objectRef: 'garment_left_lower', strategy: 'nearest_neighbor_object' },
+    { signal: 'left_at_waiting_pos', objectRef: null, strategy: 'random' },
+    { signal: 'grasp_left_lower', objectRef: 'garment_left_lower', strategy: 'nearest_neighbor_object' },
+    { signal: 'left_lower_to_upper', objectRef: 'garment_left_upper', strategy: 'nearest_neighbor_object' },
+    { signal: 'left_return_home', objectRef: null, strategy: 'random' },
+  ],
+  right: [
+    { signal: 'grasp_right_middle', objectRef: 'garment_right_middle', strategy: 'nearest_neighbor_object' },
+    { signal: 'right_middle_to_lower', objectRef: 'garment_right_lower', strategy: 'nearest_neighbor_object' },
+    { signal: 'right_at_waiting_pos', objectRef: null, strategy: 'random' },
+    { signal: 'grasp_right_lower', objectRef: 'garment_right_lower', strategy: 'nearest_neighbor_object' },
+    { signal: 'right_lower_to_upper', objectRef: 'garment_right_upper', strategy: 'nearest_neighbor_object' },
+    { signal: 'right_return_home', objectRef: null, strategy: 'random' },
+  ],
+} as const;
 
 const PLUGIN_ROOT = '/plugins';
 const FILTER_PLUGIN_NAMES: Record<number, Plugin> = {
@@ -637,6 +705,507 @@ function buildDemoRows(entry: OpenSourceEntry, demoName: string): DemoRow[] {
   }
 
   return rows;
+}
+
+function readDatasetArray(dataset: H5WasmDataset): unknown {
+  const arrayValue = dataset.to_array();
+  if (arrayValue != null) {
+    return arrayValue;
+  }
+
+  return dataset.json_value ?? dataset.value ?? null;
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+function asNumberVector(value: unknown): number[] | null {
+  if (!Array.isArray(value) || value.length === 0) {
+    return null;
+  }
+
+  if (value.every(isFiniteNumber)) {
+    return value as number[];
+  }
+
+  const firstRow = value[0];
+  if (Array.isArray(firstRow) && firstRow.every(isFiniteNumber)) {
+    return firstRow as number[];
+  }
+
+  return null;
+}
+
+function asPoseMatrix(value: unknown): number[][] | null {
+  if (!Array.isArray(value) || value.length === 0) {
+    return null;
+  }
+
+  const firstItem = value[0];
+  if (Array.isArray(firstItem) && Array.isArray(firstItem[0])) {
+    return asPoseMatrix(firstItem);
+  }
+
+  if (!value.every((row) => Array.isArray(row) && row.every(isFiniteNumber))) {
+    return null;
+  }
+
+  return value as number[][];
+}
+
+function readInitialPose(demoGroup: H5WasmGroup): number[] | null {
+  const garmentInitialPose = maybeChildDataset(demoGroup, 'initial_state/garment_initial_pose');
+  if (garmentInitialPose) {
+    return asNumberVector(readDatasetArray(garmentInitialPose));
+  }
+
+  const garmentRoot = maybeChildGroup(demoGroup, 'initial_state/garment');
+  if (!garmentRoot) {
+    return null;
+  }
+
+  for (const garmentName of garmentRoot.keys()) {
+    const garmentGroup = maybeChildGroup(garmentRoot, garmentName);
+    if (!garmentGroup) {
+      continue;
+    }
+
+    const initialPose = maybeChildDataset(garmentGroup, 'initial_pose');
+    if (!initialPose) {
+      continue;
+    }
+
+    const pose = asNumberVector(readDatasetArray(initialPose));
+    if (pose) {
+      return pose;
+    }
+  }
+
+  return null;
+}
+
+function findObjectPoseGroup(demoGroup: H5WasmGroup): H5WasmGroup | null {
+  return (
+    maybeChildGroup(demoGroup, 'obs/object_pose')
+    ?? maybeChildGroup(demoGroup, 'obs/datagen_info/object_pose')
+    ?? findPoseGroup(demoGroup, 'object_pose')
+  );
+}
+
+function readObjectPosePosition(
+  objectPoseGroup: H5WasmGroup,
+  keypointName: string,
+): [number, number, number] | null {
+  const dataset = maybeChildDataset(objectPoseGroup, keypointName);
+  if (!dataset) {
+    return null;
+  }
+
+  const matrix = asPoseMatrix(readDatasetArray(dataset));
+  const x = matrix?.[0]?.[3];
+  const y = matrix?.[1]?.[3];
+  const z = matrix?.[2]?.[3];
+
+  if (!isFiniteNumber(x) || !isFiniteNumber(y) || !isFiniteNumber(z)) {
+    return null;
+  }
+
+  return [roundFloat(x), roundFloat(y), roundFloat(z)];
+}
+
+function readAnchorXY(
+  demoGroup: H5WasmGroup,
+  anchor: ClothDistributionAnchor,
+): [number, number] | null {
+  if (anchor === 'initial_pose') {
+    const pose = readInitialPose(demoGroup);
+    const x = pose?.[0];
+    const y = pose?.[1];
+    if (!isFiniteNumber(x) || !isFiniteNumber(y)) {
+      return null;
+    }
+
+    return [roundFloat(x), roundFloat(y)];
+  }
+
+  const objectPoseGroup = findObjectPoseGroup(demoGroup);
+  if (!objectPoseGroup) {
+    return null;
+  }
+
+  if ((CLOTH_DISTRIBUTION_DIRECT_ANCHORS as readonly string[]).includes(anchor)) {
+    const directPosition = readObjectPosePosition(objectPoseGroup, anchor);
+    if (!directPosition) {
+      return null;
+    }
+
+    return [directPosition[0], directPosition[1]];
+  }
+
+  const derivedKeypoints = CLOTH_DISTRIBUTION_DERIVED_ANCHOR_GROUPS[
+    anchor as keyof typeof CLOTH_DISTRIBUTION_DERIVED_ANCHOR_GROUPS
+  ];
+  if (!derivedKeypoints) {
+    return null;
+  }
+
+  const points = derivedKeypoints
+    .map((keypointName) => readObjectPosePosition(objectPoseGroup, keypointName))
+    .filter((position): position is [number, number, number] => Boolean(position));
+  if (points.length === 0) {
+    return null;
+  }
+
+  const meanX = points.reduce((sum, position) => sum + position[0], 0) / points.length;
+  const meanY = points.reduce((sum, position) => sum + position[1], 0) / points.length;
+  return [roundFloat(meanX), roundFloat(meanY)];
+}
+
+function readObjectPositions(
+  demoGroup: H5WasmGroup,
+  keypointNames: readonly string[],
+): Record<string, [number, number, number]> | null {
+  const objectPoseGroup = findObjectPoseGroup(demoGroup);
+  if (!objectPoseGroup) {
+    return null;
+  }
+
+  const positions: Record<string, [number, number, number]> = {};
+  for (const keypointName of keypointNames) {
+    const position = readObjectPosePosition(objectPoseGroup, keypointName);
+    if (!position) {
+      return null;
+    }
+
+    positions[keypointName] = position;
+  }
+
+  return positions;
+}
+
+function readSourceDemoIndices(
+  demoGroup: H5WasmGroup,
+  datasetPath: string,
+): number[] {
+  const dataset = maybeChildDataset(demoGroup, datasetPath);
+  if (!dataset) {
+    return [];
+  }
+
+  const value = dataset.value;
+  if (ArrayBuffer.isView(value)) {
+    return [...value].map((entry) => Math.trunc(Number(entry))).filter(Number.isFinite);
+  }
+
+  const arrayValue = readDatasetArray(dataset);
+  if (!Array.isArray(arrayValue)) {
+    return [];
+  }
+
+  return arrayValue
+    .flat(Infinity)
+    .map((entry) => Math.trunc(Number(entry)))
+    .filter(Number.isFinite);
+}
+
+function episodeLength(demoGroup: H5WasmGroup): number | null {
+  const actions = maybeChildDataset(demoGroup, 'actions');
+  if (actions?.shape?.[0] != null) {
+    return actions.shape[0];
+  }
+
+  return optionalInt(getAttributeValue(demoGroup, 'num_samples'));
+}
+
+function makeTeleopId(entry: OpenSourceEntry, demoName: string): string {
+  return `${entry.datasetName}::${demoName}`;
+}
+
+function collectTeleopSources(
+  entry: OpenSourceEntry,
+  anchor: ClothDistributionAnchor,
+): {
+  points: ClothDistributionPoint[];
+  byDemoName: Record<string, TeleopSource[]>;
+} {
+  const points: ClothDistributionPoint[] = [];
+  const byDemoName: Record<string, TeleopSource[]> = {};
+
+  for (const demo of entry.demos) {
+    const demoGroup = getDemoGroup(entry, demo.name);
+    const xy = readAnchorXY(demoGroup, anchor);
+    const objectPositions = readObjectPositions(demoGroup, COMMON_CLOTH_KEYPOINTS);
+    if (!xy || !objectPositions) {
+      continue;
+    }
+
+    const initialPose = readInitialPose(demoGroup);
+    const teleopSource: TeleopSource = {
+      teleopId: makeTeleopId(entry, demo.name),
+      datasetName: entry.datasetName,
+      demoName: demo.name,
+      x: xy[0],
+      y: xy[1],
+      objectPositions,
+    };
+
+    byDemoName[demo.name] = [...(byDemoName[demo.name] ?? []), teleopSource];
+    points.push({
+      category: 'teleop',
+      datasetName: entry.datasetName,
+      demoName: demo.name,
+      x: xy[0],
+      y: xy[1],
+      initialX: initialPose?.[0] ?? null,
+      initialY: initialPose?.[1] ?? null,
+      initialRx: initialPose?.[3] ?? null,
+      initialRy: initialPose?.[4] ?? null,
+      numSamples: episodeLength(demoGroup),
+      sourceLeft: '-',
+      sourceRight: '-',
+      sourceLeftDetails: [],
+      sourceRightDetails: [],
+    });
+  }
+
+  return { points, byDemoName };
+}
+
+function resolveClothSideSourceDetails(
+  selectedIndices: readonly number[],
+  side: 'left' | 'right',
+  generatedObjectPositions: Record<string, [number, number, number]>,
+  teleopSourcesByDemo: Record<string, TeleopSource[]>,
+  includeRandomSelections: boolean,
+): {
+  rawSource: string;
+  details: ClothDistributionSourceDetail[];
+} {
+  const values = [...selectedIndices].map((value) => Math.trunc(value)).filter(Number.isFinite);
+  const rawSource = values.length > 0 ? values.join(',') : '-';
+  const grouped = new Map<string, {
+    teleopId: string;
+    datasetName: string;
+    demoName: string;
+    x: number;
+    y: number;
+    entries: Array<{
+      slot: number;
+      signal: string;
+      objectRef: string | null;
+      strategy: string;
+      distanceM: number | null;
+    }>;
+  }>();
+  const sideSpecs = CLOTH_SUBTASK_SELECTION_SPECS[side];
+
+  values.forEach((indexValue, slot) => {
+    const demoName = `demo_${indexValue}`;
+    const candidates = teleopSourcesByDemo[demoName] ?? [];
+    if (candidates.length === 0) {
+      return;
+    }
+
+    const spec = sideSpecs[slot] ?? {
+      signal: `${side}_slot_${slot}`,
+      objectRef: null,
+      strategy: 'random',
+    };
+
+    let best = candidates[0];
+    let distanceM: number | null = null;
+
+    if (spec.objectRef && generatedObjectPositions[spec.objectRef]) {
+      const generatedPosition = generatedObjectPositions[spec.objectRef];
+      let bestDistance = Number.POSITIVE_INFINITY;
+
+      for (const candidate of candidates) {
+        const sourcePosition = candidate.objectPositions[spec.objectRef];
+        if (!sourcePosition) {
+          continue;
+        }
+
+        const nextDistance = Math.hypot(
+          generatedPosition[0] - sourcePosition[0],
+          generatedPosition[1] - sourcePosition[1],
+          generatedPosition[2] - sourcePosition[2],
+        );
+
+        if (nextDistance < bestDistance) {
+          bestDistance = nextDistance;
+          best = candidate;
+          distanceM = roundFloat(nextDistance);
+        }
+      }
+    }
+
+    const existing = grouped.get(best.teleopId) ?? {
+      teleopId: best.teleopId,
+      datasetName: best.datasetName,
+      demoName: best.demoName,
+      x: best.x,
+      y: best.y,
+      entries: [],
+    };
+    existing.entries.push({
+      slot,
+      signal: spec.signal,
+      objectRef: spec.objectRef,
+      strategy: spec.strategy,
+      distanceM,
+    });
+    grouped.set(best.teleopId, existing);
+  });
+
+  const details = [...grouped.values()]
+    .sort((left, right) => left.demoName.localeCompare(right.demoName))
+    .map((record) => {
+      const entries = [...record.entries]
+        .filter((entry) => includeRandomSelections || entry.objectRef != null)
+        .sort((left, right) => left.slot - right.slot);
+      if (entries.length === 0) {
+        return null;
+      }
+      const textParts: string[] = [];
+      const hoverParts: string[] = [];
+      const slots: number[] = [];
+
+      for (const entry of entries) {
+        slots.push(entry.slot);
+        if (!entry.objectRef) {
+          textParts.push(`${side.toUpperCase()}${entry.slot}:rand`);
+          hoverParts.push(`${side.toUpperCase()}[${entry.slot}] ${entry.signal}: random`);
+          continue;
+        }
+
+        const safeDistance = entry.distanceM ?? 0;
+        textParts.push(`${side.toUpperCase()}${entry.slot}:${safeDistance.toFixed(3)}m`);
+        hoverParts.push(
+          `${side.toUpperCase()}[${entry.slot}] ${entry.signal}: `
+          + `${entry.objectRef} dist=${safeDistance.toFixed(3)}m (${entry.strategy})`,
+        );
+      }
+
+      return {
+        teleopId: record.teleopId,
+        datasetName: record.datasetName,
+        demoName: record.demoName,
+        x: record.x,
+        y: record.y,
+        slots,
+        textLabel: `${record.demoName} ${textParts.join(' | ')}`.trim(),
+        hoverLabel: hoverParts.join('<br>'),
+      } satisfies ClothDistributionSourceDetail;
+    })
+    .filter((detail): detail is ClothDistributionSourceDetail => Boolean(detail));
+
+  return { rawSource, details };
+}
+
+function collectGeneratedClothPoints(
+  entry: OpenSourceEntry,
+  category: Exclude<ClothDistributionCategory, 'teleop'>,
+  anchor: ClothDistributionAnchor,
+  teleopSourcesByDemo: Record<string, TeleopSource[]>,
+  includeRandomSelections: boolean,
+): ClothDistributionPoint[] {
+  const points: ClothDistributionPoint[] = [];
+
+  for (const demo of entry.demos) {
+    const demoGroup = getDemoGroup(entry, demo.name);
+    const xy = readAnchorXY(demoGroup, anchor);
+    const objectPositions = readObjectPositions(demoGroup, COMMON_CLOTH_KEYPOINTS);
+    if (!xy || !objectPositions) {
+      continue;
+    }
+
+    const initialPose = readInitialPose(demoGroup);
+    const leftIndices = readSourceDemoIndices(demoGroup, 'source_demo_indices/left_arm');
+    const rightIndices = readSourceDemoIndices(demoGroup, 'source_demo_indices/right_arm');
+    const leftSource = resolveClothSideSourceDetails(
+      leftIndices,
+      'left',
+      objectPositions,
+      teleopSourcesByDemo,
+      includeRandomSelections,
+    );
+    const rightSource = resolveClothSideSourceDetails(
+      rightIndices,
+      'right',
+      objectPositions,
+      teleopSourcesByDemo,
+      includeRandomSelections,
+    );
+
+    points.push({
+      category,
+      datasetName: entry.datasetName,
+      demoName: demo.name,
+      x: xy[0],
+      y: xy[1],
+      initialX: initialPose?.[0] ?? null,
+      initialY: initialPose?.[1] ?? null,
+      initialRx: initialPose?.[3] ?? null,
+      initialRy: initialPose?.[4] ?? null,
+      numSamples: episodeLength(demoGroup),
+      sourceLeft: leftSource.rawSource,
+      sourceRight: rightSource.rawSource,
+      sourceLeftDetails: leftSource.details,
+      sourceRightDetails: rightSource.details,
+    });
+  }
+
+  return points;
+}
+
+function loadClothDistribution(
+  request: ClothDistributionRequest,
+): ClothDistributionResult {
+  if (!(CLOTH_DISTRIBUTION_ANCHORS as readonly string[]).includes(request.anchor)) {
+    throw new Error(`Unsupported cloth distribution anchor: ${request.anchor}`);
+  }
+
+  const successEntry = request.successSourceId ? openSources.get(request.successSourceId) ?? null : null;
+  const failedEntry = request.failedSourceId ? openSources.get(request.failedSourceId) ?? null : null;
+  const teleopEntry = request.teleopSourceId ? openSources.get(request.teleopSourceId) ?? null : null;
+
+  if (request.successSourceId && !successEntry) {
+    throw new Error('Selected successful generated source is no longer available.');
+  }
+  if (request.failedSourceId && !failedEntry) {
+    throw new Error('Selected failed generated source is no longer available.');
+  }
+  if (request.teleopSourceId && !teleopEntry) {
+    throw new Error('Selected teleop source is no longer available.');
+  }
+
+  const teleopCollection = teleopEntry
+    ? collectTeleopSources(teleopEntry, request.anchor)
+    : { points: [], byDemoName: {} };
+
+  return {
+    anchor: request.anchor,
+    successPoints: successEntry
+      ? collectGeneratedClothPoints(
+          successEntry,
+          'success',
+          request.anchor,
+          teleopCollection.byDemoName,
+          request.includeRandomSelections,
+        )
+      : [],
+    failedPoints: failedEntry
+      ? collectGeneratedClothPoints(
+          failedEntry,
+          'failed',
+          request.anchor,
+          teleopCollection.byDemoName,
+          request.includeRandomSelections,
+        )
+      : [],
+    teleopPoints: teleopCollection.points,
+  };
 }
 
 interface H5AttributeOwner {
@@ -1363,6 +1932,8 @@ async function handleRequest(message: PoseTraceWorkerRequest): Promise<WorkerSuc
       }
       return { result: listDatasetProcessingInfo(entry) };
     }
+    case 'loadClothDistribution':
+      return { result: loadClothDistribution(message.payload) };
     case 'processDataset': {
       const result = await processDataset(message.payload, message.id);
       return { result };

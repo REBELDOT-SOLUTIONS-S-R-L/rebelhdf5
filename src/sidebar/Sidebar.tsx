@@ -1,8 +1,9 @@
-import { FiActivity, FiCloud, FiEye, FiFileText, FiFilm, FiLayers, FiPlusCircle } from 'react-icons/fi';
+import { FiActivity, FiAperture, FiCloud, FiEye, FiFileText, FiFilm, FiLayers, FiPlusCircle } from 'react-icons/fi';
 import { NavLink, useMatch, useSearchParams } from 'react-router-dom';
 
 import { useStore } from '../stores';
 import {
+  getClothDistributionLink,
   getDatasetProcessingLink,
   getPoseTraceLink,
   getVideoConverterLink,
@@ -128,6 +129,29 @@ function Sidebar() {
             >
               <FiLayers className={styles.icon} />
               <span className={styles.label}>Dataset Processing</span>
+            </button>
+          )}
+
+          {opened.length > 0 ? (
+            <NavLink
+              className={styles.mainNavItem}
+              to={getClothDistributionLink(activeFileUrl ?? opened[0].url)}
+              aria-label="Cloth Distribution"
+              title="Cloth Distribution"
+            >
+              <FiAperture className={styles.icon} />
+              <span className={styles.label}>Cloth Distribution</span>
+            </NavLink>
+          ) : (
+            <button
+              type="button"
+              className={styles.navBtn}
+              aria-label="Cloth Distribution"
+              title="Cloth Distribution"
+              disabled
+            >
+              <FiAperture className={styles.icon} />
+              <span className={styles.label}>Cloth Distribution</span>
             </button>
           )}
 

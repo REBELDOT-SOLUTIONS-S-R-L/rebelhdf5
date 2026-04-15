@@ -9,6 +9,75 @@ export interface DemoInfo {
 export const DEMO_VIDEO_KEYS = ['left_wrist', 'right_wrist', 'top'] as const;
 export type DemoVideoKey = (typeof DEMO_VIDEO_KEYS)[number];
 
+export const CLOTH_DISTRIBUTION_DIRECT_ANCHORS = [
+  'garment_left_lower',
+  'garment_left_middle',
+  'garment_left_upper',
+  'garment_right_lower',
+  'garment_right_middle',
+  'garment_right_upper',
+] as const;
+
+export const CLOTH_DISTRIBUTION_DERIVED_ANCHORS = [
+  'garment_center',
+  'garment_lower_center',
+  'garment_upper_center',
+] as const;
+
+export const CLOTH_DISTRIBUTION_ANCHORS = [
+  'initial_pose',
+  ...CLOTH_DISTRIBUTION_DIRECT_ANCHORS,
+  ...CLOTH_DISTRIBUTION_DERIVED_ANCHORS,
+] as const;
+
+export type ClothDistributionAnchor = (typeof CLOTH_DISTRIBUTION_ANCHORS)[number];
+export const DEFAULT_CLOTH_DISTRIBUTION_ANCHOR: ClothDistributionAnchor = 'garment_center';
+
+export type ClothDistributionCategory = 'success' | 'failed' | 'teleop';
+
+export interface ClothDistributionSourceDetail {
+  teleopId: string;
+  datasetName: string;
+  demoName: string;
+  x: number;
+  y: number;
+  slots: number[];
+  textLabel: string;
+  hoverLabel: string;
+}
+
+export interface ClothDistributionPoint {
+  category: ClothDistributionCategory;
+  datasetName: string;
+  demoName: string;
+  x: number;
+  y: number;
+  initialX: number | null;
+  initialY: number | null;
+  initialRx: number | null;
+  initialRy: number | null;
+  numSamples: number | null;
+  sourceLeft: string;
+  sourceRight: string;
+  sourceLeftDetails: ClothDistributionSourceDetail[];
+  sourceRightDetails: ClothDistributionSourceDetail[];
+}
+
+export interface ClothDistributionRequest {
+  successSourceId: string | null;
+  failedSourceId: string | null;
+  teleopSourceId: string | null;
+  anchor: ClothDistributionAnchor;
+  includeRandomSelections: boolean;
+}
+
+export interface ClothDistributionResult {
+  anchor: ClothDistributionAnchor;
+  successPoints: ClothDistributionPoint[];
+  failedPoints: ClothDistributionPoint[];
+  teleopPoints: ClothDistributionPoint[];
+}
+
 export interface DemoVideoInfo {
   key: DemoVideoKey;
   path: string;

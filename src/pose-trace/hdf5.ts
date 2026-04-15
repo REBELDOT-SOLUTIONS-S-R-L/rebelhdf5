@@ -1,6 +1,8 @@
 import { fetchBuffer } from '../fetch-utils';
 import { FileService, type H5File } from '../stores';
 import type {
+  ClothDistributionRequest,
+  ClothDistributionResult,
   DemoInfo,
   DemoRow,
   DatasetProcessingProgress,
@@ -31,6 +33,7 @@ type GetDatasetProcessingInfoPayload = {
   sourceId: string;
 };
 
+type LoadClothDistributionPayload = ClothDistributionRequest;
 type ProcessDatasetPayload = DatasetProcessingRequest;
 
 type ListDemoVideosPayload = {
@@ -63,6 +66,7 @@ type PoseTraceWorkerRequest =
   | { id: number; type: 'openRemoteSource'; payload: OpenRemoteSourcePayload }
   | { id: number; type: 'loadDemoRows'; payload: LoadDemoRowsPayload }
   | { id: number; type: 'getDatasetProcessingInfo'; payload: GetDatasetProcessingInfoPayload }
+  | { id: number; type: 'loadClothDistribution'; payload: LoadClothDistributionPayload }
   | { id: number; type: 'processDataset'; payload: ProcessDatasetPayload }
   | { id: number; type: 'listDemoVideos'; payload: ListDemoVideosPayload }
   | { id: number; type: 'loadDemoVideo'; payload: LoadDemoVideoPayload }
@@ -76,6 +80,7 @@ type PoseTraceWorkerResponse =
         | OpenSourceResult
         | DemoRow[]
         | DatasetProcessingSourceInfo
+        | ClothDistributionResult
         | DatasetProcessingResultMeta
         | DemoVideoInfo[]
         | LoadDemoVideoResult
@@ -199,6 +204,12 @@ export function getDatasetProcessingInfo(
   return callWorker<DatasetProcessingSourceInfo>('getDatasetProcessingInfo', {
     sourceId: source.sourceId,
   });
+}
+
+export function loadClothDistribution(
+  request: ClothDistributionRequest,
+): Promise<ClothDistributionResult> {
+  return callWorker<ClothDistributionResult>('loadClothDistribution', request);
 }
 
 export function processDataset(
