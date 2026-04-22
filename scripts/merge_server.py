@@ -50,7 +50,9 @@ def collect_dataset_paths(group: h5py.Group) -> list[str]:
     return sorted(paths)
 
 
-def collect_file_dataset_paths(data_group: h5py.Group) -> tuple[list[str], list[dict[str, Any]]]:
+def collect_file_dataset_paths(
+    data_group: h5py.Group,
+) -> tuple[list[str], dict[str, int], list[dict[str, Any]]]:
     """Collect dataset paths across every demo in a file."""
     key_counts: dict[str, int] = {}
     dataset_details: list[dict[str, Any]] = []
@@ -64,7 +66,7 @@ def collect_file_dataset_paths(data_group: h5py.Group) -> tuple[list[str], list[
         if not dataset_details:
             dataset_details = collect_dataset_info(demo_group)
 
-    return sorted(key_counts), dataset_details
+    return sorted(key_counts), key_counts, dataset_details
 
 
 def collect_dataset_info(group: h5py.Group) -> list[dict[str, Any]]:
@@ -439,9 +441,10 @@ class MergeHandler(BaseHTTPRequestHandler):
                     demo_names = sort_demo_names(list(data.keys()))
 
                     keys: list[str] = []
+                    key_counts: dict[str, int] = {}
                     dataset_details: list[dict[str, Any]] = []
                     if demo_names:
-                        keys, dataset_details = collect_file_dataset_paths(data)
+                        keys, key_counts, dataset_details = collect_file_dataset_paths(data)
 
                     all_key_sets.append(set(keys))
                     file_infos.append({
@@ -450,6 +453,7 @@ class MergeHandler(BaseHTTPRequestHandler):
                         "demoCount": len(demo_names),
                         "demoNames": demo_names,
                         "keys": keys,
+                        "keyCounts": key_counts,
                         "datasetDetails": dataset_details,
                     })
 

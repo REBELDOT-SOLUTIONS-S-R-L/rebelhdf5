@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   FiChevronDown,
   FiChevronRight,
@@ -191,6 +191,44 @@ function buildKeyTree(keyInfos: DatasetProcessingKeyInfo[]): KeyTreeNode[] {
   }
 
   return sortKeyTreeNodes([...rootNodes.values()].map(finalizeNode));
+}
+
+function sumKeyInfos(keyInfos: readonly DatasetProcessingKeyInfo[]): DatasetProcessingKeyInfo[] {
+  const keyMap = new Map<string, DatasetProcessingKeyInfo>();
+
+  for (const keyInfo of keyInfos) {
+    const existing = keyMap.get(keyInfo.path);
+    if (existing) {
+      existing.availableInDemoCount += keyInfo.availableInDemoCount;
+      continue;
+    }
+
+    keyMap.set(keyInfo.path, { ...keyInfo });
+  }
+
+  return [...keyMap.values()].sort((left, right) => left.path.localeCompare(right.path));
+}
+
+function buildBackendKeyInfos(fileInfo: PythonScanResult['files'][number] | null): DatasetProcessingKeyInfo[] {
+  if (!fileInfo) {
+    return [];
+  }
+
+  if (fileInfo.keyCounts) {
+    return Object.entries(fileInfo.keyCounts)
+      .map(([path, availableInDemoCount]) => ({
+        path,
+        availableInDemoCount,
+      }))
+      .sort((left, right) => left.path.localeCompare(right.path));
+  }
+
+  return fileInfo.keys
+    .map((path) => ({
+      path,
+      availableInDemoCount: fileInfo.demoCount,
+    }))
+    .sort((left, right) => left.path.localeCompare(right.path));
 }
 
 function KeyTreeNodeItem({
@@ -510,6 +548,7 @@ function DatasetProcessingPage() {
   const [backendScan, setBackendScan] = useState<PythonScanResult | null>(null);
   const [backendLoading, setBackendLoading] = useState(false);
   const [backendError, setBackendError] = useState<string | null>(null);
+  const previousAvailableKeyPathsRef = useRef<string[]>([]);
 
   // Detect Python backend on mount.
   useEffect(() => {
@@ -712,7 +751,6 @@ function DatasetProcessingPage() {
         if (!cancelled) {
           setBackendScan(result);
           setBackendLoading(false);
-          setSelectedKeys((current) => current.length > 0 ? current : result.commonKeys);
         }
       })
       .catch((error: unknown) => {
@@ -781,54 +819,28 @@ function DatasetProcessingPage() {
     && selectedSourceStates.every((entry) => entry.source && entry.info && !entry.loading && !entry.error);
 
   const availableKeyInfos = useMemo(() => {
-    // When using the Python backend, derive keys from its scan result.
     if (useBackend && backendScan) {
-      const totalDemos = backendScan.files.reduce((sum, f) => sum + f.demoCount, 0);
-      return backendScan.commonKeys.map((path) => ({
-        path,
-        availableInDemoCount: totalDemos,
-      }));
+      if (operation === 'cut') {
+        const primaryFile = availableFiles.find((entry) => entry.url === primarySourceUrl) ?? null;
+        const primaryPath = primaryFile ? resolvedPaths[primaryFile.name] ?? null : null;
+        const primaryInfo = backendScan.files.find((entry) => entry.path === primaryPath) ?? null;
+        return buildBackendKeyInfos(primaryInfo);
+      }
+
+      return sumKeyInfos(backendScan.files.flatMap((fileInfo) => buildBackendKeyInfos(fileInfo)));
     }
 
     if (useBackend) {
       return [];
     }
 
+    if (operation === 'cut') {
+      return primarySourceState?.info?.keyPaths ?? [];
+    }
+
     const readySources = selectedSourceStates.filter((entry) => entry.info);
-    if (readySources.length === 0) {
-      return [];
-    }
-
-    // Inner join: only include keys present in every selected source.
-    const firstKeyPaths = new Set(
-      (readySources[0].info?.keyPaths ?? []).map((keyInfo) => keyInfo.path),
-    );
-
-    const commonPaths = new Set(
-      [...firstKeyPaths].filter((path) =>
-        readySources.every((entry) =>
-          entry.info?.keyPaths.some((keyInfo) => keyInfo.path === path),
-        ),
-      ),
-    );
-
-    // Use the highest demo count across sources for display.
-    const keyMap = new Map<string, DatasetProcessingKeyInfo>();
-    for (const entry of readySources) {
-      for (const keyInfo of entry.info?.keyPaths ?? []) {
-        if (!commonPaths.has(keyInfo.path)) {
-          continue;
-        }
-
-        const existing = keyMap.get(keyInfo.path);
-        if (!existing || existing.availableInDemoCount < keyInfo.availableInDemoCount) {
-          keyMap.set(keyInfo.path, keyInfo);
-        }
-      }
-    }
-
-    return [...keyMap.values()].sort((left, right) => left.path.localeCompare(right.path));
-  }, [backendScan, selectedSourceStates, useBackend]);
+    return sumKeyInfos(readySources.flatMap((entry) => entry.info?.keyPaths ?? []));
+  }, [availableFiles, backendScan, operation, primarySourceState, primarySourceUrl, resolvedPaths, selectedSourceStates, useBackend]);
 
   const availableKeySet = useMemo(
     () => new Set(availableKeyInfos.map((keyInfo) => keyInfo.path)),
@@ -843,14 +855,23 @@ function DatasetProcessingPage() {
   const collapsedGroupSet = useMemo(() => new Set(collapsedGroupPaths), [collapsedGroupPaths]);
 
   useEffect(() => {
+    const nextAvailableKeyPaths = availableKeyInfos.map((keyInfo) => keyInfo.path);
+    const previousAvailableKeyPaths = previousAvailableKeyPathsRef.current;
+
     setSelectedKeys((current) => {
       const filtered = current.filter((key) => availableKeySet.has(key));
-      if (filtered.length > 0) {
+      const hadAllPreviousKeysSelected = previousAvailableKeyPaths.length > 0
+        && current.length === previousAvailableKeyPaths.length
+        && previousAvailableKeyPaths.every((key) => current.includes(key));
+
+      if (filtered.length > 0 && !hadAllPreviousKeysSelected) {
         return filtered;
       }
 
-      return availableKeyInfos.map((keyInfo) => keyInfo.path);
+      return nextAvailableKeyPaths;
     });
+
+    previousAvailableKeyPathsRef.current = nextAvailableKeyPaths;
   }, [availableKeyInfos, availableKeySet]);
 
   const cutDemoNames = useMemo(() => {
@@ -1321,7 +1342,9 @@ function DatasetProcessingPage() {
               <div>
                 <h2 className={styles.sectionTitle}>Output Keys</h2>
                 <p className={styles.sectionText}>
-                  Choose which demo-level dataset paths will be copied into the output file.
+                  {operation === 'cut'
+                    ? 'Choose which demo-level dataset paths will be copied into the output file.'
+                    : 'Choose which demo-level dataset paths will be copied into the output file. Merge and append expose the union of selected source keys, and keys missing in a given demo are skipped for that demo.'}
                 </p>
               </div>
               <div className={styles.keyActions}>

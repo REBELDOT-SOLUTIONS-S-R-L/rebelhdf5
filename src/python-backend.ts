@@ -42,6 +42,7 @@ export interface PythonScanFileInfo {
   demoCount: number;
   demoNames: string[];
   keys: string[];
+  keyCounts?: Record<string, number>;
 }
 
 export interface PythonScanResult {
