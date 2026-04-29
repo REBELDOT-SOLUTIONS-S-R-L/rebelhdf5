@@ -21,6 +21,7 @@ import {
 } from './types';
 import type {
   ClothDistributionAnchor,
+  ClothDistributionSourceDiagnostics,
   ClothDistributionCategory,
   ClothDistributionPoint,
   ClothDistributionRequest,
@@ -928,15 +929,24 @@ function collectTeleopSources(
 ): {
   points: ClothDistributionPoint[];
   byDemoName: Record<string, TeleopSource[]>;
+  diagnostics: ClothDistributionSourceDiagnostics;
 } {
   const points: ClothDistributionPoint[] = [];
   const byDemoName: Record<string, TeleopSource[]> = {};
+  let missingAnchorCount = 0;
+  let missingObjectPositionsCount = 0;
 
   for (const demo of entry.demos) {
     const demoGroup = getDemoGroup(entry, demo.name);
     const xy = readAnchorXY(demoGroup, anchor);
+    if (!xy) {
+      missingAnchorCount += 1;
+      continue;
+    }
+
     const objectPositions = readObjectPositions(demoGroup, COMMON_CLOTH_KEYPOINTS);
-    if (!xy || !objectPositions) {
+    if (!objectPositions) {
+      missingObjectPositionsCount += 1;
       continue;
     }
 
@@ -969,7 +979,16 @@ function collectTeleopSources(
     });
   }
 
-  return { points, byDemoName };
+  return {
+    points,
+    byDemoName,
+    diagnostics: {
+      totalDemos: entry.demos.length,
+      includedDemos: points.length,
+      missingAnchorCount,
+      missingObjectPositionsCount,
+    },
+  };
 }
 
 function resolveClothSideSourceDetails(
@@ -1114,13 +1133,17 @@ function collectGeneratedClothPoints(
 
   for (const demo of entry.demos) {
     const demoGroup = getDemoGroup(entry, demo.name);
-    const xy = readAnchorXY(demoGroup, anchor);
-    const objectPositions = readObjectPositions(demoGroup, COMMON_CLOTH_KEYPOINTS);
-    if (!xy || !objectPositions) {
+    const initialPose = readInitialPose(demoGroup);
+    const anchorXY = readAnchorXY(demoGroup, anchor);
+    let xy: [number, number] | null = anchorXY;
+    if (!xy && initialPose && isFiniteNumber(initialPose[0]) && isFiniteNumber(initialPose[1])) {
+      xy = [roundFloat(initialPose[0]), roundFloat(initialPose[1])];
+    }
+    if (!xy) {
       continue;
     }
 
-    const initialPose = readInitialPose(demoGroup);
+    const objectPositions = readObjectPositions(demoGroup, COMMON_CLOTH_KEYPOINTS) ?? {};
     const leftIndices = readSourceDemoIndices(demoGroup, 'source_demo_indices/left_arm');
     const rightIndices = readSourceDemoIndices(demoGroup, 'source_demo_indices/right_arm');
     const leftSource = resolveClothSideSourceDetails(
@@ -1182,7 +1205,7 @@ function loadClothDistribution(
 
   const teleopCollection = teleopEntry
     ? collectTeleopSources(teleopEntry, request.anchor)
-    : { points: [], byDemoName: {} };
+    : { points: [], byDemoName: {}, diagnostics: null };
 
   return {
     anchor: request.anchor,
@@ -1205,6 +1228,7 @@ function loadClothDistribution(
         )
       : [],
     teleopPoints: teleopCollection.points,
+    teleopDiagnostics: teleopCollection.diagnostics,
   };
 }
 

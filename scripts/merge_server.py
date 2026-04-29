@@ -13,15 +13,18 @@ The web app auto-detects this server on localhost:4095 and offers to use it
 for all dataset processing operations.
 
 Requires: pip install h5py
+Optional: pip install 'databricks-sdk>=0.72.0' for faster single-file volume downloads
 """
 
 from __future__ import annotations
 
 import argparse
-import subprocess
 import json
+import os
+import subprocess
 import sys
 import threading
+import time
 import traceback
 from http import HTTPStatus
 from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -33,6 +36,25 @@ import h5py
 
 DEFAULT_PORT = 4095
 STREAM_CHUNK_SIZE = 4 * 1024 * 1024  # 4 MB for file download streaming
+DATABRICKS_FAST_UNAVAILABLE_EXIT = 3
+
+
+def databricks_download_parallelism() -> int:
+    raw_value = os.environ.get("DATABRICKS_DOWNLOAD_PARALLELISM", "16")
+    try:
+        return max(1, min(64, int(raw_value)))
+    except ValueError:
+        return 16
+
+
+def format_byte_count(size: int) -> str:
+    if size >= 1024 ** 3:
+        return f"{size / (1024 ** 3):.2f} GB"
+    if size >= 1024 ** 2:
+        return f"{size / (1024 ** 2):.1f} MB"
+    if size >= 1024:
+        return f"{size / 1024:.1f} KB"
+    return f"{size} B"
 
 
 # ---------------------------------------------------------------------------
@@ -803,9 +825,76 @@ class MergeHandler(BaseHTTPRequestHandler):
                 self.wfile.write(line.encode())
                 self.wfile.flush()
 
-            Path(dst).parent.mkdir(parents=True, exist_ok=True)
+            dst_path = Path(dst)
+            dst_path.parent.mkdir(parents=True, exist_ok=True)
             send_event({"type": "start", "src": dbfs_src, "dst": dst})
 
+            def send_process_output(output: str) -> None:
+                for raw_line in output.strip().splitlines():
+                    stripped = raw_line.strip()
+                    if stripped:
+                        send_event({"type": "output", "line": stripped})
+
+            def try_fast_download() -> bool:
+                if not dbfs_src.startswith("dbfs:/Volumes/"):
+                    return False
+
+                parallelism = databricks_download_parallelism()
+                helper = Path(__file__).resolve().with_name("databricks_fast_download.py")
+                send_event({
+                    "type": "output",
+                    "line": f"Trying SDK parallel range download ({parallelism} workers).",
+                })
+
+                fast_proc = subprocess.Popen(
+                    [
+                        sys.executable,
+                        str(helper),
+                        dbfs_src,
+                        str(dst_path),
+                        "--parallelism",
+                        str(parallelism),
+                    ],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                )
+
+                last_reported_size = -1
+                while fast_proc.poll() is None:
+                    if dst_path.exists():
+                        current_size = dst_path.stat().st_size
+                        if current_size != last_reported_size:
+                            send_event({
+                                "type": "output",
+                                "line": f"Downloaded {format_byte_count(current_size)}.",
+                            })
+                            last_reported_size = current_size
+                    time.sleep(1)
+
+                output = fast_proc.stdout.read() if fast_proc.stdout else ""
+                if fast_proc.returncode == 0:
+                    send_process_output(output)
+                    return True
+                if fast_proc.returncode == DATABRICKS_FAST_UNAVAILABLE_EXIT:
+                    send_process_output(output)
+                    return False
+
+                send_process_output(output)
+                if not dst_path.exists():
+                    send_event({
+                        "type": "output",
+                        "line": "SDK parallel download failed before creating a file; trying CLI fallback.",
+                    })
+                    return False
+
+                raise RuntimeError(output.strip() or f"Fast download exited with code {fast_proc.returncode}")
+
+            if try_fast_download():
+                send_event({"type": "done", "dst": dst})
+                return
+
+            send_event({"type": "output", "line": "Falling back to databricks fs cp."})
             proc = subprocess.Popen(
                 ["databricks", "fs", "cp", dbfs_src, dst],
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,

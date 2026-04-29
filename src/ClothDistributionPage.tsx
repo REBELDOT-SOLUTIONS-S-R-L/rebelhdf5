@@ -103,8 +103,14 @@ function looksLikeFailed(file: H5File): boolean {
   return /failed/i.test(file.name);
 }
 
+function matchesTeleopHint(value: string): boolean {
+  return /(teleop|annotated)/i.test(value);
+}
+
 function looksLikeTeleop(file: H5File): boolean {
-  return /(teleop|annotated)/i.test(file.name);
+  return matchesTeleopHint(file.name)
+    || matchesTeleopHint(file.url)
+    || matchesTeleopHint(file.resolvedUrl);
 }
 
 function guessSuccessDataset(files: H5File[]): string | null {
@@ -141,6 +147,10 @@ function analysisTitle(tab: ClothViewTab): string {
 
 function formatPercent(value: number): string {
   return `${(value * 100).toFixed(1)}%`;
+}
+
+function formatSupport(value: number): string {
+  return value.toFixed(2);
 }
 
 function formatRange(start: number, end: number, unit: string): string {
@@ -382,6 +392,34 @@ function ClothDistributionPage() {
     return '';
   }, [analysisResult, hasAnalysisDatasets, loading]);
 
+  const teleopMessage = useMemo(() => {
+    if (
+      loading
+      || loadError
+      || !teleopUrl
+      || !teleopState.source
+      || !result
+      || result.teleopPoints.length > 0
+    ) {
+      return '';
+    }
+
+    const diagnostics = result.teleopDiagnostics;
+    if (!diagnostics || diagnostics.totalDemos === 0) {
+      return '';
+    }
+
+    if (diagnostics.missingAnchorCount === diagnostics.totalDemos && anchor === 'initial_pose') {
+      return 'Selected teleop dataset does not expose initial-state poses, so it cannot be plotted with Anchor = Initial Pose. Switch to a garment anchor such as garment_center.';
+    }
+
+    if (diagnostics.missingObjectPositionsCount === diagnostics.totalDemos) {
+      return 'Selected teleop dataset does not expose the garment object-pose keypoints required by cloth distribution.';
+    }
+
+    return `Selected teleop dataset contributed 0 of ${diagnostics.totalDemos} demos for the current anchor.`;
+  }, [anchor, loadError, loading, result, teleopState.source, teleopUrl]);
+
   const plotRevision = useMemo(
     () => hashRevisionKey([
       activeTab,
@@ -591,7 +629,7 @@ function ClothDistributionPage() {
                 <>
                   <div className={styles.field}>
                     <label className={styles.fieldLabel} htmlFor="cloth-min-support">
-                      Min Generated Count
+                      Min Neighborhood Support
                     </label>
                     <select
                       id="cloth-min-support"
@@ -657,17 +695,18 @@ function ClothDistributionPage() {
                     {analysisResult?.stats.analyzedTeleopCount ?? 0}
                   </div>
                   <div className={styles.statusItem}>
-                    <span className={styles.statusKey}>Cell Support:</span> {minGeneratedCount}+
+                    <span className={styles.statusKey}>Min Support:</span> {minGeneratedCount}+
                   </div>
                 </>
               )}
             </div>
           </section>
 
-          {(loadError || loading) && (
+          {(loadError || loading || teleopMessage) && (
             <section className={styles.messageCard}>
               {loadError && <p className={styles.errorText}>{loadError}</p>}
               {loading && <p className={styles.infoText}>Loading cloth-distribution data…</p>}
+              {!loadError && !loading && teleopMessage && <p className={styles.infoText}>{teleopMessage}</p>}
             </section>
           )}
 
@@ -700,8 +739,8 @@ function ClothDistributionPage() {
                   <p className={styles.recommendationsEyebrow}>Recommendations</p>
                   <h2 className={styles.recommendationsTitle}>Teleop Candidate Regions</h2>
                   <p className={styles.recommendationsText}>
-                    Ranked from the spatial-slice grid using failure rate, failed-count density,
-                    and low teleop coverage.
+                    Ranked from connected high-risk neighborhoods in the spatial slices, using
+                    failure confidence, local support, and nearby teleop density.
                   </p>
                 </div>
               </div>
@@ -712,7 +751,7 @@ function ClothDistributionPage() {
 
               {analysisResult && analysisResult.recommendations.length === 0 && (
                 <p className={styles.infoText}>
-                  No under-covered failure regions met the current generated-count threshold.
+                  No connected high-risk regions met the current neighborhood-support threshold.
                 </p>
               )}
 
@@ -722,7 +761,11 @@ function ClothDistributionPage() {
                     <article key={`${recommendation.sliceRowIndex}-${recommendation.sliceColIndex}-${index}`} className={styles.recommendationItem}>
                       <div className={styles.recommendationRank}>#{index + 1}</div>
                       <p className={styles.recommendationRate}>
-                        {formatPercent(recommendation.failureRate)} fail
+                        {formatPercent(recommendation.failureRate)} local fail
+                      </p>
+                      <p className={styles.recommendationLine}>
+                        <span className={styles.recommendationLabel}>95% ci</span>
+                        {formatPercent(recommendation.confidenceLower)} to {formatPercent(recommendation.confidenceUpper)}
                       </p>
                       <p className={styles.recommendationLine}>
                         <span className={styles.recommendationLabel}>rot x</span>
@@ -741,12 +784,20 @@ function ClothDistributionPage() {
                         {formatRange(recommendation.yStart, recommendation.yEnd, 'm')}
                       </p>
                       <p className={styles.recommendationLine}>
-                        <span className={styles.recommendationLabel}>generated</span>
-                        {recommendation.totalGeneratedCount} total ({recommendation.failedCount} failed / {recommendation.successCount} success)
+                        <span className={styles.recommendationLabel}>support</span>
+                        {formatSupport(recommendation.smoothedGeneratedSupport)} total / {formatSupport(recommendation.smoothedFailedSupport)} failed
                       </p>
                       <p className={styles.recommendationLine}>
-                        <span className={styles.recommendationLabel}>teleop</span>
-                        {recommendation.teleopCount}
+                        <span className={styles.recommendationLabel}>teleop dens.</span>
+                        {formatSupport(recommendation.teleopDensity)}
+                      </p>
+                      <p className={styles.recommendationLine}>
+                        <span className={styles.recommendationLabel}>confidence</span>
+                        {formatPercent(recommendation.confidenceScore)}
+                      </p>
+                      <p className={styles.recommendationLine}>
+                        <span className={styles.recommendationLabel}>region cells</span>
+                        {recommendation.cellCount}
                       </p>
                     </article>
                   ))}

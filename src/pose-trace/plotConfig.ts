@@ -477,33 +477,65 @@ function buildFailureHeatmapTrace(
     type: 'heatmap',
     x: plane.bins[0]?.map((bin) => bin.xCenter) ?? [],
     y: plane.bins.map((row) => row[0]?.yCenter ?? 0),
-    z: plane.bins.map((row) => row.map((bin) => (bin.masked ? null : bin.failureRate))),
+    z: plane.bins.map((row) => row.map((bin) => (bin.masked ? null : bin.displayFailureRate))),
     customdata: plane.bins.map((row) => row.map((bin) => [
       bin.xStart,
       bin.xEnd,
       bin.yStart,
       bin.yEnd,
-      bin.failedCount,
-      bin.successCount,
-      bin.totalGeneratedCount,
-      bin.teleopCount,
       bin.failureRate,
+      bin.confidenceLower,
+      bin.confidenceUpper,
+      bin.confidenceScore,
+      bin.smoothedGeneratedSupport,
+      bin.smoothedFailedSupport,
+      bin.teleopDensity,
+      bin.rawGeneratedCount,
+      bin.rawTeleopCount,
     ])),
     hoverongaps: false,
     hovertemplate: [
       `${plane.xLabel} range: %{customdata[0]:.4f} to %{customdata[1]:.4f}`,
       `${plane.yLabel} range: %{customdata[2]:.4f} to %{customdata[3]:.4f}`,
-      'failure rate: %{customdata[8]:.1%}',
-      'failed: %{customdata[4]}',
-      'success: %{customdata[5]}',
-      'total generated: %{customdata[6]}',
-      'teleop: %{customdata[7]}',
+      'local failure rate: %{customdata[4]:.1%}',
+      '95% interval: %{customdata[5]:.1%} to %{customdata[6]:.1%}',
+      'confidence: %{customdata[7]:.1%}',
+      'smoothed support: %{customdata[8]:.2f}',
+      'smoothed failed support: %{customdata[9]:.2f}',
+      'nearby teleop density: %{customdata[10]:.2f}',
+      'raw generated in cell: %{customdata[11]}',
+      'raw teleop in cell: %{customdata[12]}',
       '<extra></extra>',
     ].join('<br>'),
     coloraxis: 'coloraxis',
     showscale: showScale,
     xaxis: axisRefs?.x,
     yaxis: axisRefs?.y,
+  };
+
+  return trace as unknown as Data;
+}
+
+function buildFailureSupportContourTrace(
+  plane: FailurePlane,
+): Data {
+  const trace: Record<string, unknown> = {
+    type: 'contour',
+    x: plane.bins[0]?.map((bin) => bin.xCenter) ?? [],
+    y: plane.bins.map((row) => row[0]?.yCenter ?? 0),
+    z: plane.bins.map((row) => row.map((bin) => (bin.masked ? 0 : bin.smoothedGeneratedSupport))),
+    contours: {
+      coloring: 'none',
+      showlabels: false,
+    },
+    line: {
+      color: 'rgba(255,255,255,0.38)',
+      width: 1,
+      smoothing: 0.85,
+    },
+    hoverinfo: 'skip',
+    showscale: false,
+    showlegend: false,
   };
 
   return trace as unknown as Data;
@@ -555,7 +587,10 @@ export function buildFailureMapData(
   plane: FailurePlane,
   showTeleopOverlay: boolean,
 ): Data[] {
-  const traces: Data[] = [buildFailureHeatmapTrace(plane)];
+  const traces: Data[] = [
+    buildFailureHeatmapTrace(plane),
+    buildFailureSupportContourTrace(plane),
+  ];
   const overlayTrace = showTeleopOverlay ? buildFailureOverlayTrace(plane) : null;
   if (overlayTrace) {
     traces.push(overlayTrace);
@@ -607,7 +642,7 @@ export function buildFailureMapLayout(
     cmax: 1,
     colorscale: FAILURE_COLORSCALE,
     colorbar: {
-      title: { text: 'failure rate' },
+      title: { text: 'weighted fail rate' },
       tickformat: '.0%',
     },
   };
@@ -688,7 +723,7 @@ export function buildFailureSliceLayout(
     cmax: 1,
     colorscale: FAILURE_COLORSCALE,
     colorbar: {
-      title: { text: 'failure rate' },
+      title: { text: 'weighted fail rate' },
       tickformat: '.0%',
     },
   };

@@ -71,11 +71,19 @@ export interface ClothDistributionRequest {
   includeRandomSelections: boolean;
 }
 
+export interface ClothDistributionSourceDiagnostics {
+  totalDemos: number;
+  includedDemos: number;
+  missingAnchorCount: number;
+  missingObjectPositionsCount: number;
+}
+
 export interface ClothDistributionResult {
   anchor: ClothDistributionAnchor;
   successPoints: ClothDistributionPoint[];
   failedPoints: ClothDistributionPoint[];
   teleopPoints: ClothDistributionPoint[];
+  teleopDiagnostics: ClothDistributionSourceDiagnostics | null;
 }
 
 export interface DemoVideoInfo {
