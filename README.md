@@ -1,12 +1,9 @@
 ## Dataset tooling — rebelHDF5
 
-The training pipeline runs entirely on HDF5 files (Isaac Lab + MimicGen output).
+Our training pipeline runs entirely on HDF5 files (Isaac Lab + MimicGen output).
 Open-source MyHDF5 was a good starting point for raw inspection but didn't fit
 robotics workflows, so we forked it into **rebelHDF5** and added the features
 we actually needed to iterate on dataset quality.
-
-Project link:
-https://github.com/alex-luci/myhdf5/tree/pose-trace-integration
 
 ![rebelHDF5 viewer](screenshots/rebelhdf5-viewer.png)
 
@@ -82,3 +79,58 @@ https://github.com/alex-luci/myhdf5/tree/pose-trace-integration
 Net effect: HDF5s stopped being opaque archives and became interactive dataset
 assets, which is what made the synthetic pipeline above tractable to debug at
 scale.
+
+## DATASET STRUCTURE
+
+<pre>
+data/
+├── demo_&lt;N&gt;/
+│   ├── actions                         <span style="color:#6b7280;"># (T, 16) EEF pose + gripper</span>
+│   │
+│   ├── initial_state/
+│   │   ├── articulation/
+│   │   │   └── articulation_&lt;N&gt;/
+│   │   │       └── joint_positions
+│   │   └── object_pose/
+│   │       └── object_&lt;N&gt;
+│   │
+│   └── obs/
+│       ├── actions                     <span style="color:#6b7280;"># (T, 12) joint-space target actions</span>
+│       │
+│       ├── datagen_info/
+│       │   ├── eef_pose/
+│       │   │   └── eef_&lt;N&gt;
+│       │   ├── object_pose/
+│       │   │   └── object_&lt;N&gt;
+│       │   ├── subtask_term_signals/
+│       │   │   └── signal_&lt;N&gt;
+│       │   └── target_eef_pose/
+│       │       └── eef_&lt;N&gt;
+│       │
+│       ├── articulation_state/          <span style="color:#6b7280;"># (T, ...) joint-space joint state</span>
+│       │   └── articulation_&lt;N&gt;_joint_positions
+│       │
+│       ├── end_effectors/
+│       │   └── eef_&lt;N&gt;_pose
+│       │
+│       ├── cameras/
+│       │   └── camera_&lt;N&gt;
+│       │
+│       └── sensors/
+│           └── sensor_&lt;N&gt;
+</pre>
+## Attribution
+
+This project is based on work originally developed by the European Synchrotron Radiation Facility.
+
+Original project:
+- Copyright (c) 2022 European Synchrotron Radiation Facility
+- Licensed under the MIT License
+
+Modifications and extensions in this repository include additional features such as:
+- Pose trajectory visualization
+- HDF5 to video conversion tools
+- Dataset processing utilities (merge, split, append)
+- Cloth distribution analysis tools
+
+All original code is used in accordance with the terms of the MIT License. A copy of the original license is included in this repository
