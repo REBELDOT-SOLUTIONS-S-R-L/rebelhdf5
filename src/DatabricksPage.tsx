@@ -12,11 +12,15 @@ import {
   FiXCircle,
 } from 'react-icons/fi';
 
-import { checkBackend, type PythonBackendStatus } from './python-backend';
+import {
+  PYTHON_BACKEND_BASE_URL,
+  pollBackendStatus,
+  type PythonBackendStatus,
+} from './python-backend';
 import { useStore } from './stores';
 import styles from './DatabricksPage.module.css';
 
-const BASE_URL = 'http://localhost:4095';
+const BASE_URL = PYTHON_BACKEND_BASE_URL;
 
 const VOLUMES = [
   'workspace.default.mimicgen_annotated_hdf5_datasets',
@@ -652,13 +656,7 @@ function DatabricksPage() {
   const [backend, setBackend] = useState<PythonBackendStatus>({ available: false, rootDir: null, version: null });
 
   useEffect(() => {
-    let cancelled = false;
-    void checkBackend().then((status) => {
-      if (!cancelled) {
-        setBackend(status);
-      }
-    });
-    return () => { cancelled = true; };
+    return pollBackendStatus(setBackend);
   }, []);
 
   return (

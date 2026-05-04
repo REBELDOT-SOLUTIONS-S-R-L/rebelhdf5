@@ -27,16 +27,30 @@ import threading
 import time
 import traceback
 from http import HTTPStatus
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Generator
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 import h5py
 
 DEFAULT_PORT = 4095
 STREAM_CHUNK_SIZE = 4 * 1024 * 1024  # 4 MB for file download streaming
 DATABRICKS_FAST_UNAVAILABLE_EXIT = 3
+INDEX_SKIP_DIRS = {
+    ".cache",
+    ".git",
+    ".hg",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".svn",
+    ".venv",
+    "__pycache__",
+    "build",
+    "dist",
+    "node_modules",
+}
 
 
 def databricks_download_parallelism() -> int:
@@ -55,6 +69,20 @@ def format_byte_count(size: int) -> str:
     if size >= 1024:
         return f"{size / 1024:.1f} KB"
     return f"{size} B"
+
+
+def iter_hdf5_files(root: Path) -> Generator[Path, None, None]:
+    """Yield HDF5 files while pruning directories that are expensive and irrelevant."""
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [
+            dirname
+            for dirname in dirnames
+            if dirname not in INDEX_SKIP_DIRS
+        ]
+
+        for filename in filenames:
+            if filename.lower().endswith((".hdf5", ".h5")):
+                yield Path(dirpath) / filename
 
 
 # ---------------------------------------------------------------------------
@@ -283,7 +311,7 @@ class MergeHandler(BaseHTTPRequestHandler):
     def handle(self) -> None:
         try:
             super().handle()
-        except BrokenPipeError:
+        except (BrokenPipeError, ConnectionResetError):
             pass  # Client disconnected before response was sent (e.g. health check timeout).
 
     def log_message(self, fmt: str, *args: Any) -> None:
@@ -335,7 +363,7 @@ class MergeHandler(BaseHTTPRequestHandler):
             return self._handle_files(directory, recursive=recursive)
 
         if path.startswith("/api/download/"):
-            filename = path[len("/api/download/"):]
+            filename = unquote(path[len("/api/download/"):])
             return self._handle_download(filename)
 
         if path == "/api/databricks/job-status":
@@ -389,10 +417,15 @@ class MergeHandler(BaseHTTPRequestHandler):
     # -- Handlers -----------------------------------------------------------
 
     def _handle_health(self) -> None:
+        index_status = self.server.index_status()
         self._json_response({
             "status": "ok",
             "rootDir": self.server.root_dir,
-            "version": 3,
+            "version": 4,
+            "indexing": index_status["indexing"],
+            "indexReady": index_status["ready"],
+            "indexedFileCount": index_status["count"],
+            "indexError": index_status["error"],
         })
 
     def _resolve_file(self, filename: str) -> Path | None:
@@ -406,21 +439,29 @@ class MergeHandler(BaseHTTPRequestHandler):
                 return self._error(400, f"Not a directory: {directory}")
 
             files = []
-            patterns = ("**/*.hdf5", "**/*.h5") if recursive else ("*.hdf5", "*.h5")
-            for ext in patterns:
-                for p in sorted(base.glob(ext)):
-                    relative_path = None
-                    try:
-                        relative_path = str(p.relative_to(base))
-                    except ValueError:
-                        relative_path = str(p)
+            paths = (
+                sorted(iter_hdf5_files(base))
+                if recursive
+                else sorted(
+                    p
+                    for p in base.iterdir()
+                    if p.is_file() and p.name.lower().endswith((".hdf5", ".h5"))
+                )
+            )
 
-                    files.append({
-                        "name": p.name,
-                        "path": str(p),
-                        "relativePath": relative_path,
-                        "size": p.stat().st_size,
-                    })
+            for p in paths:
+                relative_path = None
+                try:
+                    relative_path = str(p.relative_to(base))
+                except ValueError:
+                    relative_path = str(p)
+
+                files.append({
+                    "name": p.name,
+                    "path": str(p),
+                    "relativePath": relative_path,
+                    "size": p.stat().st_size,
+                })
 
             self._json_response({
                 "directory": str(base),
@@ -441,7 +482,23 @@ class MergeHandler(BaseHTTPRequestHandler):
                 path = self._resolve_file(name)
                 resolved[name] = str(path) if path else None
 
-            self._json_response({"resolved": resolved})
+            if any(path is None for path in resolved.values()):
+                self.server.ensure_file_index()
+                if self.server.index_status()["ready"]:
+                    for name, path in resolved.items():
+                        if path is not None:
+                            continue
+                        next_path = self._resolve_file(name)
+                        resolved[name] = str(next_path) if next_path else None
+
+            index_status = self.server.index_status()
+            self._json_response({
+                "resolved": resolved,
+                "indexing": index_status["indexing"],
+                "indexReady": index_status["ready"],
+                "indexedFileCount": index_status["count"],
+                "indexError": index_status["error"],
+            })
         except Exception as exc:
             self._error(500, str(exc))
 
@@ -918,33 +975,82 @@ class MergeHandler(BaseHTTPRequestHandler):
                 pass
 
 
-class MergeServer(HTTPServer):
+class MergeServer(ThreadingHTTPServer):
+    allow_reuse_address = True
+    daemon_threads = True
+
     def __init__(self, port: int, root_dir: str, output_dir: str) -> None:
         self.root_dir = str(Path(root_dir).resolve())
         self.output_dir = output_dir
         self._outputs: dict[str, Path] = {}
         self._lock = threading.Lock()
+        self._index_lock = threading.Lock()
+        self._index_ready = False
+        self._indexing = False
+        self._index_error: str | None = None
         self._file_index: dict[str, Path] = {}
         super().__init__(("0.0.0.0", port), MergeHandler)
-        self._build_file_index()
+
+    def ensure_file_index(self) -> None:
+        """Start the fallback basename index only when legacy resolution needs it."""
+        with self._index_lock:
+            if self._index_ready or self._indexing:
+                return
+            self._indexing = True
+            self._index_ready = False
+            self._index_error = None
+
+        thread = threading.Thread(
+            target=self._build_file_index,
+            name="hdf5-file-index",
+            daemon=True,
+        )
+        thread.start()
 
     def _build_file_index(self) -> None:
         """Build an index mapping filenames to paths for fast lookups."""
         root = Path(self.root_dir)
         index: dict[str, Path] = {}
-        for ext in ("*.hdf5", "*.h5"):
-            for p in root.rglob(ext):
-                if p.is_file():
-                    # First match wins — don't overwrite.
-                    if p.name not in index:
-                        index[p.name] = p
+        start = time.monotonic()
 
-        self._file_index = index
-        print(f"  Indexed {len(index)} HDF5 file(s) under {self.root_dir}")
+        try:
+            for p in iter_hdf5_files(root):
+                if p.is_file() and p.name not in index:
+                    index[p.name] = p
+                    with self._index_lock:
+                        # Make files discoverable as soon as they are found.
+                        self._file_index.setdefault(p.name, p)
+
+            with self._index_lock:
+                self._file_index = index
+                self._index_ready = True
+                self._indexing = False
+
+            elapsed = time.monotonic() - start
+            print(
+                f"  Indexed {len(index)} HDF5 file(s) under {self.root_dir} "
+                f"in {elapsed:.1f}s",
+                flush=True,
+            )
+        except Exception as exc:
+            with self._index_lock:
+                self._index_error = str(exc)
+                self._indexing = False
+            print(f"  File index failed: {exc}", file=sys.stderr, flush=True)
+
+    def index_status(self) -> dict[str, Any]:
+        with self._index_lock:
+            return {
+                "ready": self._index_ready,
+                "indexing": self._indexing,
+                "count": len(self._file_index),
+                "error": self._index_error,
+            }
 
     def resolve_file(self, filename: str) -> Path | None:
         """Resolve a filename to a path using the cached index."""
-        cached = self._file_index.get(filename)
+        with self._index_lock:
+            cached = self._file_index.get(filename)
         if cached and cached.is_file():
             return cached
 
@@ -952,7 +1058,8 @@ class MergeServer(HTTPServer):
         p = Path(filename)
         if p.is_file():
             # Add to index for next time.
-            self._file_index[p.name] = p
+            with self._index_lock:
+                self._file_index[p.name] = p
             return p
 
         return None
@@ -988,11 +1095,11 @@ def main() -> None:
     Path(output_dir).mkdir(parents=True, exist_ok=True)
 
     server = MergeServer(args.port, root_dir, output_dir)
-    print(f"HDF5 Processing Server")
-    print(f"  Root dir:   {root_dir}")
-    print(f"  Output dir: {output_dir}")
-    print(f"  Listening:  http://localhost:{args.port}")
-    print(f"\nThe web app will auto-detect this server. Press Ctrl+C to stop.\n")
+    print(f"HDF5 Processing Server", flush=True)
+    print(f"  Root dir:   {root_dir}", flush=True)
+    print(f"  Output dir: {output_dir}", flush=True)
+    print(f"  Listening:  http://localhost:{args.port}", flush=True)
+    print(f"\nThe web app will auto-detect this server. Press Ctrl+C to stop.\n", flush=True)
 
     try:
         server.serve_forever()

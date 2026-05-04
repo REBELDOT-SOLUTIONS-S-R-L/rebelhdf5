@@ -13,14 +13,20 @@ import type {
   DatasetProcessingResultMeta,
 } from './pose-trace/types';
 
-const DEFAULT_PORT = 4095;
-const BASE_URL = `http://localhost:${DEFAULT_PORT}`;
-const HEALTH_TIMEOUT_MS = 5000;
+const DEFAULT_PORT = __MERGE_SERVER_PORT__;
+const BASE_URL = `http://127.0.0.1:${DEFAULT_PORT}`;
+const HEALTH_TIMEOUT_MS = 2000;
+
+export const PYTHON_BACKEND_BASE_URL = BASE_URL;
 
 export interface PythonBackendStatus {
   available: boolean;
   rootDir: string | null;
   version: number | null;
+  indexing?: boolean;
+  indexReady?: boolean;
+  indexedFileCount?: number;
+  indexError?: string | null;
 }
 
 export interface PythonFileEntry {
@@ -34,6 +40,14 @@ export interface PythonFileListingResult {
   directory: string;
   recursive: boolean;
   files: PythonFileEntry[];
+}
+
+export interface PythonResolvedFilesResult {
+  resolved: Record<string, string | null>;
+  indexing?: boolean;
+  indexReady?: boolean;
+  indexedFileCount?: number;
+  indexError?: string | null;
 }
 
 export interface PythonScanFileInfo {
@@ -77,32 +91,77 @@ async function parseErrorResponse(response: Response): Promise<string> {
 }
 
 /** Check whether the Python server is running. */
-export async function checkBackend(): Promise<PythonBackendStatus> {
-  try {
-    const controller = new AbortController();
-    const timeout = globalThis.setTimeout(() => {
-      controller.abort();
-    }, HEALTH_TIMEOUT_MS);
+export async function checkBackend(timeoutMs = HEALTH_TIMEOUT_MS): Promise<PythonBackendStatus> {
+  const controller = new AbortController();
+  const timeout = globalThis.setTimeout(() => {
+    controller.abort();
+  }, timeoutMs);
 
+  try {
     const response = await fetch(`${BASE_URL}/api/health`, {
       signal: controller.signal,
     });
-
-    globalThis.clearTimeout(timeout);
 
     if (!response.ok) {
       return { available: false, rootDir: null, version: null };
     }
 
-    const data: { status: string; rootDir: string; version?: number } = await response.json();
+    const data: {
+      status: string;
+      rootDir: string;
+      version?: number;
+      indexing?: boolean;
+      indexReady?: boolean;
+      indexedFileCount?: number;
+      indexError?: string | null;
+    } = await response.json();
     return {
       available: data.status === 'ok',
       rootDir: data.rootDir,
       version: Number.isFinite(data.version) ? data.version ?? null : null,
+      indexing: data.indexing,
+      indexReady: data.indexReady,
+      indexedFileCount: data.indexedFileCount,
+      indexError: data.indexError ?? null,
     };
   } catch {
     return { available: false, rootDir: null, version: null };
+  } finally {
+    globalThis.clearTimeout(timeout);
   }
+}
+
+export function pollBackendStatus(
+  onStatus: (status: PythonBackendStatus) => void,
+  unavailableIntervalMs = 1000,
+  availableIntervalMs = 10000,
+): () => void {
+  let cancelled = false;
+  let timeoutId: ReturnType<typeof globalThis.setTimeout> | null = null;
+
+  async function tick() {
+    const status = await checkBackend();
+    if (cancelled) {
+      return;
+    }
+
+    onStatus(status);
+    timeoutId = globalThis.setTimeout(
+      () => {
+        void tick();
+      },
+      status.available && !status.indexing ? availableIntervalMs : unavailableIntervalMs,
+    );
+  }
+
+  void tick();
+
+  return () => {
+    cancelled = true;
+    if (timeoutId) {
+      globalThis.clearTimeout(timeoutId);
+    }
+  };
 }
 
 /** List HDF5 files in a directory on the server. */
@@ -132,7 +191,7 @@ export async function listFiles(
 /** Resolve filenames to absolute paths on the server. */
 export async function resolveFiles(
   names: string[],
-): Promise<Record<string, string | null>> {
+): Promise<PythonResolvedFilesResult> {
   const response = await fetch(`${BASE_URL}/api/resolve-files`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -143,8 +202,8 @@ export async function resolveFiles(
     throw new Error(await parseErrorResponse(response));
   }
 
-  const data: { resolved: Record<string, string | null> } = await response.json();
-  return data.resolved;
+  const data: PythonResolvedFilesResult = await response.json();
+  return data;
 }
 
 /** Scan files for their keys and demo counts. */

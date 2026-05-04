@@ -5,6 +5,8 @@ import react from '@vitejs/plugin-react-swc';
 import { type Plugin, defineConfig } from 'vite';
 import { checker } from 'vite-plugin-checker';
 
+const mergeServerPort = Number(process.env.MERGE_SERVER_PORT) || 4095;
+
 /**
  * Vite plugin that starts scripts/merge_server.py alongside the dev server.
  *
@@ -15,7 +17,7 @@ import { checker } from 'vite-plugin-checker';
  */
 function mergeServer(): Plugin {
   let child: ChildProcess | null = null;
-  const port = Number(process.env.MERGE_SERVER_PORT) || 4095;
+  const port = mergeServerPort;
   const dir = process.env.MERGE_SERVER_DIR || path.resolve(__dirname, '..');
 
   function kill() {
@@ -36,6 +38,7 @@ function mergeServer(): Plugin {
 
       child = spawn('python3', [script, '--dir', dir, '--port', String(port)], {
         stdio: ['ignore', 'pipe', 'pipe'],
+        env: { ...process.env, PYTHONUNBUFFERED: '1' },
       });
 
       child.stdout?.on('data', (data: Buffer) => {
@@ -59,6 +62,11 @@ function mergeServer(): Plugin {
         child = null;
       });
 
+      child.on('error', (error) => {
+        console.error(`  [merge-server] failed to start: ${error.message}`);
+        child = null;
+      });
+
       // Clean up on Vite shutdown.
       process.on('exit', kill);
       process.on('SIGINT', kill);
@@ -73,6 +81,9 @@ function mergeServer(): Plugin {
 
 export default defineConfig({
   server: { open: true },
+  define: {
+    __MERGE_SERVER_PORT__: JSON.stringify(mergeServerPort),
+  },
   plugins: [
     react(),
     { ...checker({ typescript: true }), apply: 'serve' }, // dev only to reduce build time
