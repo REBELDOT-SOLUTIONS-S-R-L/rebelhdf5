@@ -1,0 +1,305 @@
+.root {
+  composes: page from './utils.module.css';
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  padding-left: clamp(1.75rem, 3vw, 3.5rem);
+  padding-right: clamp(1.75rem, 3vw, 3.5rem);
+  gap: 1.5rem;
+  overflow-y: auto;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+}
+
+.eyebrow {
+  margin: 0;
+  color: var(--color-gray);
+  font-size: 0.82em;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.title {
+  margin: 0.25rem 0 0;
+  color: var(--color-gray);
+  font-family: var(--font-logo);
+  font-size: clamp(2.1em, 3vw, 2.8em);
+  font-weight: normal;
+}
+
+.subtitle {
+  max-width: 64rem;
+  margin: 0.5rem 0 0;
+  color: var(--color-gray);
+}
+
+.card {
+  padding: 1.25rem 1.5rem;
+  background: var(--color-surface-alt);
+  border: 1px solid var(--color-border);
+  border-radius: 1rem;
+  box-shadow: 0 0.75rem 1.75rem var(--color-shadow-soft);
+}
+
+.controlsCard {
+  composes: card;
+  width: 100%;
+}
+
+.tabBar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  margin-bottom: 1rem;
+}
+
+.tabBtn {
+  composes: btnClean from global;
+  min-height: 2.5rem;
+  padding: 0.6rem 0.95rem;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--color-gray);
+  transition:
+    background-color 0.2s ease-out,
+    border-color 0.2s ease-out,
+    color 0.2s ease-out;
+}
+
+.tabBtn:hover {
+  background: rgba(255, 208, 0, 0.12);
+  border-color: rgba(255, 208, 0, 0.4);
+}
+
+.tabBtnActive {
+  composes: tabBtn;
+  border-color: rgba(255, 208, 0, 0.55);
+  background: rgba(255, 208, 0, 0.16);
+  color: var(--color-heading);
+}
+
+.controlGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  align-items: end;
+}
+
+.field {
+  min-width: 0;
+}
+
+.fieldLabel {
+  display: block;
+  margin-bottom: 0.5rem;
+  color: var(--color-gray);
+  font-size: 0.82em;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.select {
+  composes: input from './utils.module.css';
+  width: 100%;
+  min-height: 2.75rem;
+  color: var(--color-gray);
+  background: var(--color-input-bg);
+}
+
+.checkboxField {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  min-height: 2.75rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--color-border);
+  border-radius: 0.85rem;
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--color-gray);
+  cursor: pointer;
+}
+
+.checkboxField input {
+  flex: 0 0 auto;
+  margin: 0;
+  accent-color: #ffd000;
+}
+
+.checkboxField span {
+  min-width: 0;
+}
+
+.statusRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.5rem;
+  margin-top: 1rem;
+}
+
+.statusItem {
+  color: var(--color-gray);
+}
+
+.statusKey {
+  font-weight: 700;
+}
+
+.messageCard {
+  composes: card;
+  width: 100%;
+}
+
+.errorText {
+  margin: 0;
+  color: var(--color-danger);
+}
+
+.infoText {
+  margin: 0;
+  color: var(--color-gray);
+  opacity: 0.86;
+}
+
+.chartCard {
+  composes: card;
+  width: 100%;
+}
+
+.recommendationsCard {
+  composes: card;
+  width: 100%;
+}
+
+.recommendationsHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.recommendationsEyebrow {
+  margin: 0;
+  color: var(--color-gray);
+  font-size: 0.78em;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.recommendationsTitle {
+  margin: 0.2rem 0 0;
+  color: var(--color-gray);
+  font-size: 1.25em;
+}
+
+.recommendationsText {
+  margin: 0.35rem 0 0;
+  color: var(--color-gray);
+  opacity: 0.88;
+}
+
+.recommendationsGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: 1rem;
+}
+
+.recommendationItem {
+  position: relative;
+  padding: 1rem 1rem 0.95rem;
+  border: 1px solid var(--color-border);
+  border-radius: 0.9rem;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--color-gray);
+  box-shadow: 0 0.4rem 1rem var(--color-shadow-soft);
+  font-variant-numeric: tabular-nums;
+}
+
+.recommendationRank {
+  position: absolute;
+  top: 0.85rem;
+  right: 0.95rem;
+  color: var(--color-text-muted);
+  font-size: 0.92em;
+  font-weight: 700;
+}
+
+.recommendationRate {
+  margin: 0 0 0.6rem;
+  color: var(--color-heading);
+  font-size: 1.15em;
+  font-weight: 700;
+}
+
+.recommendationLine {
+  margin: 0.35rem 0 0;
+  color: var(--color-gray);
+}
+
+.recommendationLabel {
+  display: inline-block;
+  min-width: 5.5rem;
+  color: var(--color-text-muted);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 0.78em;
+}
+
+.emptyState {
+  composes: card;
+  max-width: 44rem;
+  color: var(--color-gray);
+}
+
+.emptyTitle {
+  margin: 0;
+  color: var(--color-gray);
+  font-family: var(--font-logo);
+  font-size: 1.5em;
+  font-weight: normal;
+}
+
+.emptyText {
+  margin: 0.5rem 0 0;
+}
+
+.emptyActions {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 1rem;
+  flex-wrap: wrap;
+}
+
+.openBtn {
+  composes: primaryBtn from './utils.module.css';
+  background-color: #ffd000 !important;
+  color: #111824 !important;
+  text-decoration: none;
+}
+
+.openBtn:hover {
+  background-color: #e1b800 !important;
+}
+
+@media (max-width: 90em) {
+  .controlGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 48em) {
+  .recommendationsGrid {
+    grid-template-columns: 1fr;
+  }
+}

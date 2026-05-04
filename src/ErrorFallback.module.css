@@ -6,7 +6,7 @@
 
 .error {
   max-width: 45em;
-  color: brown;
+  color: var(--color-danger-strong);
 }
 
 .error > p {
@@ -42,8 +42,8 @@
   display: inline-flex;
   margin-right: 0.75rem;
   padding: 0.25rem 0.75rem;
-  background-color: rgba(165, 42, 42, 0.1);
-  border: 2px solid rgb(165, 42, 42);
+  background-color: var(--color-danger-bg);
+  border: 2px solid var(--color-danger-strong);
   border-radius: 0.25rem;
   color: inherit;
   font-size: 90%;
@@ -53,7 +53,7 @@
 }
 
 .btn:hover {
-  background-color: brown;
+  background-color: var(--color-danger-strong);
   color: white;
 }
 

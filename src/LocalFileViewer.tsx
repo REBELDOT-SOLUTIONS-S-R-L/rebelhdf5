@@ -6,6 +6,7 @@ import FileErrorFallback from './FileErrorFallback';
 import { getPlugin } from './plugin-utils';
 import { type LocalFile } from './stores';
 import { buildMailto, FEEDBACK_MESSAGE } from './utils';
+import styles from './ViewerTheme.module.css';
 
 interface Props {
   file: LocalFile;
@@ -17,21 +18,24 @@ function LocalFileViewer(props: Props) {
 
   return (
     <H5WasmLocalFileProvider file={rawFile} getPlugin={getPlugin}>
-      <ErrorBoundary
-        fallbackRender={(fallbackProps) => (
-          <FileErrorFallback file={file} {...fallbackProps} />
-        )}
-        resetKeys={[file]}
-      >
-        <App
-          key={resolvedUrl}
-          disableDarkMode
-          propagateErrors
-          getFeedbackURL={({ entityPath }) => {
-            return buildMailto('Feedback', FEEDBACK_MESSAGE, file, entityPath);
-          }}
-        />
-      </ErrorBoundary>
+      <div className={styles.viewerTheme}>
+        <ErrorBoundary
+          fallbackRender={(fallbackProps) => (
+            <FileErrorFallback file={file} {...fallbackProps} />
+          )}
+          resetKeys={[file]}
+        >
+          <App
+            key={resolvedUrl}
+            initialPath="/data"
+            disableDarkMode
+            propagateErrors
+            getFeedbackURL={({ entityPath }) => {
+              return buildMailto('Feedback', FEEDBACK_MESSAGE, file, entityPath);
+            }}
+          />
+        </ErrorBoundary>
+      </div>
     </H5WasmLocalFileProvider>
   );
 }

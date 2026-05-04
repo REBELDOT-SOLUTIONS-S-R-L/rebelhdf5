@@ -10,7 +10,7 @@
   left: 0;
   right: 0;
   z-index: 2; /* above opened-files flyout in sidebar */
-  background-color: rgba(28, 35, 33, 0.7);
+  background-color: var(--color-overlay);
   color: white;
   font-size: clamp(4rem, 10vw, 12rem);
   display: flex;

@@ -1,0 +1,24 @@
+.viewerTheme {
+  flex: 1;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+}
+
+.viewerTheme :global([data-fullscreen-root]) {
+  flex: 1;
+  --secondary: var(--primary);
+  --secondary-light: var(--primary-light);
+  --secondary-lighter: var(--primary-lighter);
+  --secondary-dark: var(--primary-dark);
+  --secondary-dark-15: var(--primary-dark-bg);
+  --secondary-darker: var(--primary-dark);
+  --secondary-bg: var(--primary-bg);
+  --secondary-light-bg: var(--primary-light-bg);
+  --h5w-matrix-cell--bgColorAlt: color-mix(in srgb, var(--primary-light) 40%, transparent);
+  --h5w-matrix-indexCell--bgColor: color-mix(in srgb, var(--primary) 45%, transparent);
+  --h5w-matrix-indexCell--bgColorAlt: color-mix(in srgb, var(--primary-light) 35%, transparent);
+  --h5w-matrix-anchorCell--bgColor: color-mix(in srgb, var(--primary-dark) 55%, transparent);
+}
+
+

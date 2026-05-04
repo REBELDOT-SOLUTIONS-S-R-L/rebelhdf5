@@ -7,9 +7,32 @@ import {
 } from './services/utils';
 import { FileService, type H5File, type RemoteFile } from './stores';
 
-export function getViewerLink(href: string): string {
+export function getFileLink(
+  pathname: '/view' | '/pose-trace' | '/video-converter' | '/dataset-processing' | '/cloth-distribution',
+  href: string,
+): string {
   const urlParam = createSearchParams({ url: href });
-  return `/view?${urlParam.toString()}`;
+  return `${pathname}?${urlParam.toString()}`;
+}
+
+export function getViewerLink(href: string): string {
+  return getFileLink('/view', href);
+}
+
+export function getPoseTraceLink(href: string): string {
+  return getFileLink('/pose-trace', href);
+}
+
+export function getVideoConverterLink(href: string): string {
+  return getFileLink('/video-converter', href);
+}
+
+export function getDatasetProcessingLink(href: string): string {
+  return getFileLink('/dataset-processing', href);
+}
+
+export function getClothDistributionLink(href: string): string {
+  return getFileLink('/cloth-distribution', href);
 }
 
 function parseFilename(url: URL): string {

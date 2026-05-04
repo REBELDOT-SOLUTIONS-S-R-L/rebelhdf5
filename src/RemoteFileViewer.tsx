@@ -8,6 +8,7 @@ import FileErrorFallback from './FileErrorFallback';
 import { getPlugin } from './plugin-utils';
 import { type RemoteFile } from './stores';
 import { buildMailto, FEEDBACK_MESSAGE } from './utils';
+import styles from './ViewerTheme.module.css';
 
 export const FETCH_BUFFER_KEY = Symbol('fetchBuffer');
 
@@ -23,21 +24,24 @@ function RemoteFileViewer(props: Props) {
 
   return (
     <H5WasmBufferProvider filename={name} buffer={buffer} getPlugin={getPlugin}>
-      <ErrorBoundary
-        fallbackRender={(fallbackProps) => (
-          <FileErrorFallback file={file} {...fallbackProps} />
-        )}
-        resetKeys={[file]}
-      >
-        <App
-          key={resolvedUrl}
-          disableDarkMode
-          propagateErrors
-          getFeedbackURL={({ entityPath }) => {
-            return buildMailto('Feedback', FEEDBACK_MESSAGE, file, entityPath);
-          }}
-        />
-      </ErrorBoundary>
+      <div className={styles.viewerTheme}>
+        <ErrorBoundary
+          fallbackRender={(fallbackProps) => (
+            <FileErrorFallback file={file} {...fallbackProps} />
+          )}
+          resetKeys={[file]}
+        >
+          <App
+            key={resolvedUrl}
+            initialPath="/data"
+            disableDarkMode
+            propagateErrors
+            getFeedbackURL={({ entityPath }) => {
+              return buildMailto('Feedback', FEEDBACK_MESSAGE, file, entityPath);
+            }}
+          />
+        </ErrorBoundary>
+      </div>
     </H5WasmBufferProvider>
   );
 }

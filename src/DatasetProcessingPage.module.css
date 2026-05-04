@@ -1,0 +1,535 @@
+.root {
+  composes: page from './utils.module.css';
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  padding-left: clamp(1.75rem, 3vw, 3.5rem);
+  padding-right: clamp(1.75rem, 3vw, 3.5rem);
+  gap: 1.5rem;
+  overflow-y: auto;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+}
+
+.eyebrow {
+  margin: 0;
+  color: var(--color-gray);
+  font-size: 0.82em;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.title {
+  margin: 0.25rem 0 0;
+  color: var(--color-gray);
+  font-family: var(--font-logo);
+  font-size: clamp(2.1em, 3vw, 2.8em);
+  font-weight: normal;
+}
+
+.subtitle {
+  max-width: 54rem;
+  margin: 0.5rem 0 0;
+  color: var(--color-gray);
+}
+
+.card {
+  padding: 1.25rem 1.5rem;
+  background: var(--color-surface-alt);
+  border: 1px solid var(--color-border);
+  border-radius: 1rem;
+  box-shadow: 0 0.75rem 1.75rem var(--color-shadow-soft);
+}
+
+.controlsCard {
+  composes: card;
+  width: 100%;
+}
+
+.controlGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  align-items: end;
+}
+
+.field {
+  min-width: 0;
+}
+
+.fieldLabel {
+  display: block;
+  margin-bottom: 0.5rem;
+  color: var(--color-gray);
+  font-size: 0.82em;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.select {
+  composes: input from './utils.module.css';
+  width: 100%;
+  min-height: 2.75rem;
+  color: var(--color-gray);
+  background: var(--color-input-bg);
+}
+
+.statusRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.5rem;
+  margin-top: 1rem;
+}
+
+.statusItem {
+  color: var(--color-gray);
+}
+
+.statusKey {
+  font-weight: 700;
+}
+
+.messageCard {
+  composes: card;
+  width: 100%;
+  color: var(--color-gray);
+}
+
+.errorText {
+  margin: 0;
+  color: var(--color-danger);
+}
+
+.infoText {
+  margin: 0;
+  color: var(--color-gray);
+  opacity: 0.86;
+}
+
+.keysCard {
+  composes: card;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.keysHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.keyActions {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.secondaryBtn {
+  composes: btnClean from global;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.55rem;
+  min-height: 2.6rem;
+  padding: 0.55rem 0.9rem;
+  border: 1px solid var(--color-border);
+  border-radius: 0.65rem;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--color-gray);
+  box-shadow: 0 0.35rem 0.9rem var(--color-shadow-soft);
+  transition:
+    border-color 0.18s ease,
+    background-color 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+.secondaryBtn:hover:not(:disabled) {
+  border-color: rgba(255, 208, 0, 0.38);
+  background: rgba(255, 208, 0, 0.08);
+  box-shadow: 0 0.55rem 1rem var(--color-shadow-soft);
+}
+
+.secondaryBtn:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.keyTree {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  max-height: 30rem;
+  overflow: auto;
+  padding: 0.45rem 0.35rem;
+  background: rgba(255, 255, 255, 0.015);
+  border: 1px solid var(--color-border);
+  border-radius: 0.85rem;
+}
+
+.treeBranch {
+  display: flex;
+  flex-direction: column;
+}
+
+.treeBranchRow {
+  display: flex;
+  align-items: center;
+  gap: 0.2rem;
+  min-height: 1.9rem;
+  padding-right: 0.5rem;
+}
+
+.treeBranchSelectBtn {
+  composes: btnClean from global;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 0.4rem;
+  color: var(--color-gray);
+}
+
+.treeBranchSelectBtn:hover {
+  background: rgba(255, 208, 0, 0.06);
+}
+
+.treeBranchLabel {
+  composes: btnClean from global;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 1.75rem;
+  padding-right: 0.25rem;
+  padding-top: 0.12rem;
+  padding-bottom: 0.12rem;
+  color: var(--color-gray);
+  font-size: 0.95em;
+  font-weight: 700;
+  border-radius: 0.45rem;
+  cursor: pointer;
+  text-align: left;
+}
+
+.treeBranchLabel:hover {
+  background: rgba(255, 208, 0, 0.06);
+}
+
+.treeBranchIcon {
+  flex: 0 0 auto;
+  color: #ffd000;
+  opacity: 0.9;
+}
+
+.treeCollapseIcon {
+  flex: 0 0 auto;
+  opacity: 0.72;
+}
+
+.treeBranchName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.treeChildren {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.treeLeaf {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.45rem;
+  min-height: 1.9rem;
+  padding-top: 0.12rem;
+  padding-right: 0.5rem;
+  padding-bottom: 0.12rem;
+  color: var(--color-gray);
+  font-size: 0.93em;
+  border-radius: 0.45rem;
+}
+
+.treeLeaf:hover {
+  background: rgba(255, 208, 0, 0.06);
+}
+
+.treeLeaf input {
+  margin: 0;
+  accent-color: #ffd000;
+}
+
+.treeLeafIcon {
+  flex: 0 0 auto;
+  opacity: 0.72;
+}
+
+.treeLeafLabel {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.treeMeta {
+  margin-left: auto;
+  color: var(--color-gray);
+  opacity: 0.58;
+  font-variant-numeric: tabular-nums;
+}
+
+.actionsCard {
+  composes: card;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.sectionTitle {
+  margin: 0;
+  color: var(--color-gray);
+  font-size: 1.1em;
+}
+
+.sectionText {
+  margin: 0.35rem 0 0;
+  color: var(--color-gray);
+  opacity: 0.86;
+}
+
+.sectionLabel {
+  margin: 1rem 0 0.75rem;
+  color: var(--color-gray);
+  font-size: 0.82em;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.checkboxGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: 0.75rem;
+}
+
+.checkboxItem {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  min-width: 0;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--color-border);
+  border-radius: 0.85rem;
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--color-gray);
+}
+
+.checkboxItem input {
+  flex: 0 0 auto;
+  accent-color: #ffd000;
+}
+
+.checkboxItem span {
+  min-width: 0;
+  word-break: break-word;
+}
+
+.actionRow {
+  display: flex;
+  gap: 0.85rem;
+  flex-wrap: wrap;
+}
+
+.processingStatus {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.85rem;
+  align-items: flex-start;
+  padding: 0.9rem 1rem;
+  border: 1px solid rgba(255, 208, 0, 0.22);
+  border-radius: 0.85rem;
+  background: rgba(255, 208, 0, 0.06);
+  color: var(--color-gray);
+}
+
+.processingSpinner {
+  flex: 0 0 auto;
+  margin-top: 0.08rem;
+  color: #ffd000;
+  font-size: 1.15rem;
+  animation: datasetProcessingSpin 0.9s linear infinite;
+}
+
+.processingCopy {
+  min-width: 0;
+}
+
+.processingTitle {
+  margin: 0;
+  color: var(--color-gray);
+  font-weight: 700;
+}
+
+.processingText {
+  margin: 0.25rem 0 0;
+  color: var(--color-gray);
+  opacity: 0.86;
+}
+
+.progressBar {
+  margin-top: 0.65rem;
+  height: 0.5rem;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 0.25rem;
+  overflow: hidden;
+}
+
+.progressFill {
+  height: 100%;
+  background: #ffd000;
+  border-radius: 0.25rem;
+  transition: width 0.25s ease-out;
+}
+
+.primaryAction {
+  composes: primaryBtn from './utils.module.css';
+  background-color: #ffd000 !important;
+  color: #111824 !important;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.primaryAction:hover:not(:disabled) {
+  background-color: #e1b800 !important;
+}
+
+.primaryAction:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.successText {
+  margin: 0;
+  color: #a9e4a2;
+}
+
+.emptyState {
+  composes: card;
+  max-width: 42rem;
+  color: var(--color-gray);
+}
+
+.emptyTitle {
+  margin: 0;
+  color: var(--color-gray);
+  font-family: var(--font-logo);
+  font-size: 1.5em;
+  font-weight: normal;
+}
+
+.emptyText {
+  margin: 0.5rem 0 0;
+}
+
+.emptyActions {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 1rem;
+  flex-wrap: wrap;
+}
+
+.openBtn {
+  composes: primaryBtn from './utils.module.css';
+  background-color: #ffd000 !important;
+  color: #111824 !important;
+  text-decoration: none;
+}
+
+.openBtn:hover {
+  background-color: #e1b800 !important;
+}
+
+.backendHeader {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+}
+
+.backendHeader > svg {
+  flex: 0 0 auto;
+  font-size: 1.3rem;
+  color: #a9e4a2;
+}
+
+.backendTitle {
+  margin: 0;
+  font-weight: 700;
+  color: var(--color-gray);
+}
+
+.backendSubtitle {
+  margin: 0.2rem 0 0;
+  color: var(--color-gray);
+  opacity: 0.72;
+  font-size: 0.9em;
+}
+
+.backendToggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-left: auto;
+  color: var(--color-gray);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.backendToggle input {
+  accent-color: #a9e4a2;
+}
+
+.downloadLink {
+  color: #ffd000;
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+
+.downloadLink:hover {
+  color: #e1b800;
+}
+
+@keyframes datasetProcessingSpin {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 90em) {
+  .controlGrid {
+    grid-template-columns: 1fr;
+  }
+}

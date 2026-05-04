@@ -1,7 +1,14 @@
-import { FiFileText, FiHelpCircle, FiPlusCircle } from 'react-icons/fi';
-import { NavLink, useMatch } from 'react-router-dom';
+import { FiActivity, FiAperture, FiCloud, FiEye, FiFileText, FiFilm, FiLayers, FiPlusCircle } from 'react-icons/fi';
+import { NavLink, useMatch, useSearchParams } from 'react-router-dom';
 
 import { useStore } from '../stores';
+import {
+  getClothDistributionLink,
+  getDatasetProcessingLink,
+  getPoseTraceLink,
+  getVideoConverterLink,
+  getViewerLink,
+} from '../utils';
 import Flyout from './Flyout';
 import OpenedFiles from './OpenedFiles';
 import styles from './Sidebar.module.css';
@@ -9,15 +16,18 @@ import SidebarToggle from './SidebarToggle';
 
 function Sidebar() {
   const isViewingFile = !!useMatch('/view');
+  const opened = useStore((state) => state.opened);
   const mayCollapse = useStore((state) => state.sidebarMayCollapse);
   const isCollapsed = mayCollapse && isViewingFile;
+  const [searchParams] = useSearchParams();
+  const activeFileUrl = searchParams.get('url') ?? opened[0]?.url ?? null;
 
   return (
     <div className={styles.sidebar} data-collapsed={isCollapsed || undefined}>
       <div className={styles.sidebarInner}>
         <h1 className={styles.logo} data-reveal>
           <NavLink className={styles.logoLink} to="/">
-            myHDF<span className={styles.logo5}>5</span>
+            rebelHDF<span className={styles.logo5}>5</span>
           </NavLink>
         </h1>
         <nav className={styles.nav} data-reveal>
@@ -32,14 +42,129 @@ function Sidebar() {
             <span className={styles.label}>Open HDF5</span>
           </NavLink>
 
+          {activeFileUrl ? (
+            <NavLink
+              className={styles.mainNavItem}
+              to={getViewerLink(activeFileUrl)}
+              aria-label="Viewer"
+              title="Viewer"
+            >
+              <FiEye className={styles.icon} />
+              <span className={styles.label}>Viewer</span>
+            </NavLink>
+          ) : (
+            <button
+              type="button"
+              className={styles.navBtn}
+              aria-label="Viewer"
+              title="Viewer"
+              disabled
+            >
+              <FiEye className={styles.icon} />
+              <span className={styles.label}>Viewer</span>
+            </button>
+          )}
+
+          {activeFileUrl ? (
+            <NavLink
+              className={styles.mainNavItem}
+              to={getPoseTraceLink(activeFileUrl)}
+              aria-label="Pose Trace"
+              title="Pose Trace"
+            >
+              <FiActivity className={styles.icon} />
+              <span className={styles.label}>Pose Trace</span>
+            </NavLink>
+          ) : (
+            <button
+              type="button"
+              className={styles.navBtn}
+              aria-label="Pose Trace"
+              title="Pose Trace"
+              disabled
+            >
+              <FiActivity className={styles.icon} />
+              <span className={styles.label}>Pose Trace</span>
+            </button>
+          )}
+
+          {activeFileUrl ? (
+            <NavLink
+              className={styles.mainNavItem}
+              to={getVideoConverterLink(activeFileUrl)}
+              aria-label="Video Converter"
+              title="Video Converter"
+            >
+              <FiFilm className={styles.icon} />
+              <span className={styles.label}>Video Converter</span>
+            </NavLink>
+          ) : (
+            <button
+              type="button"
+              className={styles.navBtn}
+              aria-label="Video Converter"
+              title="Video Converter"
+              disabled
+            >
+              <FiFilm className={styles.icon} />
+              <span className={styles.label}>Video Converter</span>
+            </button>
+          )}
+
+          {activeFileUrl ? (
+            <NavLink
+              className={styles.mainNavItem}
+              to={getDatasetProcessingLink(activeFileUrl)}
+              aria-label="Dataset Processing"
+              title="Dataset Processing"
+            >
+              <FiLayers className={styles.icon} />
+              <span className={styles.label}>Dataset Processing</span>
+            </NavLink>
+          ) : (
+            <button
+              type="button"
+              className={styles.navBtn}
+              aria-label="Dataset Processing"
+              title="Dataset Processing"
+              disabled
+            >
+              <FiLayers className={styles.icon} />
+              <span className={styles.label}>Dataset Processing</span>
+            </button>
+          )}
+
+          {opened.length > 0 ? (
+            <NavLink
+              className={styles.mainNavItem}
+              to={getClothDistributionLink(activeFileUrl ?? opened[0].url)}
+              aria-label="Cloth Distribution"
+              title="Cloth Distribution"
+            >
+              <FiAperture className={styles.icon} />
+              <span className={styles.label}>Cloth Distribution</span>
+            </NavLink>
+          ) : (
+            <button
+              type="button"
+              className={styles.navBtn}
+              aria-label="Cloth Distribution"
+              title="Cloth Distribution"
+              disabled
+            >
+              <FiAperture className={styles.icon} />
+              <span className={styles.label}>Cloth Distribution</span>
+            </button>
+          )}
+
           <NavLink
             className={styles.mainNavItem}
-            to="help"
-            aria-label="Help"
-            title="Help"
+            to="/databricks"
+            aria-label="Databricks"
+            title="Databricks"
           >
-            <FiHelpCircle className={styles.icon} />
-            <span className={styles.label}>Help</span>
+            <FiCloud className={styles.icon} />
+            <span className={styles.label}>Databricks</span>
           </NavLink>
 
           {isCollapsed ? (
