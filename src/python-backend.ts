@@ -1,5 +1,5 @@
 /**
- * Client for the local Python processing server (scripts/merge_server.py).
+ * Client for the local Python backend server (scripts/backend_server.py).
  *
  * The server is auto-detected on localhost:4095. When available it provides
  * native HDF5 cut/merge/append which is orders of magnitude faster than the
@@ -13,7 +13,7 @@ import type {
   DatasetProcessingResultMeta,
 } from './pose-trace/types';
 
-const DEFAULT_PORT = __MERGE_SERVER_PORT__;
+const DEFAULT_PORT = __PYTHON_BACKEND_PORT__;
 const BASE_URL = `http://127.0.0.1:${DEFAULT_PORT}`;
 const HEALTH_TIMEOUT_MS = 2000;
 
@@ -262,7 +262,7 @@ export async function runProcess(
 
     if (response.status === 404 && endpoint === '/api/process') {
       throw new Error(
-        'Your Python backend is outdated and does not support this operation. Restart `scripts/merge_server.py` to load the current API.',
+        'Your Python backend is outdated and does not support this operation. Restart `scripts/backend_server.py` to load the current API.',
       );
     }
 

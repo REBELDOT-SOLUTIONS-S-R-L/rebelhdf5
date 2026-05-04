@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
-"""Local HTTP server for HDF5 dataset processing operations.
+"""Local HTTP server for rebelHDF5 backend operations.
 
 Provides a REST + SSE API that the web app connects to for running
 cut/merge/append natively (bypassing the slow WASM path).
 
 Usage:
-    python scripts/merge_server.py                          # serve current dir
-    python scripts/merge_server.py --dir /path/to/datasets  # serve specific dir
-    python scripts/merge_server.py --port 4100              # custom port
+    python scripts/backend_server.py                          # serve current dir
+    python scripts/backend_server.py --dir /path/to/datasets  # serve specific dir
+    python scripts/backend_server.py --port 4100              # custom port
 
 The web app auto-detects this server on localhost:4095 and offers to use it
-for all dataset processing operations.
+for local dataset processing and Databricks operations.
 
 Requires: pip install h5py
 Optional: pip install 'databricks-sdk>=0.72.0' for faster single-file volume downloads
@@ -305,8 +305,8 @@ def process_with_progress(
 # HTTP handler
 # ---------------------------------------------------------------------------
 
-class MergeHandler(BaseHTTPRequestHandler):
-    server: "MergeServer"
+class BackendHandler(BaseHTTPRequestHandler):
+    server: "BackendServer"
 
     def handle(self) -> None:
         try:
@@ -975,7 +975,7 @@ class MergeHandler(BaseHTTPRequestHandler):
                 pass
 
 
-class MergeServer(ThreadingHTTPServer):
+class BackendServer(ThreadingHTTPServer):
     allow_reuse_address = True
     daemon_threads = True
 
@@ -989,7 +989,7 @@ class MergeServer(ThreadingHTTPServer):
         self._indexing = False
         self._index_error: str | None = None
         self._file_index: dict[str, Path] = {}
-        super().__init__(("0.0.0.0", port), MergeHandler)
+        super().__init__(("0.0.0.0", port), BackendHandler)
 
     def ensure_file_index(self) -> None:
         """Start the fallback basename index only when legacy resolution needs it."""
@@ -1094,8 +1094,8 @@ def main() -> None:
 
     Path(output_dir).mkdir(parents=True, exist_ok=True)
 
-    server = MergeServer(args.port, root_dir, output_dir)
-    print(f"HDF5 Processing Server", flush=True)
+    server = BackendServer(args.port, root_dir, output_dir)
+    print(f"rebelHDF5 Backend Server", flush=True)
     print(f"  Root dir:   {root_dir}", flush=True)
     print(f"  Output dir: {output_dir}", flush=True)
     print(f"  Listening:  http://localhost:{args.port}", flush=True)

@@ -761,7 +761,7 @@ function DatasetProcessingPage() {
 
         setResolveError(
           missing.length > 0
-            ? `Could not find on server: ${missing.join(', ')}. Check MERGE_SERVER_DIR.`
+              ? `Could not find on server: ${missing.join(', ')}. Check PYTHON_BACKEND_DIR.`
             : null,
         );
       } catch (error: unknown) {
@@ -1284,7 +1284,7 @@ function DatasetProcessingPage() {
       {useBackend && backend.available && !backendFilesLoading && sourceOptions.length === 0 && (
         <section className={styles.messageCard}>
           <p className={styles.infoText}>
-            No HDF5 files found under the Python server root. Set <code>MERGE_SERVER_DIR</code> to your dataset directory or open files in the browser and turn the backend off.
+            No HDF5 files found under the Python server root. Set <code>PYTHON_BACKEND_DIR</code> to your dataset directory or open files in the browser and turn the backend off.
           </p>
         </section>
       )}

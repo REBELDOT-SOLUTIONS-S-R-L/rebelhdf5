@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 
-declare const __MERGE_SERVER_PORT__: number;
+declare const __PYTHON_BACKEND_PORT__: number;
 
 // HDF5 compression plugins
 declare module '*.so' {
