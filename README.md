@@ -82,42 +82,70 @@ scale.
 
 ## DATASET STRUCTURE
 
-<pre>
-data/
-├── demo_&lt;N&gt;/
-│   ├── actions                         <span style="color:#6b7280;"># (T, 16) EEF pose + gripper</span>
+<style>
+.tree {
+  background: #ffffff00;
+  color: #e5e7eb;
+  padding: 16px 20px;
+  border-radius: 10px;
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-x: auto;
+  border: 1px solid #ffffff00;
+}
+
+.tree .comment {
+  color: #6b7280;
+  margin-left: 8px;
+}
+
+.tree .folder {
+  color: #93c5fd;
+}
+
+.tree .file {
+  color: #e5e7eb;
+}
+</style>
+
+<pre class="tree">
+<span class="folder">data/</span>
+├── <span class="folder">demo_&lt;N&gt;/</span>
+│   ├── <span class="file">actions</span><span class="comment"># (T, 16) EEF pose + gripper</span>
 │   │
-│   ├── initial_state/
-│   │   ├── articulation/
-│   │   │   └── articulation_&lt;N&gt;/
-│   │   │       └── joint_positions
-│   │   └── object_pose/
-│   │       └── object_&lt;N&gt;
+│   ├── <span class="folder">initial_state/</span>
+│   │   ├── <span class="folder">articulation/</span>
+│   │   │   └── <span class="folder">articulation_&lt;N&gt;/</span>
+│   │   │       └── <span class="file">joint_positions</span>
+│   │   │
+│   │   └── <span class="folder">object_pose/</span>
+│   │       └── <span class="file">object_&lt;N&gt;</span>
 │   │
-│   └── obs/
-│       ├── actions                     <span style="color:#6b7280;"># (T, 12) joint-space target actions</span>
+│   └── <span class="folder">obs/</span>
+│       ├── <span class="file">actions</span><span class="comment"># (T, 12) joint-space target actions</span>
 │       │
-│       ├── datagen_info/
-│       │   ├── eef_pose/
-│       │   │   └── eef_&lt;N&gt;
-│       │   ├── object_pose/
-│       │   │   └── object_&lt;N&gt;
-│       │   ├── subtask_term_signals/
-│       │   │   └── signal_&lt;N&gt;
-│       │   └── target_eef_pose/
-│       │       └── eef_&lt;N&gt;
+│       ├── <span class="folder">datagen_info/</span>
+│       │   ├── <span class="folder">eef_pose/</span>
+│       │   │   └── <span class="file">eef_&lt;N&gt;</span>
+│       │   ├── <span class="folder">object_pose/</span>
+│       │   │   └── <span class="file">object_&lt;N&gt;</span>
+│       │   ├── <span class="folder">subtask_term_signals/</span>
+│       │   │   └── <span class="file">signal_&lt;N&gt;</span>
+│       │   └── <span class="folder">target_eef_pose/</span>
+│       │       └── <span class="file">eef_&lt;N&gt;</span>
 │       │
-│       ├── articulation_state/          <span style="color:#6b7280;"># (T, ...) joint-space joint state</span>
-│       │   └── articulation_&lt;N&gt;_joint_positions
+│       ├── <span class="folder">articulation_state/</span><span class="comment"># (T, ...) joint-space joint state</span>
+│       │   └── <span class="file">articulation_&lt;N&gt;_joint_positions</span>
 │       │
-│       ├── end_effectors/
-│       │   └── eef_&lt;N&gt;_pose
+│       ├── <span class="folder">end_effectors/</span>
+│       │   └── <span class="file">eef_&lt;N&gt;_pose</span>
 │       │
-│       ├── cameras/
-│       │   └── camera_&lt;N&gt;
+│       ├── <span class="folder">cameras/</span>
+│       │   └── <span class="file">camera_&lt;N&gt;</span>
 │       │
-│       └── sensors/
-│           └── sensor_&lt;N&gt;
+│       └── <span class="folder">sensors/</span>
+│           └── <span class="file">sensor_&lt;N&gt;</span>
 </pre>
 ## Attribution
 
