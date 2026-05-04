@@ -222,7 +222,10 @@ class BackendHandler(BaseHTTPRequestHandler):
 
             for p in paths:
                 with h5py.File(p, "r") as f:
-                    data = f["data"]
+                    try:
+                        data = hdf5_ops.require_data_group(f, p)
+                    except ValueError as exc:
+                        return self._error(400, str(exc))
                     demo_names = hdf5_ops.sort_demo_names(list(data.keys()))
 
                     keys: list[str] = []

@@ -28,7 +28,6 @@ function LocalFileViewer(props: Props) {
           <App
             key={resolvedUrl}
             initialPath="/data"
-            disableDarkMode
             propagateErrors
             getFeedbackURL={({ entityPath }) => {
               return buildMailto('Feedback', FEEDBACK_MESSAGE, file, entityPath);

@@ -102,6 +102,17 @@ def sort_demo_names(names: list[str]) -> list[str]:
     return sorted(names, key=_key)
 
 
+def require_data_group(f: h5py.File, file_path: Path) -> h5py.Group:
+    """Return the `/data` group of a file, or raise a friendly ValueError."""
+    group = f.get("data")
+    if not isinstance(group, h5py.Group):
+        raise ValueError(
+            f"{file_path.name} has no top-level /data group — this file does not "
+            "follow the demo-based schema that cut/merge/append operate on."
+        )
+    return group
+
+
 def get_cut_demo_names(
     all_demos: list[str],
     start_demo: str,
@@ -139,7 +150,7 @@ def process_with_progress(
 
     for p in input_paths:
         with h5py.File(p, "r") as f:
-            all_demos = sort_demo_names(list(f["data"].keys()))
+            all_demos = sort_demo_names(list(require_data_group(f, p).keys()))
 
             if operation == "cut" and cut_range:
                 demos = get_cut_demo_names(
@@ -167,14 +178,14 @@ def process_with_progress(
     with h5py.File(output_path, "w", track_order=True) as out_f:
         with h5py.File(input_paths[0], "r") as first_f:
             copy_attributes(first_f, out_f)
-            first_data = first_f["data"]
+            first_data = require_data_group(first_f, input_paths[0])
             out_data = out_f.create_group("data", track_order=True)
             copy_attributes(first_data, out_data, exclude={"total"})
 
         for input_path, demo_names in source_demo_lists:
             source_name = input_path.stem
             with h5py.File(input_path, "r") as in_f:
-                data = in_f["data"]
+                data = require_data_group(in_f, input_path)
 
                 for demo_name in demo_names:
                     yield {

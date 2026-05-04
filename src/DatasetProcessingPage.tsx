@@ -631,18 +631,44 @@ function DatasetProcessingPage() {
     return [...byUrl.values()];
   }, [file, opened]);
 
-  // Unified source option IDs. Backend-listed files carry absolute server paths.
-  const sourceOptions = useMemo<SourceOption[]>(() => {
-    if (useBackend && backend.available && backendFiles.length > 0) {
-      return backendFiles.map((entry) => ({
-        id: getBackendSourceId(entry.path),
-        name: entry.name,
-        label: entry.relativePath ?? entry.name,
-        backendPath: entry.path,
-      }));
+  // Source options are always restricted to files the user has opened.
+  // When the Python backend is active, we additionally drop any opened file
+  // that the server can't locate (so we never trigger a "could not find on
+  // server" failure mid-flow); skippedNames lets us surface that fact in the UI.
+  const { sourceOptions, skippedNames } = useMemo<{
+    sourceOptions: SourceOption[];
+    skippedNames: string[];
+  }>(() => {
+    if (useBackend && backend.available) {
+      const pathByName = new Map<string, string>();
+      for (const entry of backendFiles) {
+        if (!pathByName.has(entry.name)) {
+          pathByName.set(entry.name, entry.path);
+        }
+      }
+
+      const options: SourceOption[] = [];
+      const skipped: string[] = [];
+      for (const f of availableFiles) {
+        const backendPath = pathByName.get(f.name);
+        if (backendPath) {
+          options.push({
+            id: getBackendSourceId(backendPath),
+            name: f.name,
+            label: f.name,
+            backendPath,
+          });
+        } else {
+          skipped.push(f.name);
+        }
+      }
+      return { sourceOptions: options, skippedNames: skipped };
     }
 
-    return availableFiles.map((f) => ({ id: f.url, name: f.name, label: f.name }));
+    return {
+      sourceOptions: availableFiles.map((f) => ({ id: f.url, name: f.name, label: f.name })),
+      skippedNames: [],
+    };
   }, [availableFiles, backend.available, backendFiles, useBackend]);
 
   const sourceOptionMap = useMemo(
@@ -1264,6 +1290,12 @@ function DatasetProcessingPage() {
           {useBackend && backendFilesError && (
             <p className={styles.errorText} style={{ marginTop: '0.75rem' }}>{backendFilesError}</p>
           )}
+          {useBackend && skippedNames.length > 0 && (
+            <p className={styles.infoText} style={{ marginTop: '0.75rem' }}>
+              Hidden because the server can't find them under <code>{backend.rootDir ?? 'PYTHON_BACKEND_DIR'}</code>:{' '}
+              {skippedNames.join(', ')}. Turn the backend off to process them via WASM.
+            </p>
+          )}
         </section>
       )}
 
@@ -1281,10 +1313,10 @@ function DatasetProcessingPage() {
         </section>
       )}
 
-      {useBackend && backend.available && !backendFilesLoading && sourceOptions.length === 0 && (
+      {useBackend && backend.available && sourceOptions.length === 0 && skippedNames.length === 0 && (
         <section className={styles.messageCard}>
           <p className={styles.infoText}>
-            No HDF5 files found under the Python server root. Set <code>PYTHON_BACKEND_DIR</code> to your dataset directory or open files in the browser and turn the backend off.
+            Open one or more HDF5 files from the home page to enable processing.
           </p>
         </section>
       )}
@@ -1432,7 +1464,7 @@ function DatasetProcessingPage() {
 
             <div className={styles.statusRow}>
               <div className={styles.statusItem}>
-                <span className={styles.statusKey}>{useBackend ? 'Server Files:' : 'Opened:'}</span> {sourceOptions.length}
+                <span className={styles.statusKey}>Opened:</span> {sourceOptions.length}
               </div>
               <div className={styles.statusItem}>
                 <span className={styles.statusKey}>Selected Sources:</span> {orderedSelectedSourceUrls.length}
