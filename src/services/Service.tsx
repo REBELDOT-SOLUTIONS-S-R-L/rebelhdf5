@@ -1,11 +1,10 @@
-import { type PropsWithChildren } from 'react';
-import { type IconType } from 'react-icons';
+import { type ComponentType, type PropsWithChildren } from 'react';
 
 import styles from '../Services.module.css';
 
 interface Props {
   heading?: string;
-  icon: IconType;
+  icon: ComponentType<{ className?: string }>;
 }
 
 function Service(props: PropsWithChildren<Props>) {

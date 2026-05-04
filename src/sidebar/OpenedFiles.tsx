@@ -1,4 +1,4 @@
-import { type IconType } from 'react-icons';
+import { type ComponentType } from 'react';
 import {
   FiDownload,
   FiGithub,
@@ -21,7 +21,7 @@ import { FileService, type H5File, useStore } from '../stores';
 import { getFileLink } from '../utils';
 import sidebarStyles from './Sidebar.module.css';
 
-const ICONS: Record<FileService, IconType> = {
+const ICONS: Record<FileService, ComponentType<{ className?: string }>> = {
   [FileService.Local]: FiMonitor,
   [FileService.Url]: FiGlobe,
   [FileService.GitHub]: FiGithub,

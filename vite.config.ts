@@ -1,7 +1,7 @@
 import { type ChildProcess, spawn } from 'node:child_process';
 import path from 'node:path';
 
-import react from '@vitejs/plugin-react-swc';
+import react from '@vitejs/plugin-react';
 import { type Plugin, defineConfig } from 'vite';
 import { checker } from 'vite-plugin-checker';
 
@@ -84,6 +84,8 @@ export default defineConfig({
   define: {
     __MERGE_SERVER_PORT__: JSON.stringify(mergeServerPort),
   },
+  build: { sourcemap: true },
+
   plugins: [
     react(),
     { ...checker({ typescript: true }), apply: 'serve' }, // dev only to reduce build time
@@ -92,11 +94,4 @@ export default defineConfig({
 
   // Import HDF5 compression plugins as static assets
   assetsInclude: ['**/*.so'],
-
-  // `es2020` required by @h5web/h5wasm for BigInt `123n` notation support
-  optimizeDeps: { esbuildOptions: { target: 'es2020' } },
-  build: {
-    target: 'es2020',
-    sourcemap: true,
-  },
 });

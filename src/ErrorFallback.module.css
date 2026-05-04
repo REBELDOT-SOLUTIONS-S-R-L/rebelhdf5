@@ -1,4 +1,6 @@
 .root {
+  flex: 1;
+  min-width: 0;
   padding: 3rem 4rem;
 }
 
@@ -16,6 +18,26 @@
   font-weight: bold;
 }
 
+.detailedError {
+  color: brown;
+}
+
+.detailedError > summary {
+  max-width: 45em;
+  margin-bottom: 1.5rem;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+.detailedError > pre {
+  margin: -0.5rem 0 1.5rem;
+  padding-bottom: 0.75rem;
+  font-size: 90%;
+  scrollbar-width: thin;
+  overflow-x: auto;
+  overflow-y: visible;
+}
+
 .btn {
   display: inline-flex;
   margin-right: 0.75rem;
@@ -27,6 +49,7 @@
   font-size: 90%;
   font-weight: 600;
   text-decoration: none;
+  cursor: pointer;
 }
 
 .btn:hover {

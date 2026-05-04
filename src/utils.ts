@@ -98,6 +98,24 @@ export async function resolveFileUrl(
   };
 }
 
+const INTRO =
+  'Please introduce yourself (name, organisation, scientific field, etc.)';
+
+function getReportIntro(fileOrUrl?: H5File | string) {
+  if (
+    fileOrUrl &&
+    typeof fileOrUrl !== 'string' &&
+    fileOrUrl.service === FileService.Local
+  ) {
+    return `<<<
+  1. ${INTRO}
+  2. To help us understand the issue, please send us your HDF5 file (ideally via a file sharing service).
+>>>`;
+  }
+
+  return `<<< ${INTRO} >>>`;
+}
+
 export function buildMailto(
   subject: string,
   message: string,
@@ -105,6 +123,8 @@ export function buildMailto(
   entityPath?: string,
 ): string {
   const body = `Hi,
+
+${getReportIntro(fileOrUrl)}
 
 ${message}
 
@@ -127,10 +147,7 @@ Here is some additional context:
       ? `
   - Entity path: ${entityPath}`
       : ''
-  }
-
-Thanks,
-<< Name >>`;
+  }`;
 
   const params = new URLSearchParams({ subject: `[myHDF5] ${subject}`, body });
   const paramsStr = params.toString().replaceAll('+', '%20'); // use percent encoding for spaces to avoid issues with some email clients

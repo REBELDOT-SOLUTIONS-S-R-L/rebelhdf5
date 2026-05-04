@@ -1,3 +1,5 @@
+@import 'modern-normalize/modern-normalize.css';
+
 :root {
   box-sizing: border-box;
   color-scheme: light;
@@ -99,7 +101,6 @@
 
 body {
   min-width: 62rem;
-  margin: 0;
   overflow-x: auto;
   scrollbar-width: thin;
   background-color: var(--color-shell-bg);
@@ -115,12 +116,27 @@ body {
   }
 }
 
-code {
+#root {
+  height: 100vh;
+}
+
+code,
+pre {
   font-family:
     'Lucida Console', 'Lucida Sans Typewriter', monaco,
     'Bitstream Vera Sans Mono', monospace;
 }
 
-#root {
-  height: 100vh;
+button {
+  background: none;
+  border: none;
+  font-size: inherit;
+  line-height: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.5;
+  pointer-events: none;
 }
