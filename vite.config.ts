@@ -18,16 +18,52 @@ const backendServerDir = process.env.PYTHON_BACKEND_DIR ?? process.env.MERGE_SER
  */
 function backendServer(): Plugin {
   let child: ChildProcess | null = null;
+  let stopping = false;
   const port = backendServerPort;
   const dir = backendServerDir;
 
   function kill() {
-    if (!child) {
-      return;
+    const runningChild = child;
+    if (!runningChild) {
+      return Promise.resolve();
     }
 
-    child.kill('SIGTERM');
-    child = null;
+    return new Promise<void>((resolve) => {
+      let closed = false;
+      const timeout = setTimeout(() => {
+        if (!closed) {
+          runningChild.kill('SIGKILL');
+        }
+        resolve();
+      }, 2500);
+
+      runningChild.once('close', () => {
+        closed = true;
+        clearTimeout(timeout);
+        resolve();
+      });
+
+      runningChild.kill('SIGTERM');
+      child = null;
+    });
+  }
+
+  function killSync() {
+    if (child) {
+      child.kill('SIGTERM');
+      child = null;
+    }
+  }
+
+  function shutdown(exitCode: number) {
+    if (stopping) {
+      process.exit(exitCode);
+    }
+
+    stopping = true;
+    void kill().finally(() => {
+      process.exit(exitCode);
+    });
   }
 
   return {
@@ -68,14 +104,16 @@ function backendServer(): Plugin {
         child = null;
       });
 
-      // Clean up on Vite shutdown.
-      process.on('exit', kill);
-      process.on('SIGINT', kill);
-      process.on('SIGTERM', kill);
+      // Clean up on Vite shutdown. Signal listeners must explicitly exit,
+      // otherwise Ctrl+C only stops the child backend and leaves Vite alive.
+      process.on('exit', killSync);
+      process.once('SIGINT', () => shutdown(130));
+      process.once('SIGTERM', () => shutdown(143));
+      process.once('SIGHUP', () => shutdown(129));
     },
 
     closeBundle() {
-      kill();
+      void kill();
     },
   };
 }
@@ -84,8 +122,9 @@ export default defineConfig({
   server: { open: true },
   define: {
     __PYTHON_BACKEND_PORT__: JSON.stringify(backendServerPort),
+    global: 'globalThis',
   },
-  build: { sourcemap: true },
+  build: { sourcemap: process.env.SOURCEMAP === '1' },
 
   plugins: [
     react(),

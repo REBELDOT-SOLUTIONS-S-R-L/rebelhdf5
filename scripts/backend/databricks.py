@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-import json
 import os
 import re
 import subprocess
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Generator
 
@@ -16,6 +17,30 @@ DATABRICKS_FAST_UNAVAILABLE_EXIT = 3
 
 class UploadScriptMissing(RuntimeError):
     """Raised when the external upload helper script can't be found."""
+
+
+class DatabricksUnavailable(RuntimeError):
+    """Raised when the Databricks SDK can't be initialised (missing creds, import failure)."""
+
+
+@lru_cache(maxsize=1)
+def _client() -> Any:
+    """Return a lazily-initialised, process-wide WorkspaceClient.
+
+    Raises DatabricksUnavailable if the SDK is missing or credentials aren't configured.
+    """
+    try:
+        from databricks.sdk import WorkspaceClient  # noqa: WPS433  (runtime import is intentional)
+    except Exception as exc:  # pragma: no cover - import-time failure surface
+        raise DatabricksUnavailable(f"databricks-sdk not importable: {exc}") from exc
+
+    try:
+        return WorkspaceClient()
+    except Exception as exc:
+        raise DatabricksUnavailable(
+            f"Could not initialise Databricks client: {exc}. "
+            "Set DATABRICKS_HOST/DATABRICKS_TOKEN or run `databricks configure`."
+        ) from exc
 
 
 def databricks_download_parallelism() -> int:
@@ -50,17 +75,23 @@ def _fast_download_helper_path() -> Path:
 
 
 def put_secrets(secrets: dict[str, str], scope: str) -> dict[str, Any]:
+    try:
+        client = _client()
+    except DatabricksUnavailable as exc:
+        return {
+            "results": [
+                {"key": key, "ok": False, "error": str(exc)} for key in secrets
+            ],
+            "allOk": False,
+        }
+
     results: list[dict[str, Any]] = []
     for key, value in secrets.items():
-        proc = subprocess.run(
-            ["databricks", "secrets", "put-secret", scope, key, "--string-value", str(value)],
-            capture_output=True, text=True, timeout=30,
-        )
-        results.append({
-            "key": key,
-            "ok": proc.returncode == 0,
-            "error": proc.stderr.strip() if proc.returncode != 0 else None,
-        })
+        try:
+            client.secrets.put_secret(scope=scope, key=key, string_value=str(value))
+            results.append({"key": key, "ok": True, "error": None})
+        except Exception as exc:
+            results.append({"key": key, "ok": False, "error": str(exc)})
 
     failed = [r for r in results if not r["ok"]]
     return {
@@ -134,71 +165,93 @@ def run_pipeline(job_id: str) -> dict[str, Any]:
     Possible shapes:
         {"status": "error", "message": str}
         {"status": "ok", "runId": str | None, "output": dict}
-        {"status": "undecoded", "rawOutput": str}
     """
-    proc = subprocess.run(
-        ["databricks", "jobs", "run-now", str(job_id), "--no-wait", "--output", "json"],
-        capture_output=True, text=True, timeout=60,
-    )
-
-    if proc.returncode != 0:
-        return {"status": "error", "message": f"Failed to start job: {proc.stderr.strip()}"}
-
-    if not proc.stdout.strip():
-        return {"status": "ok", "runId": None, "output": {}}
+    try:
+        client = _client()
+    except DatabricksUnavailable as exc:
+        return {"status": "error", "message": str(exc)}
 
     try:
-        output = json.loads(proc.stdout)
-    except json.JSONDecodeError:
-        return {"status": "undecoded", "rawOutput": proc.stdout.strip()}
+        wait = client.jobs.run_now(job_id=int(job_id))
+    except Exception as exc:
+        return {"status": "error", "message": f"Failed to start job: {exc}"}
 
-    return {"status": "ok", "runId": output.get("run_id"), "output": output}
+    run_id = getattr(wait, "run_id", None)
+    output = {"run_id": run_id} if run_id is not None else {}
+    return {
+        "status": "ok",
+        "runId": str(run_id) if run_id is not None else None,
+        "output": output,
+    }
 
 
 def get_job_status(run_id: str) -> tuple[bool, dict[str, Any], str]:
-    proc = subprocess.run(
-        ["databricks", "jobs", "get-run", str(run_id), "--output", "json"],
-        capture_output=True, text=True, timeout=30,
-    )
+    try:
+        client = _client()
+    except DatabricksUnavailable as exc:
+        return False, {}, str(exc)
 
-    if proc.returncode != 0:
-        return False, {}, f"Failed to get job status: {proc.stderr.strip()}"
+    try:
+        run = client.jobs.get_run(run_id=int(run_id))
+    except Exception as exc:
+        return False, {}, f"Failed to get job status: {exc}"
 
-    output = json.loads(proc.stdout) if proc.stdout.strip() else {}
-    state = output.get("state", {})
+    state = getattr(run, "state", None)
+    life_cycle = getattr(getattr(state, "life_cycle_state", None), "value", None) \
+        if state is not None else None
+    result_state = getattr(getattr(state, "result_state", None), "value", None) \
+        if state is not None else None
+    message = getattr(state, "state_message", "") if state is not None else ""
+
     return True, {
         "runId": run_id,
-        "lifeCycleState": state.get("life_cycle_state"),
-        "resultState": state.get("result_state"),
-        "stateMessage": state.get("state_message", ""),
+        "lifeCycleState": life_cycle,
+        "resultState": result_state,
+        "stateMessage": message or "",
     }, ""
 
 
+def _fetch_active_runs_for_job(job_id: str) -> list[dict[str, Any]]:
+    try:
+        client = _client()
+    except DatabricksUnavailable:
+        return []
+
+    try:
+        runs = list(client.jobs.list_runs(job_id=int(job_id), active_only=True))
+    except Exception:
+        return []
+
+    out: list[dict[str, Any]] = []
+    for run in runs:
+        state = getattr(run, "state", None)
+        life_cycle = getattr(getattr(state, "life_cycle_state", None), "value", "") \
+            if state is not None else ""
+        result_state = getattr(getattr(state, "result_state", None), "value", "") \
+            if state is not None else ""
+        message = getattr(state, "state_message", "") if state is not None else ""
+        out.append({
+            "jobId": str(getattr(run, "job_id", job_id)),
+            "runId": str(getattr(run, "run_id", "")),
+            "runName": getattr(run, "run_name", "") or "",
+            "lifeCycleState": life_cycle or "",
+            "resultState": result_state or "",
+            "stateMessage": message or "",
+            "runPageUrl": getattr(run, "run_page_url", "") or "",
+        })
+    return out
+
+
 def get_active_runs(job_ids: list[str]) -> list[dict[str, Any]]:
+    if not job_ids:
+        return []
+
+    # SDK calls are HTTP-bound; fan out so a list of N jobs costs ~one round-trip.
+    workers = min(len(job_ids), 8)
     all_runs: list[dict[str, Any]] = []
-
-    for job_id in job_ids:
-        proc = subprocess.run(
-            ["databricks", "jobs", "list-runs", "--job-id", job_id, "--active-only", "--output", "json"],
-            capture_output=True, text=True, timeout=30,
-        )
-
-        if proc.returncode != 0:
-            continue
-
-        runs = json.loads(proc.stdout) if proc.stdout.strip() else []
-        for run in runs:
-            state = run.get("state", {})
-            all_runs.append({
-                "jobId": str(run.get("job_id", job_id)),
-                "runId": str(run.get("run_id", "")),
-                "runName": run.get("run_name", ""),
-                "lifeCycleState": state.get("life_cycle_state", ""),
-                "resultState": state.get("result_state", ""),
-                "stateMessage": state.get("state_message", ""),
-                "runPageUrl": run.get("run_page_url", ""),
-            })
-
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        for runs in pool.map(_fetch_active_runs_for_job, job_ids):
+            all_runs.extend(runs)
     return all_runs
 
 
@@ -206,39 +259,33 @@ def list_volume_files(
     volume: str, volume_path: str = "",
 ) -> tuple[bool, dict[str, Any], str]:
     volume_fs = volume.replace(".", "/")
-    full_path = f"dbfs:/Volumes/{volume_fs}"
+    directory_path = f"/Volumes/{volume_fs}"
     if volume_path:
-        full_path = f"{full_path}/{volume_path.strip('/')}"
+        directory_path = f"{directory_path}/{volume_path.strip('/')}"
+    display_path = f"dbfs:{directory_path}"
 
-    proc = subprocess.run(
-        ["databricks", "fs", "ls", full_path, "--long"],
-        capture_output=True, text=True, timeout=30,
-    )
+    try:
+        client = _client()
+    except DatabricksUnavailable as exc:
+        return False, {}, str(exc)
 
-    if proc.returncode != 0:
-        return False, {}, f"Failed to list volume: {proc.stderr.strip()}"
+    try:
+        entries = list(client.files.list_directory_contents(directory_path))
+    except Exception as exc:
+        return False, {}, f"Failed to list volume: {exc}"
 
     files: list[dict[str, Any]] = []
-    for raw_line in proc.stdout.strip().splitlines():
-        # Format: TYPE SIZE DATE NAME
-        parts = raw_line.split(None, 3)
-        if len(parts) >= 4:
-            file_type = parts[0]
-            size_str = parts[1]
-            name = parts[3]
-            files.append({
-                "name": name,
-                "type": file_type,
-                "size": int(size_str) if size_str.isdigit() else 0,
-            })
-        elif len(parts) >= 1:
-            files.append({
-                "name": parts[-1],
-                "type": "FILE",
-                "size": 0,
-            })
+    for entry in entries:
+        is_dir = bool(getattr(entry, "is_directory", False))
+        name = getattr(entry, "name", None) or Path(getattr(entry, "path", "")).name
+        size = getattr(entry, "file_size", 0) or 0
+        files.append({
+            "name": name,
+            "type": "DIRECTORY" if is_dir else "FILE",
+            "size": int(size),
+        })
 
-    return True, {"path": full_path, "files": files}, ""
+    return True, {"path": display_path, "files": files}, ""
 
 
 def volume_download_events(

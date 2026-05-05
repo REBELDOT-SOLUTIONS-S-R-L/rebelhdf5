@@ -23,8 +23,26 @@ INDEX_SKIP_DIRS = {
 
 
 def iter_hdf5_files(root: Path) -> Generator[Path, None, None]:
-    """Yield HDF5 files while pruning directories that are expensive and irrelevant."""
-    for dirpath, dirnames, filenames in os.walk(root):
+    """Yield HDF5 files while pruning expensive directories.
+
+    Does not follow symlinks and skips already-visited inodes to avoid loops
+    when the user adds a tree that contains symlinked subdirectories.
+    """
+    seen_inodes: set[tuple[int, int]] = set()
+
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+        try:
+            st = os.stat(dirpath)
+        except OSError:
+            dirnames[:] = []
+            continue
+
+        ident = (st.st_dev, st.st_ino)
+        if ident in seen_inodes:
+            dirnames[:] = []
+            continue
+        seen_inodes.add(ident)
+
         dirnames[:] = [
             dirname
             for dirname in dirnames

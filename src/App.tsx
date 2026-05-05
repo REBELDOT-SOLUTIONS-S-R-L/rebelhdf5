@@ -1,66 +1,59 @@
-import { Suspense, lazy } from 'react';
-import { Route, Routes } from 'react-router-dom';
+import { lazy, Suspense } from 'react';
+import { type FallbackProps, ErrorBoundary } from 'react-error-boundary';
+import { Route, Routes, useLocation } from 'react-router-dom';
 
 import Dropzone from './Dropzone';
-import HelpPage from './HelpPage';
+import styles from './ErrorFallback.module.css';
 import Layout from './Layout';
-const ClothDistributionPage = lazy(() => import('./ClothDistributionPage'));
-const DatabricksPage = lazy(() => import('./DatabricksPage'));
-const DatasetProcessingPage = lazy(() => import('./DatasetProcessingPage'));
-const PoseTracePage = lazy(() => import('./PoseTracePage'));
-import ServicesPage from './ServicesPage';
-const VideoConverterPage = lazy(() => import('./VideoConverterPage'));
-import ViewPage from './ViewPage';
+import Loader from './Loader';
+
+const ClothDistributionPage = lazy(async () => import('./ClothDistributionPage'));
+const DatabricksPage = lazy(async () => import('./DatabricksPage'));
+const DatasetProcessingPage = lazy(async () => import('./DatasetProcessingPage'));
+const PoseTracePage = lazy(async () => import('./PoseTracePage'));
+const ServicesPage = lazy(async () => import('./ServicesPage'));
+const VideoConverterPage = lazy(async () => import('./VideoConverterPage'));
+const ViewPage = lazy(async () => import('./ViewPage'));
+
+function RouteErrorFallback(props: FallbackProps) {
+  const { error, resetErrorBoundary } = props;
+  const msg = error instanceof Error ? error.message : String(error);
+
+  return (
+    <div className={styles.root} data-error-fallback>
+      <div className={styles.error}>
+        <p>Page could not be loaded.</p>
+        <p>{msg}</p>
+      </div>
+      <button className={styles.btn} type="button" onClick={resetErrorBoundary}>
+        Retry
+      </button>
+    </div>
+  );
+}
 
 function App() {
+  const location = useLocation();
+
   return (
     <Dropzone>
       <Layout>
-        <Routes>
-          <Route path="/" element={<ServicesPage />} />
-          <Route path="/help" element={<HelpPage />} />
-          <Route path="/view" element={<ViewPage />} />
-          <Route
-            path="/pose-trace"
-            element={(
-              <Suspense fallback={null}>
-                <PoseTracePage />
-              </Suspense>
-            )}
-          />
-          <Route
-            path="/video-converter"
-            element={(
-              <Suspense fallback={null}>
-                <VideoConverterPage />
-              </Suspense>
-            )}
-          />
-          <Route
-            path="/dataset-processing"
-            element={(
-              <Suspense fallback={null}>
-                <DatasetProcessingPage />
-              </Suspense>
-            )}
-          />
-          <Route
-            path="/cloth-distribution"
-            element={(
-              <Suspense fallback={null}>
-                <ClothDistributionPage />
-              </Suspense>
-            )}
-          />
-          <Route
-            path="/databricks"
-            element={(
-              <Suspense fallback={null}>
-                <DatabricksPage />
-              </Suspense>
-            )}
-          />
-        </Routes>
+        <ErrorBoundary
+          FallbackComponent={RouteErrorFallback}
+          resetKeys={[location.pathname, location.search]}
+        >
+          <Suspense fallback={<Loader message="Loading page..." />}>
+            <Routes>
+              <Route path="/" element={<ServicesPage />} />
+              <Route path="/view" element={<ViewPage />} />
+              <Route path="/pose-trace" element={<PoseTracePage />} />
+              <Route path="/video-converter" element={<VideoConverterPage />} />
+              <Route path="/dataset-processing" element={<DatasetProcessingPage />} />
+              <Route path="/cloth-distribution" element={<ClothDistributionPage />} />
+              <Route path="/databricks" element={<DatabricksPage />} />
+            </Routes>
+          </Suspense>
+        </ErrorBoundary>
       </Layout>
     </Dropzone>
   );

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gzip
 import json
 import traceback
 from http import HTTPStatus
@@ -50,8 +51,17 @@ class BackendHandler(BaseHTTPRequestHandler):
 
     def _json_response(self, data: Any, status: int = 200) -> None:
         body = json.dumps(data).encode()
+        accept_enc = self.headers.get("Accept-Encoding", "")
+        gzip_ok = "gzip" in accept_enc and len(body) > 1024
+
+        if gzip_ok:
+            body = gzip.compress(body, compresslevel=4)
+
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        if gzip_ok:
+            self.send_header("Content-Encoding", "gzip")
         self._cors_headers()
         self.end_headers()
         self.wfile.write(body)
@@ -89,9 +99,9 @@ class BackendHandler(BaseHTTPRequestHandler):
 
         if path == "/api/files":
             qs = parse_qs(parsed.query)
-            directory = qs.get("dir", [self.server.root_dir])[0]
+            directories = qs.get("dir", list(self.server.root_dirs))
             recursive = qs.get("recursive", ["0"])[0].lower() in {"1", "true", "yes", "on"}
-            return self._handle_files(directory, recursive=recursive)
+            return self._handle_files(directories, recursive=recursive)
 
         if path.startswith("/api/download/"):
             filename = unquote(path[len("/api/download/"):])
@@ -128,6 +138,9 @@ class BackendHandler(BaseHTTPRequestHandler):
         if path == "/api/resolve-files":
             return self._handle_resolve_files()
 
+        if path == "/api/index/add":
+            return self._handle_index_add()
+
         if path == "/api/scan":
             return self._handle_scan()
 
@@ -152,6 +165,7 @@ class BackendHandler(BaseHTTPRequestHandler):
         self._json_response({
             "status": "ok",
             "rootDir": self.server.root_dir,
+            "rootDirs": list(self.server.root_dirs),
             "version": 4,
             "indexing": index_status["indexing"],
             "indexReady": index_status["ready"],
@@ -162,29 +176,81 @@ class BackendHandler(BaseHTTPRequestHandler):
     def _resolve_file(self, filename: str) -> Path | None:
         return self.server.resolve_file(filename)
 
-    def _handle_files(self, directory: str, *, recursive: bool = False) -> None:
+    def _handle_files(self, directories: list[str], *, recursive: bool = False) -> None:
         try:
-            base = Path(directory).resolve()
-            if not base.is_dir():
-                return self._error(400, f"Not a directory: {directory}")
+            resolved_bases: list[Path] = []
+            for d in directories:
+                base = Path(d).resolve()
+                if not base.is_dir():
+                    return self._error(400, f"Not a directory: {d}")
+                resolved_bases.append(base)
 
-            files = list_hdf5_files_in_dir(base, recursive=recursive)
+            seen_paths: set[str] = set()
+            files: list[dict[str, Any]] = []
+            for base in resolved_bases:
+                for entry in list_hdf5_files_in_dir(base, recursive=recursive):
+                    if entry["path"] in seen_paths:
+                        continue
+                    seen_paths.add(entry["path"])
+                    files.append(entry)
+
             self._json_response({
-                "directory": str(base),
+                "directory": str(resolved_bases[0]),
+                "directories": [str(b) for b in resolved_bases],
                 "recursive": recursive,
                 "files": files,
             })
         except Exception as exc:
             self._error(500, str(exc))
 
+    def _handle_index_add(self) -> None:
+        try:
+            body = self._read_json_body()
+            new_path = body.get("path")
+            if not new_path or not isinstance(new_path, str):
+                return self._error(400, "Missing 'path' field.")
+
+            try:
+                status = self.server.add_root(new_path)
+            except ValueError as exc:
+                return self._error(400, str(exc))
+
+            self._json_response({
+                "rootDirs": list(self.server.root_dirs),
+                "added": status.get("added", 0),
+                "indexedFileCount": status["count"],
+                "indexReady": status["ready"],
+                "indexing": status["indexing"],
+                "indexError": status["error"],
+            })
+        except Exception as exc:
+            self._error(500, str(exc))
+
     def _handle_resolve_files(self) -> None:
-        """Resolve a list of filenames to absolute paths under the server root."""
+        """Resolve a list of filenames to absolute paths under the server root.
+
+        The body accepts:
+            { "names": [str, ...], "paths": { name: absolute_path | null, ... } }
+        When `paths[name]` is a real file on disk, we trust it directly and
+        record it in the index for next time. Otherwise we fall back to
+        basename lookup against the index built from --dir roots.
+        """
         try:
             body = self._read_json_body()
             names: list[str] = body.get("names", [])
+            hint_paths: dict[str, Any] = body.get("paths", {}) or {}
 
             resolved: dict[str, str | None] = {}
             for name in names:
+                hint = hint_paths.get(name) if isinstance(hint_paths, dict) else None
+                if isinstance(hint, str) and hint:
+                    hp = Path(hint)
+                    if hp.is_file():
+                        # Cache for future basename lookups.
+                        self.server.resolve_file(str(hp))
+                        resolved[name] = str(hp)
+                        continue
+
                 path = self._resolve_file(name)
                 resolved[name] = str(path) if path else None
 

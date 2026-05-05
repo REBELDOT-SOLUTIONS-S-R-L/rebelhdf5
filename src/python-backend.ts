@@ -6,11 +6,11 @@
  * WASM path for large (multi-GB) files — especially those with video data.
  */
 
-import type {
-  DatasetProcessingCutRange,
-  DatasetProcessingOperation,
-  DatasetProcessingProgress,
-  DatasetProcessingResultMeta,
+import  {
+  type DatasetProcessingCutRange,
+  type DatasetProcessingOperation,
+  type DatasetProcessingProgress,
+  type DatasetProcessingResultMeta,
 } from './pose-trace/types';
 
 const DEFAULT_PORT = __PYTHON_BACKEND_PORT__;
@@ -22,11 +22,21 @@ export const PYTHON_BACKEND_BASE_URL = BASE_URL;
 export interface PythonBackendStatus {
   available: boolean;
   rootDir: string | null;
+  rootDirs?: string[];
   version: number | null;
   indexing?: boolean;
   indexReady?: boolean;
   indexedFileCount?: number;
   indexError?: string | null;
+}
+
+export interface PythonAddRootResult {
+  rootDirs: string[];
+  added: number;
+  indexedFileCount: number;
+  indexReady: boolean;
+  indexing: boolean;
+  indexError: string | null;
 }
 
 export interface PythonFileEntry {
@@ -109,6 +119,7 @@ export async function checkBackend(timeoutMs = HEALTH_TIMEOUT_MS): Promise<Pytho
     const data: {
       status: string;
       rootDir: string;
+      rootDirs?: string[];
       version?: number;
       indexing?: boolean;
       indexReady?: boolean;
@@ -118,6 +129,7 @@ export async function checkBackend(timeoutMs = HEALTH_TIMEOUT_MS): Promise<Pytho
     return {
       available: data.status === 'ok',
       rootDir: data.rootDir,
+      rootDirs: data.rootDirs,
       version: Number.isFinite(data.version) ? data.version ?? null : null,
       indexing: data.indexing,
       indexReady: data.indexReady,
@@ -134,7 +146,7 @@ export async function checkBackend(timeoutMs = HEALTH_TIMEOUT_MS): Promise<Pytho
 export function pollBackendStatus(
   onStatus: (status: PythonBackendStatus) => void,
   unavailableIntervalMs = 1000,
-  availableIntervalMs = 10000,
+  availableIntervalMs = 10_000,
 ): () => void {
   let cancelled = false;
   let timeoutId: ReturnType<typeof globalThis.setTimeout> | null = null;
@@ -188,14 +200,26 @@ export async function listFiles(
   return data;
 }
 
-/** Resolve filenames to absolute paths on the server. */
+/** Resolve filenames to absolute paths on the server.
+ *
+ * Pass `paths[name] = absolutePath` for any opened file whose absolute server
+ * path is already known (e.g. files that came from `/api/files`). The server
+ * trusts those directly and skips the basename index — meaning files can live
+ * outside the indexed `--dir` roots.
+ */
 export async function resolveFiles(
   names: string[],
+  paths: Record<string, string | undefined> = {},
 ): Promise<PythonResolvedFilesResult> {
+  const cleanPaths: Record<string, string> = {};
+  for (const [name, p] of Object.entries(paths)) {
+    if (p) {cleanPaths[name] = p;}
+  }
+
   const response = await fetch(`${BASE_URL}/api/resolve-files`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ names }),
+    body: JSON.stringify({ names, paths: cleanPaths }),
   });
 
   if (!response.ok) {
@@ -204,6 +228,21 @@ export async function resolveFiles(
 
   const data: PythonResolvedFilesResult = await response.json();
   return data;
+}
+
+/** Tell the backend to also index this directory. */
+export async function addBackendRoot(path: string): Promise<PythonAddRootResult> {
+  const response = await fetch(`${BASE_URL}/api/index/add`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path }),
+  });
+
+  if (!response.ok) {
+    throw new Error(await parseErrorResponse(response));
+  }
+
+  return await response.json() as PythonAddRootResult;
 }
 
 /** Scan files for their keys and demo counts. */
@@ -306,7 +345,8 @@ export async function runProcess(
         continue;
       }
 
-      if (event.type === 'progress') {
+      switch (event.type) {
+      case 'progress':
         callbacks.onProgress?.({
           phase: event.phase as DatasetProcessingProgress['phase'],
           overallDemoIndex: event.overallDemoIndex as number,
@@ -314,7 +354,10 @@ export async function runProcess(
           currentSourceName: event.currentSourceName as string,
           currentDemoName: event.currentDemoName as string,
         });
-      } else if (event.type === 'done') {
+      
+      break;
+      
+      case 'done': {
         const fileName = event.fileName as string;
         finalResult = {
           fileName,
@@ -323,8 +366,13 @@ export async function runProcess(
           fileSize: event.fileSize as number,
           downloadUrl: `${BASE_URL}/api/download/${encodeURIComponent(fileName)}`,
         };
-      } else if (event.type === 'error') {
+      
+      break;
+      }
+      case 'error':
         throw new Error(event.message as string);
+      
+      // No default
       }
     }
   }

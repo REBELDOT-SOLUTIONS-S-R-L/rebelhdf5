@@ -32,9 +32,9 @@ importers:
       modern-normalize:
         specifier: 3.0.1
         version: 3.0.1
-      plotly.js-dist-min:
+      plotly.js:
         specifier: 3.4.0
-        version: 3.4.0
+        version: 3.4.0(mapbox-gl@1.13.3)
       react:
         specifier: 18.3.1
         version: 18.3.1
@@ -55,7 +55,7 @@ importers:
         version: 5.6.0(react@18.3.1)
       react-plotly.js:
         specifier: 2.6.0
-        version: 2.6.0(plotly.js@3.5.1(mapbox-gl@1.13.3))(react@18.3.1)
+        version: 2.6.0(plotly.js@3.4.0(mapbox-gl@1.13.3))(react@18.3.1)
       react-router-dom:
         specifier: 6.3.0
         version: 6.3.0(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
@@ -1302,6 +1302,9 @@ packages:
   caniuse-lite@1.0.30001788:
     resolution: {integrity: sha512-6q8HFp+lOQtcf7wBK+uEenxymVWkGKkjFpCvw5W25cmMwEDU45p1xQFBQv8JDlMMry7eNxyBaR+qxgmTUZkIRQ==}
 
+  canvas-fit@1.5.0:
+    resolution: {integrity: sha512-onIcjRpz69/Hx5bB5HGbYKUF2uC6QT6Gp+pfpGm3A7mPfcluSLV5v4Zu+oflDUwLdUw0rLIBhUbi0v8hM4FJQQ==}
+
   chai@5.3.3:
     resolution: {integrity: sha512-4zNhdJD/iOjSH0A05ea+Ke6MU5mmpQcbQsSOkgdaUMJ9zTlDTD/GYlwohmIE2u0gaxHYiVHEn1Fw9mZ/ktJWgw==}
     engines: {node: '>=18'}
@@ -1335,6 +1338,9 @@ packages:
     resolution: {integrity: sha512-GfisEZEJvzKrmGWkvfhgzcz/BllN1USeqD2V6tg14OAOgaCD2Z/PUEuxnAZ/nPvmaHRG7a8y77p1T/IRQ4D1Hw==}
     engines: {node: '>=4'}
 
+  color-alpha@1.0.4:
+    resolution: {integrity: sha512-lr8/t5NPozTSqli+duAN+x+no/2WaKTeWvxhHGN+aXT6AJ8vPlzLa7UriyjWak0pSC2jHol9JgjBYnnHsGha9A==}
+
   color-alpha@1.1.3:
     resolution: {integrity: sha512-krPYBO1RSO5LH4AGb/b6z70O1Ip2o0F0+0cVFN5FN99jfQtZFT08rQyg+9oOBNJYAn3SRwJIFC8jUEOKz7PisA==}
 
@@ -1357,6 +1363,9 @@ packages:
 
   color-parse@1.4.3:
     resolution: {integrity: sha512-BADfVl/FHkQkyo8sRBwMYBqemqsgnu7JZAwUgvBvuwwuNUZAhSvLTbsEErS5bQXzOjDR0dWzJ4vXN2Q+QoPx0A==}
+
+  color-parse@2.0.0:
+    resolution: {integrity: sha512-g2Z+QnWsdHLppAbrpcFWo629kLOnOPtpxYV69GCqm92gqSgyXbzlfyN3MXs0412fPBkFmiuS+rXposgBgBa6Kg==}
 
   color-parse@2.0.2:
     resolution: {integrity: sha512-eCtOz5w5ttWIUcaKLiktF+DxZO1R9KLNY/xhbV6CkhM7sR3GhVghmt6X6yOnzeaM24po+Z9/S1apbXMwA3Iepw==}
@@ -1661,6 +1670,9 @@ packages:
 
   electron-to-chromium@1.5.336:
     resolution: {integrity: sha512-AbH9q9J455r/nLmdNZes0G0ZKcRX73FicwowalLs6ijwOmCJSRRrLX63lcAlzy9ux3dWK1w1+1nsBJEWN11hcQ==}
+
+  element-size@1.1.1:
+    resolution: {integrity: sha512-eaN+GMOq/Q+BIWy0ybsgpcYImjGIdNLyjLFJU4XsLHXYQao5jCNb36GyN6C2qwmDDYSfIBmKpPpr4VnBdLCsPQ==}
 
   elementary-circuits-directed-graph@1.3.1:
     resolution: {integrity: sha512-ZEiB5qkn2adYmpXGnJKkxT8uJHlW/mxmBpmeqawEHzPxh9HkLD4/1mFYX5l0On+f6rcPIt8/EWlRU2Vo3fX6dQ==}
@@ -2597,8 +2609,17 @@ packages:
     resolution: {integrity: sha512-VqlMdYi59Uch6fnUPxnpijWUQe+TW6zeWCvyr6Mb7JibheHzSuAAoJi2c71ZwIaWKpECpGpYHoaaBp6rBRr+/g==}
     engines: {node: '>=6'}
 
+  mouse-change@1.4.0:
+    resolution: {integrity: sha512-vpN0s+zLL2ykyyUDh+fayu9Xkor5v/zRD9jhSqjRS1cJTGS0+oakVZzNm5n19JvvEj0you+MXlYTpNxUDQUjkQ==}
+
   mouse-event-offset@3.0.2:
     resolution: {integrity: sha512-s9sqOs5B1Ykox3Xo8b3Ss2IQju4UwlW6LSR+Q5FXWpprJ5fzMLefIIItr3PH8RwzfGy6gxs/4GAmiNuZScE25w==}
+
+  mouse-event@1.0.5:
+    resolution: {integrity: sha512-ItUxtL2IkeSKSp9cyaX2JLUuKk2uMoxBg4bbOWVd29+CskYJR9BGsUqtXenNzKbnDshvupjUewDIYVrOB6NmGw==}
+
+  mouse-wheel@1.2.0:
+    resolution: {integrity: sha512-+OfYBiUOCTWcTECES49neZwL5AoGkXE+lFjIvzwNCnYRlso+EnfvovcBxGoyQ0yQt806eSPjS675K0EwWknXmw==}
 
   ms@2.0.0:
     resolution: {integrity: sha512-Tpp60P6IUJDTuOq/5Z8cdskzJujfwqfOTkrwIwj7IRISpnkJnT6SyJ4PCPnGMoFjC9ddhal5KVIYtAt97ix05A==}
@@ -2770,11 +2791,8 @@ packages:
     resolution: {integrity: sha512-QP88BAKvMam/3NxH6vj2o21R6MjxZUAd6nlwAS/pnGvN9IVLocLHxGYIzFhg6fUQ+5th6P4dv4eW9jX3DSIj7A==}
     engines: {node: '>=12'}
 
-  plotly.js-dist-min@3.4.0:
-    resolution: {integrity: sha512-eo7xh7oyE9fFoE/wintgmvfOjvTKwCb3wRf9ShQv90du4n+EVkOY7w5qEkmUS9SSkHRnAw8sk/0QI7wEc5U+8Q==}
-
-  plotly.js@3.5.1:
-    resolution: {integrity: sha512-rUzQ7Q46whi1aWT2JlvKE2dnryNORPrxyy66OGSMXgejK3XgD4ysD9SapMOI1RzzUJyX0KbfVDFcB9/DqOyH9Q==}
+  plotly.js@3.4.0:
+    resolution: {integrity: sha512-jdWfHLB8AxlGUmVhqJTGEKdwjCKGn9Yi8yg16067/JyqseuSado7F6IOM1XPZspdZyO/cf8IPuy7ROlVhqZZNw==}
     engines: {node: '>=18.0.0'}
 
   pluralize@8.0.0:
@@ -3041,6 +3059,9 @@ packages:
     resolution: {integrity: sha512-9LkiTwjUh6rT555DtE9rTX+BKByPfrMzEAtnlEtdEwr3Nkffwiihqe2bWADg+OQRjt9gl6ICdmB/ZFDCGAtSow==}
     engines: {node: '>= 4'}
 
+  right-now@1.0.0:
+    resolution: {integrity: sha512-DA8+YS+sMIVpbsuKgy+Z67L9Lxb1p05mNxRpDPNksPDEFir4vmBlUtuN9jkTGn9YMMdlBuK7XQgFiz6ws+yhSg==}
+
   robust-predicates@3.0.3:
     resolution: {integrity: sha512-NS3levdsRIUOmiJ8FZWCP7LG3QpJyrs/TE0Zpf1yvZu8cAJJ6QMW92H1c7kWpdIHo8RvmLxN/o2JXTKHp74lUA==}
 
@@ -3142,6 +3163,9 @@ packages:
   signal-exit@3.0.7:
     resolution: {integrity: sha512-wnD2ZE+l+SPC/uoS0vXeE9L1+0wuaMqKlfz9AMUo38JsyLSBWSFcHR1Rri62LZc12vLr1gb3jl7iwQhgwpAbGQ==}
 
+  signum@1.0.0:
+    resolution: {integrity: sha512-yodFGwcyt59XRh7w5W3jPcIQb3Bwi21suEfT7MAWnBX3iCdklJpgDgvGT9o04UonglZN5SNMfJFkHIR/jO8GHw==}
+
   source-map-js@1.2.1:
     resolution: {integrity: sha512-UXWMKhLOwVKb728IUtQPXxfYU+usdybtUrK/8uGE8CQMvrhOpwvzDBwj0QhSL7MQc7vIsISBG8VQ8+IDQxpfQA==}
     engines: {node: '>=0.10.0'}
@@ -3232,6 +3256,9 @@ packages:
   supercluster@8.0.1:
     resolution: {integrity: sha512-IiOea5kJ9iqzD2t7QJq/cREyLHTtSmUT6gQsweojg9WH2sYJqZK9SswTu6jrscO6D1G5v5vYZ9ru/eq85lXeZQ==}
 
+  superscript-text@1.0.0:
+    resolution: {integrity: sha512-gwu8l5MtRZ6koO0icVTlmN5pm7Dhh1+Xpe9O4x6ObMAsW+3jPbW14d1DsBq1F4wiI+WOFjXF35pslgec/G8yCQ==}
+
   supports-color@7.2.0:
     resolution: {integrity: sha512-qpCAvRl9stuOHveKsn7HncJRvv501qIacKzQlO/+Lwxc9+0q2wLyv4Dfvt80/DPn2pqOBsJdDiogXGR9+OvwRw==}
     engines: {node: '>=8'}
@@ -3292,6 +3319,9 @@ packages:
 
   to-float32@1.1.0:
     resolution: {integrity: sha512-keDnAusn/vc+R3iEiSDw8TOF7gPiTLdK1ArvWtYbJQiVfmRg6i/CAvbKq3uIS0vWroAC7ZecN3DjQKw3aSklUg==}
+
+  to-px@1.0.1:
+    resolution: {integrity: sha512-2y3LjBeIZYL19e5gczp14/uRWFDtDUErJPVN3VU9a7SJO+RjGRtYR47aMN2bZgGlxvW4ZcEz2ddUPVHXcMfuXw==}
 
   to-px@1.1.0:
     resolution: {integrity: sha512-bfg3GLYrGoEzrGoE05TAL/Uw+H/qrf2ptr9V3W7U0lkjjyYnIfgxmVLUfhQ1hZpIQwin81uxhDjvUkDYsC0xWw==}
@@ -4927,6 +4957,10 @@ snapshots:
 
   caniuse-lite@1.0.30001788: {}
 
+  canvas-fit@1.5.0:
+    dependencies:
+      element-size: 1.1.1
+
   chai@5.3.3:
     dependencies:
       assertion-error: 2.0.1
@@ -4958,6 +4992,10 @@ snapshots:
     dependencies:
       escape-string-regexp: 1.0.5
 
+  color-alpha@1.0.4:
+    dependencies:
+      color-parse: 1.4.3
+
   color-alpha@1.1.3:
     dependencies:
       color-parse: 1.4.3
@@ -4981,6 +5019,10 @@ snapshots:
       dtype: 2.0.0
 
   color-parse@1.4.3:
+    dependencies:
+      color-name: 1.1.4
+
+  color-parse@2.0.0:
     dependencies:
       color-name: 1.1.4
 
@@ -5275,6 +5317,8 @@ snapshots:
   earcut@3.0.2: {}
 
   electron-to-chromium@1.5.336: {}
+
+  element-size@1.1.1: {}
 
   elementary-circuits-directed-graph@1.3.1:
     dependencies:
@@ -6425,7 +6469,19 @@ snapshots:
 
   modern-normalize@3.0.1: {}
 
+  mouse-change@1.4.0:
+    dependencies:
+      mouse-event: 1.0.5
+
   mouse-event-offset@3.0.2: {}
+
+  mouse-event@1.0.5: {}
+
+  mouse-wheel@1.2.0:
+    dependencies:
+      right-now: 1.0.0
+      signum: 1.0.0
+      to-px: 1.1.0
 
   ms@2.0.0: {}
 
@@ -6601,9 +6657,7 @@ snapshots:
 
   picomatch@4.0.4: {}
 
-  plotly.js-dist-min@3.4.0: {}
-
-  plotly.js@3.5.1(mapbox-gl@1.13.3):
+  plotly.js@3.4.0(mapbox-gl@1.13.3):
     dependencies:
       '@plotly/d3': 3.8.2
       '@plotly/d3-sankey': 0.7.2
@@ -6614,7 +6668,10 @@ snapshots:
       '@turf/bbox': 7.3.5
       '@turf/centroid': 7.3.5
       base64-arraybuffer: 1.0.2
+      canvas-fit: 1.5.0
+      color-alpha: 1.0.4
       color-normalize: 1.5.0
+      color-parse: 2.0.0
       color-rgba: 3.0.0
       country-regex: 1.1.0
       d3-force: 1.2.1
@@ -6632,7 +6689,9 @@ snapshots:
       has-passive-events: 1.0.0
       is-mobile: 4.0.0
       maplibre-gl: 4.7.1
+      mouse-change: 1.4.0
       mouse-event-offset: 3.0.2
+      mouse-wheel: 1.2.0
       native-promise-only: 0.8.1
       parse-svg-path: 0.1.2
       point-in-polygon: 1.1.0
@@ -6643,8 +6702,10 @@ snapshots:
       regl-scatter2d: 3.4.0
       regl-splom: 1.0.14
       strongly-connected-components: 1.0.1
+      superscript-text: 1.0.0
       svg-path-sdf: 1.1.3
       tinycolor2: 1.6.0
+      to-px: 1.0.1
       topojson-client: 3.1.0
       webgl-context: 2.2.0
       world-calendars: 1.0.4
@@ -6766,9 +6827,9 @@ snapshots:
       react-dom: 18.3.1(react@18.3.1)
       resize-observer-polyfill: 1.5.1
 
-  react-plotly.js@2.6.0(plotly.js@3.5.1(mapbox-gl@1.13.3))(react@18.3.1):
+  react-plotly.js@2.6.0(plotly.js@3.4.0(mapbox-gl@1.13.3))(react@18.3.1):
     dependencies:
-      plotly.js: 3.5.1(mapbox-gl@1.13.3)
+      plotly.js: 3.4.0(mapbox-gl@1.13.3)
       prop-types: 15.8.1
       react: 18.3.1
 
@@ -6970,6 +7031,8 @@ snapshots:
 
   retry@0.12.0: {}
 
+  right-now@1.0.0: {}
+
   robust-predicates@3.0.3: {}
 
   rolldown@1.0.0-rc.13:
@@ -7102,6 +7165,8 @@ snapshots:
 
   signal-exit@3.0.7: {}
 
+  signum@1.0.0: {}
+
   source-map-js@1.2.1: {}
 
   source-map@0.6.1: {}
@@ -7229,6 +7294,8 @@ snapshots:
     dependencies:
       kdbush: 4.0.2
 
+  superscript-text@1.0.0: {}
+
   supports-color@7.2.0:
     dependencies:
       has-flag: 4.0.0
@@ -7288,6 +7355,10 @@ snapshots:
   tinyspy@4.0.4: {}
 
   to-float32@1.1.0: {}
+
+  to-px@1.0.1:
+    dependencies:
+      parse-unit: 1.0.1
 
   to-px@1.1.0:
     dependencies:

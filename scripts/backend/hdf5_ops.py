@@ -22,19 +22,28 @@ def collect_dataset_paths(group: h5py.Group) -> list[str]:
 def collect_file_dataset_paths(
     data_group: h5py.Group,
 ) -> tuple[list[str], dict[str, int], list[dict[str, Any]]]:
-    """Collect dataset paths across every demo in a file."""
-    key_counts: dict[str, int] = {}
-    dataset_details: list[dict[str, Any]] = []
+    """Collect dataset paths across every demo in a file.
 
-    for demo_name in sort_demo_names(list(data_group.keys())):
+    Demos in a single file share a schema, so we walk the first demo's tree
+    once to learn the keys, then per remaining demo only check membership
+    (h5py `in` is O(1) per key). This drops scan time from O(N * S) to
+    O(S + N * K) where N = demos, S = subtree size, K = unique keys.
+    """
+    demo_names = sort_demo_names(list(data_group.keys()))
+    if not demo_names:
+        return [], {}, []
+
+    first = data_group[demo_names[0]]
+    keys = collect_dataset_paths(first)
+    key_counts: dict[str, int] = dict.fromkeys(keys, 0)
+
+    for demo_name in demo_names:
         demo_group = data_group[demo_name]
-        demo_keys = collect_dataset_paths(demo_group)
-        for key in demo_keys:
-            key_counts[key] = key_counts.get(key, 0) + 1
+        for key in keys:
+            if key in demo_group:
+                key_counts[key] += 1
 
-        if not dataset_details:
-            dataset_details = collect_dataset_info(demo_group)
-
+    dataset_details = collect_dataset_info(first)
     return sorted(key_counts), key_counts, dataset_details
 
 
