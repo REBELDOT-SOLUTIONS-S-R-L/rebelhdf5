@@ -117,10 +117,10 @@ scale.
 │   ├── <span class="folder">initial_state/</span>
 │   │   ├── <span class="folder">articulation/</span>
 │   │   │   └── <span class="folder">articulation_&lt;N&gt;/</span>
-│   │   │       └── <span class="file">joint_positions</span>
+│   │   │       └── <span class="file">joint_positions</span><span class="comment"># (T, 12) initial joint positions of the articulation</span>
 │   │   │
 │   │   └── <span class="folder">object_pose/</span>
-│   │       └── <span class="file">object_&lt;N&gt;</span>
+│   │       └── <span class="file">object_&lt;N&gt;</span><span class="comment"># (T, 12) initial positions of the objects</span>
 │   │
 │   └── <span class="folder">obs/</span>
 │       ├── <span class="file">actions</span><span class="comment"># (T, 12) joint-space target actions</span>
