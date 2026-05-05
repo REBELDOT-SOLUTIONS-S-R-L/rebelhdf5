@@ -18,6 +18,9 @@
   "scripts": {
     "start": "vite",
     "build": "vite build",
+    "desktop": "vite build && electron electron/main.cjs",
+    "desktop:run": "electron electron/main.cjs",
+    "desktop:install-launcher": "scripts/install_desktop_launcher.sh",
     "preview": "vite preview",
     "lint": "pnpm \"/^lint:/\"",
     "lint:eslint": "eslint --max-warnings=0",
@@ -52,6 +55,7 @@
     "@types/react": "^18.3.28",
     "@types/react-dom": "^18.3.7",
     "@vitejs/plugin-react": "6.0.1",
+    "electron": "41.5.0",
     "eslint": "9.39.4",
     "prettier": "3.8.3",
     "typescript": "5.9.3",

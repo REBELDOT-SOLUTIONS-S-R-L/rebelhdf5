@@ -18,6 +18,7 @@ const ReactPlot = factory(Plotly as object);
 function Plot(props: PlotParams) {
   const {
     config,
+    layout,
     onInitialized,
     onPurge,
     onUpdate,
@@ -33,8 +34,13 @@ function Plot(props: PlotParams) {
     [config],
   );
   const mergedStyle = useMemo(
-    () => ({ width: '100%', minWidth: 0, ...style }),
-    [style],
+    () => ({
+      width: '100%',
+      minWidth: 0,
+      height: layout?.height,
+      ...style,
+    }),
+    [layout?.height, style],
   );
 
   const scheduleResize = useCallback(() => {
@@ -94,6 +100,7 @@ function Plot(props: PlotParams) {
     <ReactPlot
       {...plotProps}
       config={mergedConfig}
+      layout={layout}
       onInitialized={(figure: Readonly<Figure>, nextGraphDiv: Readonly<HTMLElement>) => {
         rememberGraphDiv(nextGraphDiv);
         onInitialized?.(figure, nextGraphDiv);

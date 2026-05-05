@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   FiChevronDown,
   FiChevronRight,
@@ -26,17 +26,13 @@ import  {
   type PoseTraceSource,
 } from './pose-trace/types';
 import {
-  addBackendRoot,
-  listFiles,
   pollBackendStatus,
   type PythonBackendStatus,
-  type PythonFileEntry,
   type PythonScanResult,
-  resolveFiles,
   runProcess,
   scanFiles,
 } from './python-backend';
-import { FileService, type H5File, useStore } from './stores';
+import { type H5File, useStore } from './stores';
 import { resolveFileUrl } from './utils';
 
 interface ResolvedFileState {
@@ -563,11 +559,6 @@ function DatasetProcessingPage() {
   const [backendScan, setBackendScan] = useState<PythonScanResult | null>(null);
   const [backendLoading, setBackendLoading] = useState(false);
   const [backendError, setBackendError] = useState<string | null>(null);
-  const [backendFiles, setBackendFiles] = useState<PythonFileEntry[]>([]);
-  const [backendFilesLoading, setBackendFilesLoading] = useState(false);
-  const [backendFilesError, setBackendFilesError] = useState<string | null>(null);
-  const [backendFilesRefreshKey, setBackendFilesRefreshKey] = useState(0);
-  const [resolveRetryKey, setResolveRetryKey] = useState(0);
   const previousAvailableKeyPathsRef = useRef<string[]>([]);
   const backendAutoEnabledRef = useRef(false);
 
@@ -589,37 +580,6 @@ function DatasetProcessingPage() {
     }
   }, [backend.available, useBackend]);
 
-  useEffect(() => {
-    if (!useBackend || !backend.available || !backend.rootDir) {
-      setBackendFiles([]);
-      setBackendFilesLoading(false);
-      setBackendFilesError(null);
-      return;
-    }
-
-    let cancelled = false;
-    setBackendFilesLoading(true);
-    setBackendFilesError(null);
-
-    // Pass undefined so the server lists every indexed root, not just the first.
-    void listFiles(undefined, true)
-      .then((result) => {
-        if (!cancelled) {
-          setBackendFiles(result.files);
-          setBackendFilesLoading(false);
-        }
-      })
-      .catch((error: unknown) => {
-        if (!cancelled) {
-          setBackendFiles([]);
-          setBackendFilesError(error instanceof Error ? error.message : 'Could not list server files.');
-          setBackendFilesLoading(false);
-        }
-      });
-
-    return () => { cancelled = true; };
-  }, [backend.available, backend.rootDir, backendFilesRefreshKey, useBackend]);
-
   const availableFiles = useMemo(() => {
     const byUrl = new Map<string, H5File>();
     if (file) {
@@ -634,32 +594,23 @@ function DatasetProcessingPage() {
     return [...byUrl.values()];
   }, [file, opened]);
 
-  // Source options are always restricted to files the user has opened.
-  // When the Python backend is active, we additionally drop any opened file
-  // that the server can't locate (so we never trigger a "could not find on
-  // server" failure mid-flow); skippedNames lets us surface that fact in the UI.
+  // Source options are always restricted to files the user has opened. In
+  // desktop backend mode we only use explicit filesystem paths from Electron;
+  // guessing by basename is unreliable and no longer needed locally.
   const { sourceOptions, skippedNames } = useMemo<{
     sourceOptions: SourceOption[];
     skippedNames: string[];
   }>(() => {
     if (useBackend && backend.available) {
-      const pathByName = new Map<string, string>();
-      for (const entry of backendFiles) {
-        if (!pathByName.has(entry.name)) {
-          pathByName.set(entry.name, entry.path);
-        }
-      }
-
       const options: SourceOption[] = [];
       const skipped: string[] = [];
       for (const f of availableFiles) {
-        const backendPath = pathByName.get(f.name);
-        if (backendPath) {
+        if (f.serverPath) {
           options.push({
-            id: getBackendSourceId(backendPath),
+            id: getBackendSourceId(f.serverPath),
             name: f.name,
             label: f.name,
-            backendPath,
+            backendPath: f.serverPath,
           });
         } else {
           skipped.push(f.name);
@@ -672,7 +623,7 @@ function DatasetProcessingPage() {
       sourceOptions: availableFiles.map((f) => ({ id: f.url, name: f.name, label: f.name })),
       skippedNames: [],
     };
-  }, [availableFiles, backend.available, backendFiles, useBackend]);
+  }, [availableFiles, backend.available, useBackend]);
 
   const sourceOptionMap = useMemo(
     () => new Map(sourceOptions.map((entry) => [entry.id, entry])),
@@ -736,129 +687,19 @@ function DatasetProcessingPage() {
     [orderedSelectedSourceUrls, sourceOptionMap],
   );
 
-  // Resolve opened file names to server-side paths via the resolve-files endpoint.
-  const [resolvedPaths, setResolvedPaths] = useState<Record<string, string | null>>({});
-  const [resolveError, setResolveError] = useState<string | null>(null);
-  const [missingNames, setMissingNames] = useState<string[]>([]);
-  const [addingRoot, setAddingRoot] = useState(false);
-
-  const namesToResolve = useMemo(
-    () => {
-      if (!useBackend || !backend.available) {
-        return [];
-      }
-
-      return orderedSelectedSourceUrls
-        .map((url) => sourceOptionMap.get(url))
-        .filter((entry): entry is SourceOption => entry !== undefined && !entry.backendPath)
-        .map((entry) => entry.name)
-        .filter(Boolean);
-    },
-    [backend.available, orderedSelectedSourceUrls, sourceOptionMap, useBackend],
-  );
-
-  // Pre-known server paths from the opened-file store (e.g. files that arrived
-  // through a backend listing). Letting the backend trust these means files
-  // outside the indexed --dir roots still resolve.
-  const pathHintsForResolve = useMemo(() => {
-    const hints: Record<string, string> = {};
-    for (const f of availableFiles) {
-      if (f.serverPath) {
-        hints[f.name] = f.serverPath;
-      }
-    }
-    return hints;
-  }, [availableFiles]);
-
-  useEffect(() => {
-    if (namesToResolve.length === 0) {
-      setResolvedPaths({});
-      setResolveError(null);
-      setMissingNames([]);
-      return;
+  const resolveError = useMemo(() => {
+    if (!useBackend || !backend.available) {
+      return null;
     }
 
-    let cancelled = false;
-    let retryTimeout: ReturnType<typeof globalThis.setTimeout> | null = null;
+    const missingPaths = selectedSourceOptions
+      .filter((entry) => !entry.backendPath)
+      .map((entry) => entry.name);
 
-    async function resolveSelectedFiles() {
-      try {
-        const result = await resolveFiles(namesToResolve, pathHintsForResolve);
-        if (cancelled) {
-          return;
-        }
-
-        setResolvedPaths(result.resolved);
-        const missing = namesToResolve.filter((n) => !result.resolved[n]);
-
-        if (result.indexError) {
-          setMissingNames([]);
-          setResolveError(`Python server file index failed: ${result.indexError}`);
-          return;
-        }
-
-        if (missing.length > 0 && result.indexing) {
-          setMissingNames([]);
-          setResolveError(null);
-          retryTimeout = globalThis.setTimeout(() => {
-            setResolveRetryKey((current) => current + 1);
-          }, 1500);
-          return;
-        }
-
-        if (missing.length > 0) {
-          setMissingNames(missing);
-          setResolveError(
-            `Could not find on server: ${missing.join(', ')}. Add the parent directory below or restart the backend with --dir <path>.`,
-          );
-        } else {
-          setMissingNames([]);
-          setResolveError(null);
-        }
-      } catch (error: unknown) {
-        if (!cancelled) {
-          setMissingNames([]);
-          setResolveError(
-            error instanceof Error
-              ? error.message
-              : 'Could not resolve files on the Python backend.',
-          );
-        }
-      }
-    }
-
-    void resolveSelectedFiles();
-
-    return () => {
-      cancelled = true;
-      if (retryTimeout) {
-        globalThis.clearTimeout(retryTimeout);
-      }
-    };
-  }, [namesToResolve, pathHintsForResolve, resolveRetryKey]);
-
-  const handleAddBackendRoot = useCallback(async () => {
-    const input = globalThis.prompt(
-      'Absolute path of a directory the backend should also index for HDF5 files:',
-      '',
-    );
-    const trimmed = input?.trim();
-    if (!trimmed) {
-      return;
-    }
-    setAddingRoot(true);
-    try {
-      await addBackendRoot(trimmed);
-      setBackendFilesRefreshKey((current) => current + 1);
-      setResolveRetryKey((current) => current + 1);
-    } catch (error: unknown) {
-      setResolveError(
-        error instanceof Error ? error.message : 'Failed to add directory to backend index.',
-      );
-    } finally {
-      setAddingRoot(false);
-    }
-  }, []);
+    return missingPaths.length > 0
+      ? `No local filesystem path for: ${missingPaths.join(', ')}. Reopen the file with the desktop file picker.`
+      : null;
+  }, [backend.available, selectedSourceOptions, useBackend]);
 
   const backendScanPaths = useMemo(
     () => {
@@ -870,10 +711,10 @@ function DatasetProcessingPage() {
         return [];
       }
 
-      const paths = selectedSourceOptions.map((entry) => entry.backendPath ?? resolvedPaths[entry.name]);
+      const paths = selectedSourceOptions.map((entry) => entry.backendPath);
       return paths.every((p): p is string => Boolean(p)) ? paths : [];
     },
-    [resolveError, resolvedPaths, selectedSourceOptions],
+    [resolveError, selectedSourceOptions],
   );
 
   // Demo names for the primary source in backend mode.
@@ -887,14 +728,13 @@ function DatasetProcessingPage() {
       return [];
     }
 
-    const resolvedPath = primaryOption.backendPath ?? resolvedPaths[primaryOption.name];
-    if (!resolvedPath) {
+    if (!primaryOption.backendPath) {
       return [];
     }
 
-    const fileInfo = backendScan.files.find((f) => f.path === resolvedPath);
+    const fileInfo = backendScan.files.find((f) => f.path === primaryOption.backendPath);
     return fileInfo?.demoNames ?? [];
-  }, [backendScan, primarySourceUrl, resolvedPaths, sourceOptionMap, useBackend]);
+  }, [backendScan, primarySourceUrl, sourceOptionMap, useBackend]);
 
   useEffect(() => {
     if (!useBackend || !backend.available || !backend.rootDir) {
@@ -999,7 +839,7 @@ function DatasetProcessingPage() {
     if (useBackend && backendScan) {
       if (operation === 'cut') {
         const primaryOption = primarySourceUrl ? sourceOptionMap.get(primarySourceUrl) ?? null : null;
-        const primaryPath = primaryOption ? primaryOption.backendPath ?? resolvedPaths[primaryOption.name] ?? null : null;
+        const primaryPath = primaryOption?.backendPath ?? null;
         const primaryInfo = backendScan.files.find((entry) => entry.path === primaryPath) ?? null;
         return buildBackendKeyInfos(primaryInfo);
       }
@@ -1017,7 +857,7 @@ function DatasetProcessingPage() {
 
     const readySources = selectedSourceStates.filter((entry) => entry.info);
     return sumKeyInfos(readySources.flatMap((entry) => entry.info?.keyPaths ?? []));
-  }, [backendScan, operation, primarySourceState, primarySourceUrl, resolvedPaths, selectedSourceStates, sourceOptionMap, useBackend]);
+  }, [backendScan, operation, primarySourceState, primarySourceUrl, selectedSourceStates, sourceOptionMap, useBackend]);
 
   const availableKeySet = useMemo(
     () => new Set(availableKeyInfos.map((keyInfo) => keyInfo.path)),
@@ -1306,14 +1146,7 @@ function DatasetProcessingPage() {
               <p className={styles.backendTitle}>Python Processing Server</p>
               <p className={styles.backendSubtitle}>
                 Native processing — orders of magnitude faster for large files with video data.
-                {backend.rootDir && <> Serving <code>{backend.rootDir}</code></>}
-                {backend.indexing && (
-                  <>
-                    {' '}Indexing HDF5 files
-                    {typeof backend.indexedFileCount === 'number' && ` (${backend.indexedFileCount} found so far)`}
-                    …
-                  </>
-                )}
+                {backend.outputDir && <> Output directory: <code>{backend.outputDir}</code></>}
               </p>
             </div>
             <label className={styles.backendToggle}>
@@ -1333,33 +1166,14 @@ function DatasetProcessingPage() {
           {useBackend && backendLoading && !backendError && (
             <p className={styles.infoText} style={{ marginTop: '0.75rem' }}>Scanning files…</p>
           )}
-          {useBackend && backendFilesLoading && !backendFilesError && (
-            <p className={styles.infoText} style={{ marginTop: '0.75rem' }}>Loading server HDF5 files…</p>
-          )}
-          {useBackend && backendFilesError && (
-            <p className={styles.errorText} style={{ marginTop: '0.75rem' }}>{backendFilesError}</p>
-          )}
           {useBackend && skippedNames.length > 0 && (
             <p className={styles.infoText} style={{ marginTop: '0.75rem' }}>
-              Hidden because the server can't find them under{' '}
-              <code>{(backend.rootDirs ?? [backend.rootDir]).filter(Boolean).join(', ') || 'PYTHON_BACKEND_DIR'}</code>:{' '}
-              {skippedNames.join(', ')}. Add the parent directory below or turn the backend off to process them via WASM.
+              Hidden from backend processing because they were opened without a desktop filesystem path:{' '}
+              {skippedNames.join(', ')}. Reopen them with the desktop file picker or turn the backend off to process them via WASM.
             </p>
           )}
           {useBackend && resolveError && (
             <p className={styles.errorText} style={{ marginTop: '0.75rem' }}>{resolveError}</p>
-          )}
-          {useBackend && (resolveError || missingNames.length > 0 || skippedNames.length > 0) && (
-            <div style={{ marginTop: '0.5rem' }}>
-              <button
-                type="button"
-                className={styles.openBtn}
-                onClick={() => { void handleAddBackendRoot(); }}
-                disabled={addingRoot}
-              >
-                {addingRoot ? 'Adding…' : 'Add directory to backend index…'}
-              </button>
-            </div>
           )}
         </section>
       )}

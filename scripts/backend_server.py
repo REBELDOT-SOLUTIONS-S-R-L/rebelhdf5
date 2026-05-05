@@ -43,8 +43,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="HDF5 dataset processing server.")
     parser.add_argument(
         "--dir", action="append", default=None,
-        help="Root directory to index HDF5 files from. Pass multiple times to "
-             "index several locations (default: cwd).",
+        help="Root directory to expose through /api/files. Pass multiple "
+             "times to expose several locations (default: cwd).",
     )
     parser.add_argument(
         "--output-dir", default=None,

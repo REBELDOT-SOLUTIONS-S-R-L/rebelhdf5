@@ -62,10 +62,10 @@ function OpenedFiles() {
   }
 
   return (
-    <>
+    <section className={sidebarStyles.openedFiles}>
       <h2 className={sidebarStyles.heading}>Opened files</h2>
       {opened.length > 0 ? (
-        <ul className={sidebarStyles.navList}>
+        <ul className={`${sidebarStyles.navList} ${sidebarStyles.openedFilesList}`}>
           {opened.map((file, index) => {
             const { url, name, service, resolvedUrl } = file;
             const isActive = url === fileUrl;
@@ -122,7 +122,7 @@ function OpenedFiles() {
       ) : (
         <p className={sidebarStyles.hint}>To get started, please open a file</p>
       )}
-    </>
+    </section>
   );
 }
 

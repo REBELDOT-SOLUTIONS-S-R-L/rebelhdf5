@@ -80,6 +80,24 @@ Net effect: HDF5s stopped being opaque archives and became interactive dataset
 assets, which is what made the synthetic pipeline above tractable to debug at
 scale.
 
+## Local Desktop App
+
+Run the Electron desktop shell locally:
+
+```sh
+corepack pnpm desktop
+```
+
+This builds the Vite app, serves `dist/` from an internal localhost server, and
+starts `scripts/backend_server.py` from the Electron main process. Closing the
+desktop app stops the Python backend.
+
+If `dist/` is already built and you only want to launch the desktop shell:
+
+```sh
+corepack pnpm desktop:run
+```
+
 ## DATASET STRUCTURE
 
 <style>

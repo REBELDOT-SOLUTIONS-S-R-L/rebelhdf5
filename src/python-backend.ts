@@ -13,7 +13,7 @@ import  {
   type DatasetProcessingResultMeta,
 } from './pose-trace/types';
 
-const DEFAULT_PORT = __PYTHON_BACKEND_PORT__;
+const DEFAULT_PORT = globalThis.rebelHdf5Desktop?.backendPort ?? __PYTHON_BACKEND_PORT__;
 const BASE_URL = `http://127.0.0.1:${DEFAULT_PORT}`;
 const HEALTH_TIMEOUT_MS = 2000;
 
@@ -23,6 +23,7 @@ export interface PythonBackendStatus {
   available: boolean;
   rootDir: string | null;
   rootDirs?: string[];
+  outputDir?: string;
   version: number | null;
   indexing?: boolean;
   indexReady?: boolean;
@@ -120,6 +121,7 @@ export async function checkBackend(timeoutMs = HEALTH_TIMEOUT_MS): Promise<Pytho
       status: string;
       rootDir: string;
       rootDirs?: string[];
+      outputDir?: string;
       version?: number;
       indexing?: boolean;
       indexReady?: boolean;
@@ -130,6 +132,7 @@ export async function checkBackend(timeoutMs = HEALTH_TIMEOUT_MS): Promise<Pytho
       available: data.status === 'ok',
       rootDir: data.rootDir,
       rootDirs: data.rootDirs,
+      outputDir: data.outputDir,
       version: Number.isFinite(data.version) ? data.version ?? null : null,
       indexing: data.indexing,
       indexReady: data.indexReady,
@@ -162,7 +165,7 @@ export function pollBackendStatus(
       () => {
         void tick();
       },
-      status.available && !status.indexing ? availableIntervalMs : unavailableIntervalMs,
+      status.available ? availableIntervalMs : unavailableIntervalMs,
     );
   }
 
@@ -200,12 +203,11 @@ export async function listFiles(
   return data;
 }
 
-/** Resolve filenames to absolute paths on the server.
+/** Resolve explicit file paths on the server.
  *
  * Pass `paths[name] = absolutePath` for any opened file whose absolute server
- * path is already known (e.g. files that came from `/api/files`). The server
- * trusts those directly and skips the basename index — meaning files can live
- * outside the indexed `--dir` roots.
+ * path is already known. The server trusts real files directly and does not
+ * scan directories or guess by basename.
  */
 export async function resolveFiles(
   names: string[],
@@ -230,7 +232,7 @@ export async function resolveFiles(
   return data;
 }
 
-/** Tell the backend to also index this directory. */
+/** Add a directory to the backend's explicit file-listing roots. */
 export async function addBackendRoot(path: string): Promise<PythonAddRootResult> {
   const response = await fetch(`${BASE_URL}/api/index/add`, {
     method: 'POST',

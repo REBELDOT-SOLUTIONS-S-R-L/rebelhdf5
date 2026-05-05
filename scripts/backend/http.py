@@ -166,7 +166,8 @@ class BackendHandler(BaseHTTPRequestHandler):
             "status": "ok",
             "rootDir": self.server.root_dir,
             "rootDirs": list(self.server.root_dirs),
-            "version": 4,
+            "outputDir": self.server.output_dir,
+            "version": 5,
             "indexing": index_status["indexing"],
             "indexReady": index_status["ready"],
             "indexedFileCount": index_status["count"],
@@ -180,7 +181,7 @@ class BackendHandler(BaseHTTPRequestHandler):
         try:
             resolved_bases: list[Path] = []
             for d in directories:
-                base = Path(d).resolve()
+                base = Path(d).expanduser().resolve()
                 if not base.is_dir():
                     return self._error(400, f"Not a directory: {d}")
                 resolved_bases.append(base)
@@ -227,13 +228,13 @@ class BackendHandler(BaseHTTPRequestHandler):
             self._error(500, str(exc))
 
     def _handle_resolve_files(self) -> None:
-        """Resolve a list of filenames to absolute paths under the server root.
+        """Resolve a list of explicit local file paths.
 
         The body accepts:
             { "names": [str, ...], "paths": { name: absolute_path | null, ... } }
-        When `paths[name]` is a real file on disk, we trust it directly and
-        record it in the index for next time. Otherwise we fall back to
-        basename lookup against the index built from --dir roots.
+        When `paths[name]` is a real file on disk, we trust it directly.
+        Otherwise `name` itself is treated as a path. No directory scan or
+        basename lookup is performed.
         """
         try:
             body = self._read_json_body()
@@ -244,24 +245,13 @@ class BackendHandler(BaseHTTPRequestHandler):
             for name in names:
                 hint = hint_paths.get(name) if isinstance(hint_paths, dict) else None
                 if isinstance(hint, str) and hint:
-                    hp = Path(hint)
-                    if hp.is_file():
-                        # Cache for future basename lookups.
-                        self.server.resolve_file(str(hp))
-                        resolved[name] = str(hp)
+                    path = self._resolve_file(hint)
+                    if path:
+                        resolved[name] = str(path)
                         continue
 
                 path = self._resolve_file(name)
                 resolved[name] = str(path) if path else None
-
-            if any(path is None for path in resolved.values()):
-                self.server.ensure_file_index()
-                if self.server.index_status()["ready"]:
-                    for name, path in resolved.items():
-                        if path is not None:
-                            continue
-                        next_path = self._resolve_file(name)
-                        resolved[name] = str(next_path) if next_path else None
 
             index_status = self.server.index_status()
             self._json_response({

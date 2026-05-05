@@ -14,8 +14,8 @@ interface BaseFile {
   name: string;
   service: FileService;
   resolvedUrl: string;
-  // Absolute path on the Python backend's filesystem, when known. Lets the
-  // backend skip basename-index lookup for files outside the indexed roots.
+  // Absolute path on the local machine, when known in the desktop app. The
+  // Python backend uses this directly instead of guessing by filename.
   serverPath?: string;
 }
 
