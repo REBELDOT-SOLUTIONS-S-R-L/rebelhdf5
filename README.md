@@ -82,3 +82,102 @@ https://github.com/alex-luci/myhdf5/tree/pose-trace-integration
 Net effect: HDF5s stopped being opaque archives and became interactive dataset
 assets, which is what made the synthetic pipeline above tractable to debug at
 scale.
+
+## DATASET STRUCTURE
+
+<style>
+.tree {
+  background: #ffffff00;
+  color: #e5e7eb;
+  padding: 16px 20px;
+  border-radius: 10px;
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-x: auto;
+  border: 1px solid #ffffff00;
+}
+
+.tree .comment {
+  color: #6b7280;
+  margin-left: 8px;
+}
+
+.tree .folder {
+  color: #93c5fd;
+}
+
+.tree .file {
+  color: #e5e7eb;
+}
+</style>
+
+<pre class="tree">
+<span class="folder">data/</span><span class="comment"># attrs: schema_version, fps, env_args, applied_action, num_episodes, total, description</span>
+├── <span class="folder">demo_&lt;N&gt;/</span><span class="comment"># attrs: num_samples, success, random_seed</span>
+│   ├── <span class="folder">actions/</span>
+│   │   ├── <span class="file">pose</span><span class="comment"># (T, A_pose) EEF pose + gripper actions; attrs: frame, format, quat_order, entity_order</span>
+│   │   └── <span class="file">joints</span><span class="comment"># (T, total_joints) joint-space actions; attrs: units, joint_order, entity_order</span>
+│   │
+│   ├── <span class="folder">initial_state/</span>
+│   │   ├── <span class="folder">articulation/</span>
+│   │   │   ├── <span class="folder">articulation_name/</span>
+│   │   │   │   ├── <span class="file">joint_position</span><span class="comment"># (1, J)</span>
+│   │   │   │   ├── <span class="file">joint_velocity</span><span class="comment"># (1, J)</span>
+│   │   │   │   ├── <span class="file">root_pose</span><span class="comment"># (1, 7)</span>
+│   │   │   │   └── <span class="file">root_velocity</span><span class="comment"># (1, 6)</span>
+│   │   │
+│   │   └── <span class="folder">objects/</span>
+│   │       └── <span class="folder">object_name/</span>
+│   │           ├── <span class="file">initial_pose</span>
+│   │           └── <span class="file">scale</span>
+│   │
+│   ├── <span class="folder">obs/</span><span class="comment"># measured observations; attrs: sample_phase</span>
+│   │   ├── <span class="folder">articulation/</span>
+│   │   │   └── <span class="folder">articulation_name/</span>
+│   │   │       ├── <span class="file">joint_position</span><span class="comment"># (T, J)</span>
+│   │   │       └── <span class="file">joint_velocity</span><span class="comment"># (T, J)</span>
+│   │   │
+│   │   ├── <span class="folder">end_effectors/</span>
+│   │   │   └── <span class="folder">end_effector_name/</span>
+│   │   │       └── <span class="file">pose</span><span class="comment"># (T, 4, 4)</span>
+│   │   │
+│   │   ├── <span class="folder">objects/</span>
+│   │   │   └── <span class="folder">object_name/</span>
+│   │   │       └── <span class="file">pose</span><span class="comment"># (T, 4, 4)</span>
+│   │   │
+│   │   ├── <span class="folder">cameras/</span>
+│   │   │   └── <span class="file">camera_name</span><span class="comment"># (T, H, W, C)</span>
+│   │   │
+│   │   ├── <span class="folder">sensors/</span>
+│   │   │   └── <span class="folder">sensor_name/</span>
+│   │   │       └── <span class="file">field_name</span>
+│   │   │
+│   │   └── <span class="folder">datagen_info/</span><span class="comment"># MimicGen-compatible; attrs: sample_phase, aligned_to</span>
+│   │       ├── <span class="folder">eef_pose/</span>
+│   │       │   └── <span class="file">end_effector_name</span><span class="comment"># (T, 4, 4)</span>
+│   │       ├── <span class="folder">target_eef_pose/</span>
+│   │       │   └── <span class="file">end_effector_name</span><span class="comment"># (T, 4, 4)</span>
+│   │       ├── <span class="folder">object_pose/</span>
+│   │       │   └── <span class="file">object_name</span><span class="comment"># (T, 4, 4)</span>
+│   │       └── <span class="folder">subtask_term_signals/</span>
+│   │           └── <span class="file">signal_name</span><span class="comment"># (T, 1)</span>
+│   │ 
+│   └── <span class="folder">reference_demo_indices/</span><span class="comment"># (num_subtasks,) source demo index MimicGen selected for each subtask</span>
+│       └── <span class="file">articulation_name</span>
+</pre>
+## Attribution
+
+This project is based on work originally developed by the European Synchrotron Radiation Facility.
+
+Original project:
+- Copyright (c) 2022 European Synchrotron Radiation Facility
+- Licensed under the MIT License
+
+Modifications and extensions in this repository include additional features such as:
+- Pose trajectory visualization
+- HDF5 to video conversion tools
+- Dataset processing utilities (merge, split, append)
+- Cloth distribution analysis tools
+
+All original code is used in accordance with the terms of the MIT License. A copy of the original license is included in this repository
