@@ -88,9 +88,19 @@ const OPERATION_LABELS: Record<DatasetProcessingOperation, string> = {
 };
 const DATASET_PROCESSING_OPERATIONS: DatasetProcessingOperation[] = ['cut', 'merge', 'append', 'lerobot'];
 const BACKEND_SOURCE_PREFIX = 'backend:';
+const DEFAULT_LEROBOT_MODALITY_JSON = '/workspace/IsaacTools/ROBOTICS-lehome-challenge/configs/gr00t/modality.json';
+const DEFAULT_LEROBOT_TASK = 'Fold the garment on the table';
 
 function getBackendSourceId(path: string): string {
   return `${BACKEND_SOURCE_PREFIX}${path}`;
+}
+
+function getDesktopFilePath(file: File): string | undefined {
+  try {
+    return globalThis.rebelHdf5Desktop?.getPathForFile?.(file) || undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function stripExtension(filename: string): string {
@@ -113,6 +123,20 @@ function triggerDownloadUrl(fileName: string, downloadUrl: string) {
   link.href = downloadUrl;
   link.download = fileName;
   link.click();
+}
+
+function parseTaskRulesJson(text: string): Array<Record<string, unknown>> | undefined {
+  const trimmed = text.trim();
+  if (trimmed.length === 0) {
+    return undefined;
+  }
+
+  const parsed = JSON.parse(trimmed) as unknown;
+  if (!Array.isArray(parsed) || !parsed.every((entry) => entry && typeof entry === 'object' && !Array.isArray(entry))) {
+    throw new Error('Task rules must be a JSON array of objects.');
+  }
+
+  return parsed as Array<Record<string, unknown>>;
 }
 
 function buildDefaultOutputName(
@@ -556,6 +580,11 @@ function DatasetProcessingPage() {
   const [appendSourceUrls, setAppendSourceUrls] = useState<string[]>([]);
   const [lerobotSourceUrls, setLerobotSourceUrls] = useState<string[]>([]);
   const [skipFailedDemos, setSkipFailedDemos] = useState(true);
+  const [lerobotModalityJsonPath, setLerobotModalityJsonPath] = useState(DEFAULT_LEROBOT_MODALITY_JSON);
+  const [lerobotConversionConfigPath, setLerobotConversionConfigPath] = useState('');
+  const [lerobotModalityPythonPath, setLerobotModalityPythonPath] = useState('');
+  const [lerobotDefaultTask, setLerobotDefaultTask] = useState(DEFAULT_LEROBOT_TASK);
+  const [lerobotTaskRulesText, setLerobotTaskRulesText] = useState('');
   const [cutStartDemoName, setCutStartDemoName] = useState<string | null>(null);
   const [cutEndDemoName, setCutEndDemoName] = useState<string | null>(null);
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
@@ -1026,6 +1055,11 @@ function DatasetProcessingPage() {
       appendSourceUrls,
       lerobotSourceUrls,
       skipFailedDemos,
+      lerobotModalityJsonPath,
+      lerobotConversionConfigPath,
+      lerobotModalityPythonPath,
+      lerobotDefaultTask,
+      lerobotTaskRulesText,
       cutStartDemoName,
       cutEndDemoName,
       selectedKeys,
@@ -1034,7 +1068,12 @@ function DatasetProcessingPage() {
       appendSourceUrls,
       cutEndDemoName,
       cutStartDemoName,
+      lerobotConversionConfigPath,
+      lerobotDefaultTask,
+      lerobotModalityJsonPath,
+      lerobotModalityPythonPath,
       lerobotSourceUrls,
+      lerobotTaskRulesText,
       mergeSourceUrls,
       operation,
       primarySourceUrl,
@@ -1066,11 +1105,17 @@ function DatasetProcessingPage() {
         }
 
         if (operation === 'lerobot') {
+          const taskRules = parseTaskRulesJson(lerobotTaskRulesText);
           const result = await runLeRobotConvert(
             {
               paths: backendScanPaths,
               outputName: defaultOutputName,
               skipFailed: skipFailedDemos,
+              modalityJson: lerobotModalityJsonPath.trim() || undefined,
+              conversionConfigJson: lerobotConversionConfigPath.trim() || undefined,
+              modalityPython: lerobotModalityPythonPath.trim() || undefined,
+              defaultTask: lerobotDefaultTask.trim() || undefined,
+              taskRules,
             },
             { onProgress: setProgress },
           );
@@ -1456,6 +1501,122 @@ function DatasetProcessingPage() {
                 <p className={styles.infoText}>
                   The converter writes LeRobot v2.1 parquet, metadata, modality.json, and GPU-encoded MP4 videos.
                 </p>
+                <div className={styles.lerobotConfigGrid}>
+                  <div className={styles.field}>
+                    <label className={styles.fieldLabel} htmlFor="lerobot-modality-json-path">
+                      Modality JSON
+                    </label>
+                    <input
+                      id="lerobot-modality-json-path"
+                      className={styles.select}
+                      value={lerobotModalityJsonPath}
+                      onChange={(event) => {
+                        setLerobotModalityJsonPath(event.target.value);
+                      }}
+                    />
+                    <input
+                      aria-label="Select modality JSON"
+                      className={styles.fileInput}
+                      type="file"
+                      accept=".json,application/json"
+                      onChange={(event) => {
+                        const pickedFile = event.currentTarget.files?.[0];
+                        const pickedPath = pickedFile ? getDesktopFilePath(pickedFile) : undefined;
+                        if (pickedPath) {
+                          setLerobotModalityJsonPath(pickedPath);
+                        }
+                        event.currentTarget.value = '';
+                      }}
+                    />
+                  </div>
+
+                  <div className={styles.field}>
+                    <label className={styles.fieldLabel} htmlFor="lerobot-conversion-config-path">
+                      Conversion Config JSON
+                    </label>
+                    <input
+                      id="lerobot-conversion-config-path"
+                      className={styles.select}
+                      placeholder="Optional"
+                      value={lerobotConversionConfigPath}
+                      onChange={(event) => {
+                        setLerobotConversionConfigPath(event.target.value);
+                      }}
+                    />
+                    <input
+                      aria-label="Select conversion config JSON"
+                      className={styles.fileInput}
+                      type="file"
+                      accept=".json,application/json"
+                      onChange={(event) => {
+                        const pickedFile = event.currentTarget.files?.[0];
+                        const pickedPath = pickedFile ? getDesktopFilePath(pickedFile) : undefined;
+                        if (pickedPath) {
+                          setLerobotConversionConfigPath(pickedPath);
+                        }
+                        event.currentTarget.value = '';
+                      }}
+                    />
+                  </div>
+
+                  <div className={styles.field}>
+                    <label className={styles.fieldLabel} htmlFor="lerobot-modality-python-path">
+                      GR00T Python Config
+                    </label>
+                    <input
+                      id="lerobot-modality-python-path"
+                      className={styles.select}
+                      placeholder="Optional, copied into meta/"
+                      value={lerobotModalityPythonPath}
+                      onChange={(event) => {
+                        setLerobotModalityPythonPath(event.target.value);
+                      }}
+                    />
+                    <input
+                      aria-label="Select GR00T Python config"
+                      className={styles.fileInput}
+                      type="file"
+                      accept=".py,text/x-python"
+                      onChange={(event) => {
+                        const pickedFile = event.currentTarget.files?.[0];
+                        const pickedPath = pickedFile ? getDesktopFilePath(pickedFile) : undefined;
+                        if (pickedPath) {
+                          setLerobotModalityPythonPath(pickedPath);
+                        }
+                        event.currentTarget.value = '';
+                      }}
+                    />
+                  </div>
+
+                  <div className={styles.field}>
+                    <label className={styles.fieldLabel} htmlFor="lerobot-default-task">
+                      Default Task String
+                    </label>
+                    <input
+                      id="lerobot-default-task"
+                      className={styles.select}
+                      value={lerobotDefaultTask}
+                      onChange={(event) => {
+                        setLerobotDefaultTask(event.target.value);
+                      }}
+                    />
+                  </div>
+                </div>
+
+                <div className={styles.field}>
+                  <label className={styles.fieldLabel} htmlFor="lerobot-task-rules">
+                    Task Rules JSON
+                  </label>
+                  <textarea
+                    id="lerobot-task-rules"
+                    className={styles.textarea}
+                    placeholder={'Optional: [{"match":"Top_Long","task":"Fold the long-sleeve top on the table"}]'}
+                    value={lerobotTaskRulesText}
+                    onChange={(event) => {
+                      setLerobotTaskRulesText(event.target.value);
+                    }}
+                  />
+                </div>
               </>
             )}
 

@@ -171,7 +171,7 @@ class BackendHandler(BaseHTTPRequestHandler):
             "rootDir": self.server.root_dir,
             "rootDirs": list(self.server.root_dirs),
             "outputDir": self.server.output_dir,
-            "version": 7,
+            "version": 8,
             "indexing": index_status["indexing"],
             "indexReady": index_status["ready"],
             "indexedFileCount": index_status["count"],
@@ -194,6 +194,16 @@ class BackendHandler(BaseHTTPRequestHandler):
                 return [], f"File not found or ambiguous: {raw_path}"
             paths.append(resolved)
         return paths, None
+
+    def _resolve_optional_file(self, raw_path: Any, label: str) -> tuple[Path | None, str | None]:
+        if raw_path is None or raw_path == "":
+            return None, None
+        if not isinstance(raw_path, str):
+            return None, f"{label} must be a path string."
+        resolved = self._resolve_file(raw_path)
+        if not resolved:
+            return None, f"{label} not found or ambiguous: {raw_path}"
+        return resolved, None
 
     def _handle_files(self, directories: list[str], *, recursive: bool = False) -> None:
         try:
@@ -388,18 +398,30 @@ class BackendHandler(BaseHTTPRequestHandler):
             skip_failed = bool(body.get("skipFailed", True))
             max_episodes_raw = body.get("maxEpisodes")
             max_episodes = int(max_episodes_raw) if max_episodes_raw is not None else None
-            modality_json_raw = body.get("modalityJson")
-            if modality_json_raw:
-                modality_json = Path(modality_json_raw)
-            else:
-                default_modality = (
-                    Path("/workspace/IsaacTools/ROBOTICS-lehome-challenge")
-                    / "configs/gr00t/modality.json"
-                )
-                modality_json = default_modality if default_modality.exists() else None
+            modality_json, modality_error = self._resolve_optional_file(
+                body.get("modalityJson"),
+                "modalityJson",
+            )
+            conversion_config_json, conversion_config_error = self._resolve_optional_file(
+                body.get("conversionConfigJson"),
+                "conversionConfigJson",
+            )
+            modality_python, modality_python_error = self._resolve_optional_file(
+                body.get("modalityPython"),
+                "modalityPython",
+            )
+            default_task = body.get("defaultTask")
+            if default_task is not None and not isinstance(default_task, str):
+                return self._error(400, "defaultTask must be a string.")
+            task_rules = body.get("taskRules")
+            if task_rules is not None and not isinstance(task_rules, list):
+                return self._error(400, "taskRules must be a list.")
 
             if path_error:
                 return self._error(400, path_error)
+            for config_error in (modality_error, conversion_config_error, modality_python_error):
+                if config_error:
+                    return self._error(400, config_error)
             if not paths:
                 return self._error(400, "No input files specified.")
             if max_episodes is not None and max_episodes < 1:
@@ -419,8 +441,12 @@ class BackendHandler(BaseHTTPRequestHandler):
                     paths,
                     output_path,
                     modality_json,
+                    conversion_config_json=conversion_config_json,
+                    modality_python=modality_python,
                     skip_failed=skip_failed,
                     max_episodes=max_episodes,
+                    default_task=default_task,
+                    task_rules=task_rules,
                 ):
                     self._send_sse(event)
 

@@ -87,6 +87,11 @@ export interface PythonLeRobotConvertRequest {
   paths: string[];
   outputName: string;
   skipFailed: boolean;
+  modalityJson?: string;
+  conversionConfigJson?: string;
+  modalityPython?: string;
+  defaultTask?: string;
+  taskRules?: Array<Record<string, unknown>>;
   maxEpisodes?: number;
 }
 
@@ -409,6 +414,11 @@ export async function runLeRobotConvert(
       paths: request.paths,
       outputName: request.outputName,
       skipFailed: request.skipFailed,
+      modalityJson: request.modalityJson,
+      conversionConfigJson: request.conversionConfigJson,
+      modalityPython: request.modalityPython,
+      defaultTask: request.defaultTask,
+      taskRules: request.taskRules,
       maxEpisodes: request.maxEpisodes,
     }),
   });

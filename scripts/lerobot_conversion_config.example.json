@@ -1,0 +1,71 @@
+{
+  "fps": 30,
+  "robot_type": "so101_bimanual",
+  "chunk_size": 1000,
+  "exclude_name_substrings": ["_failed"],
+  "state_sources": {
+    "observation.state": [
+      {
+        "path": "obs/left_joint_pos",
+        "target_start": 0,
+        "target_end": 6
+      },
+      {
+        "path": "obs/right_joint_pos",
+        "target_start": 6,
+        "target_end": 12
+      }
+    ]
+  },
+  "action_sources": {
+    "action": ["obs/actions", "processed_actions"]
+  },
+  "video_sources": {
+    "observation.images.top": "obs/top",
+    "observation.images.left_wrist": "obs/left_wrist",
+    "observation.images.right_wrist": "obs/right_wrist"
+  },
+  "feature_names": {
+    "observation.state": [
+      "left_joint_0",
+      "left_joint_1",
+      "left_joint_2",
+      "left_joint_3",
+      "left_joint_4",
+      "left_gripper",
+      "right_joint_0",
+      "right_joint_1",
+      "right_joint_2",
+      "right_joint_3",
+      "right_joint_4",
+      "right_gripper"
+    ],
+    "action": [
+      "left_joint_0",
+      "left_joint_1",
+      "left_joint_2",
+      "left_joint_3",
+      "left_joint_4",
+      "left_gripper",
+      "right_joint_0",
+      "right_joint_1",
+      "right_joint_2",
+      "right_joint_3",
+      "right_joint_4",
+      "right_gripper"
+    ]
+  },
+  "tasks": {
+    "default": "Fold the garment on the table",
+    "rules": [
+      {
+        "match": ["Top_Long", "top_long"],
+        "task": "Fold the long-sleeve top on the table"
+      },
+      {
+        "match": ["Pant_Short", "pant_short"],
+        "task": "Fold the short pants on the table"
+      }
+    ]
+  }
+}
