@@ -4,7 +4,9 @@ const { contextBridge, webUtils } = require('electron');
 
 function readNumberArg(name) {
   const prefix = `--${name}=`;
-  const raw = process.argv.find((arg) => arg.startsWith(prefix))?.slice(prefix.length);
+  const raw = process.argv
+    .find((arg) => arg.startsWith(prefix))
+    ?.slice(prefix.length);
   const parsed = raw ? Number(raw) : NaN;
   return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
 }

@@ -4,7 +4,7 @@ import { defineConfig, globalIgnores } from 'eslint/config';
 const opts = detectOpts(import.meta.dirname);
 
 const config = defineConfig([
-  globalIgnores(['dist/', 'electron/**/*.cjs']),
+  globalIgnores(['dist/', 'electron/']),
   ...createConfig(opts),
 ]);
 
