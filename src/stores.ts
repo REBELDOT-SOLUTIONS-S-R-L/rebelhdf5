@@ -14,6 +14,9 @@ interface BaseFile {
   name: string;
   service: FileService;
   resolvedUrl: string;
+  // Absolute path on the local machine, when known in the desktop app. The
+  // Python backend uses this directly instead of guessing by filename.
+  serverPath?: string;
 }
 
 export interface LocalFile extends BaseFile {

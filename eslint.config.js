@@ -3,6 +3,9 @@ import { defineConfig, globalIgnores } from 'eslint/config';
 
 const opts = detectOpts(import.meta.dirname);
 
-const config = defineConfig([globalIgnores(['dist/']), ...createConfig(opts)]);
+const config = defineConfig([
+  globalIgnores(['dist/', 'electron/**/*.cjs']),
+  ...createConfig(opts),
+]);
 
 export default config;

@@ -258,7 +258,7 @@
 
 .emptyState {
   composes: card;
-  max-width: 44rem;
+  width: 100%;
   color: var(--color-gray);
 }
 

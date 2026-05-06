@@ -7,17 +7,10 @@
   max-width: 28em;
   height: 100vh;
   padding: 1rem 1.25rem 0 1.75rem;
-  overflow-x: hidden;
-  overflow-y: scroll;
-  scrollbar-width: thin;
+  overflow: hidden;
   color: var(--color-sidebar-text);
   transition: max-width 0.2s ease-out;
   accent-color: var(--color-five);
-}
-
-.sidebar:not(:hover) {
-  /* Hide scrollbar until sidebar is hovered (FF on Windows) */
-  scrollbar-color: transparent transparent;
 }
 
 .sidebar[data-collapsed] {
@@ -79,6 +72,9 @@
 
 .nav {
   flex: 1 1 0%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
   margin-top: 2rem;
 }
 
@@ -102,10 +98,12 @@
 .navItem {
   display: flex;
   align-items: center;
+  justify-content: flex-start;
   margin: 0.25rem -1rem;
   padding: calc(0.5rem + 1px) 1rem 0.5rem; /* tweak horizontal centering */
   color: inherit;
   border-radius: 1.5rem;
+  text-align: left;
   text-decoration: none;
 }
 
@@ -151,6 +149,7 @@
   text-overflow: ellipsis;
   overflow: hidden;
   white-space: nowrap;
+  text-align: left;
 }
 
 .sidebar[data-collapsed] .mainNavItem > .label {
@@ -199,6 +198,7 @@
 }
 
 .heading {
+  flex: none;
   font-size: 0.875em;
   font-weight: 600;
   white-space: nowrap;
@@ -263,7 +263,29 @@
 }
 
 .hint {
+  flex: none;
   font-style: italic;
+}
+
+.openedFiles {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  margin-top: 2.25rem;
+}
+
+.flyout .openedFiles {
+  max-height: min(30rem, 70vh);
+  margin-top: 0;
+}
+
+.openedFilesList {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: thin;
 }
 
 .footer {

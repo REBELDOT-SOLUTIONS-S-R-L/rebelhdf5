@@ -1,11 +1,10 @@
-import { App } from '@h5web/app';
 import { H5WasmLocalFileProvider } from '@h5web/h5wasm';
 import { ErrorBoundary } from 'react-error-boundary';
 
 import FileErrorFallback from './FileErrorFallback';
+import H5WebApp from './H5WebApp';
 import { getPlugin } from './plugin-utils';
 import { type LocalFile } from './stores';
-import { buildMailto, FEEDBACK_MESSAGE } from './utils';
 import styles from './ViewerTheme.module.css';
 
 interface Props {
@@ -25,15 +24,7 @@ function LocalFileViewer(props: Props) {
           )}
           resetKeys={[file]}
         >
-          <App
-            key={resolvedUrl}
-            initialPath="/data"
-            disableDarkMode
-            propagateErrors
-            getFeedbackURL={({ entityPath }) => {
-              return buildMailto('Feedback', FEEDBACK_MESSAGE, file, entityPath);
-            }}
-          />
+          <H5WebApp key={resolvedUrl} />
         </ErrorBoundary>
       </div>
     </H5WasmLocalFileProvider>

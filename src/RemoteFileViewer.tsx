@@ -1,13 +1,12 @@
-import { App } from '@h5web/app';
 import { H5WasmBufferProvider } from '@h5web/h5wasm';
 import { ErrorBoundary } from 'react-error-boundary';
 import { suspend } from 'suspend-react';
 
 import { fetchBuffer } from './fetch-utils';
 import FileErrorFallback from './FileErrorFallback';
+import H5WebApp from './H5WebApp';
 import { getPlugin } from './plugin-utils';
 import { type RemoteFile } from './stores';
-import { buildMailto, FEEDBACK_MESSAGE } from './utils';
 import styles from './ViewerTheme.module.css';
 
 export const FETCH_BUFFER_KEY = Symbol('fetchBuffer');
@@ -31,15 +30,7 @@ function RemoteFileViewer(props: Props) {
           )}
           resetKeys={[file]}
         >
-          <App
-            key={resolvedUrl}
-            initialPath="/data"
-            disableDarkMode
-            propagateErrors
-            getFeedbackURL={({ entityPath }) => {
-              return buildMailto('Feedback', FEEDBACK_MESSAGE, file, entityPath);
-            }}
-          />
+          <H5WebApp key={resolvedUrl} />
         </ErrorBoundary>
       </div>
     </H5WasmBufferProvider>

@@ -671,7 +671,7 @@ function DatabricksPage() {
         </div>
         {!backend.available && (
           <p className={styles.errorText}>
-            Python server not detected. Start with: <code>MERGE_SERVER_DIR=/path/to/data pnpm start</code>
+            Python server not detected. Start with: <code>PYTHON_BACKEND_DIR=/path/to/data pnpm start</code>
           </p>
         )}
       </header>

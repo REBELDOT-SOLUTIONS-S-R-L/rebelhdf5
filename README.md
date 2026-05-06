@@ -1,12 +1,9 @@
 ## Dataset tooling — rebelHDF5
 
-The training pipeline runs entirely on HDF5 files (Isaac Lab + MimicGen output).
+Our training pipeline runs entirely on HDF5 files (Isaac Lab + MimicGen output).
 Open-source MyHDF5 was a good starting point for raw inspection but didn't fit
 robotics workflows, so we forked it into **rebelHDF5** and added the features
 we actually needed to iterate on dataset quality.
-
-Project link:
-https://github.com/alex-luci/myhdf5/tree/pose-trace-integration
 
 ![rebelHDF5 viewer](screenshots/rebelhdf5-viewer.png)
 
@@ -83,6 +80,24 @@ Net effect: HDF5s stopped being opaque archives and became interactive dataset
 assets, which is what made the synthetic pipeline above tractable to debug at
 scale.
 
+## Local Desktop App
+
+Run the Electron desktop shell locally:
+
+```sh
+corepack pnpm desktop
+```
+
+This builds the Vite app, serves `dist/` from an internal localhost server, and
+starts `scripts/backend_server.py` from the Electron main process. Closing the
+desktop app stops the Python backend.
+
+If `dist/` is already built and you only want to launch the desktop shell:
+
+```sh
+corepack pnpm desktop:run
+```
+
 ## DATASET STRUCTURE
 
 <style>
@@ -113,19 +128,31 @@ scale.
 </style>
 
 <pre class="tree">
-<span class="folder">data/</span><span class="comment"># attrs: schema_version, fps, env_args, applied_action, num_episodes, total, description</span>
-├── <span class="folder">demo_&lt;N&gt;/</span><span class="comment"># attrs: num_samples, success, random_seed</span>
+<span class="folder">data/</span>
+├── <span class="folder">attrs/</span>
+│   ├── <span class="file">schema_version</span><span class="comment"># version of the database schema</span>
+│   ├── <span class="file">fps</span><span class="comment"># camera fps</span>
+│   ├── <span class="file">env_args</span><span class="comment"># </span>
+│   ├── <span class="file">actions_frame</span><span class="comment"># world, robot, etc</span>
+│   ├── <span class="file">num_episodes</span><span class="comment"># number of total episodes</span>
+│   ├── <span class="file">total_samples</span><span class="comment"># number of total samples</span>
+│   └── <span class="file">description</span><span class="comment"># human format description</span>
+├── <span class="folder">demo_&lt;N&gt;/</span>
+│   ├── <span class="folder">attrs/</span>
+│   │   ├── <span class="file">num_samples</span><span class="comment"># number of total samples</span>
+│   │   ├── <span class="file">success</span><span class="comment"># True if episode success, False otherwise</span>
+│   │   └── <span class="file">seed</span><span class="comment"># random seed used for env</span>
 │   ├── <span class="folder">actions/</span>
 │   │   ├── <span class="file">pose</span><span class="comment"># (T, A_pose) EEF pose + gripper actions; attrs: frame, format, quat_order, entity_order</span>
 │   │   └── <span class="file">joints</span><span class="comment"># (T, total_joints) joint-space actions; attrs: units, joint_order, entity_order</span>
 │   │
 │   ├── <span class="folder">initial_state/</span>
 │   │   ├── <span class="folder">articulation/</span>
-│   │   │   ├── <span class="folder">articulation_name/</span>
-│   │   │   │   ├── <span class="file">joint_position</span><span class="comment"># (1, J)</span>
-│   │   │   │   ├── <span class="file">joint_velocity</span><span class="comment"># (1, J)</span>
-│   │   │   │   ├── <span class="file">root_pose</span><span class="comment"># (1, 7)</span>
-│   │   │   │   └── <span class="file">root_velocity</span><span class="comment"># (1, 6)</span>
+│   │   │   └── <span class="folder">articulation_name/</span>
+│   │   │       ├── <span class="file">joint_position</span><span class="comment"># (1, J)</span>
+│   │   │       ├── <span class="file">joint_velocity</span><span class="comment"># (1, J)</span>
+│   │   │       ├── <span class="file">root_pose</span><span class="comment"># (1, 7)</span>
+│   │   │       └── <span class="file">root_velocity</span><span class="comment"># (1, 6)</span>
 │   │   │
 │   │   └── <span class="folder">objects/</span>
 │   │       └── <span class="folder">object_name/</span>

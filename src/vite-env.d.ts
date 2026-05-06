@@ -1,6 +1,18 @@
 /// <reference types="vite/client" />
 
-declare const __MERGE_SERVER_PORT__: number;
+declare const __PYTHON_BACKEND_PORT__: number;
+
+interface RebelHdf5DesktopRuntime {
+  backendPort?: number;
+  getPathForFile?: (file: File) => string | undefined;
+}
+
+interface Window {
+  rebelHdf5Desktop?: RebelHdf5DesktopRuntime;
+}
+
+// eslint-disable-next-line no-var -- required for global augmentation
+declare var rebelHdf5Desktop: RebelHdf5DesktopRuntime | undefined;
 
 // HDF5 compression plugins
 declare module '*.so' {
@@ -25,6 +37,27 @@ interface SaveFilePickerOptions {
   suggestedName?: string;
   types?: FilePickerAcceptType[];
 }
+
+type WellKnownDirectory =
+  | 'desktop'
+  | 'documents'
+  | 'downloads'
+  | 'music'
+  | 'pictures'
+  | 'videos';
+
+interface OpenFilePickerOptions {
+  excludeAcceptAllOption?: boolean;
+  id?: string;
+  multiple?: boolean;
+  startIn?: WellKnownDirectory | FileSystemHandle;
+  types?: FilePickerAcceptType[];
+}
+
+// eslint-disable-next-line no-var -- required for global augmentation
+declare var showOpenFilePicker:
+  | ((options?: OpenFilePickerOptions) => Promise<FileSystemFileHandle[]>)
+  | undefined;
 
 // eslint-disable-next-line no-var -- required for global augmentation
 declare var showSaveFilePicker:

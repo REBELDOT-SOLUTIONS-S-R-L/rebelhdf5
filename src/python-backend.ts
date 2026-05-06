@@ -1,19 +1,19 @@
 /**
- * Client for the local Python processing server (scripts/merge_server.py).
+ * Client for the local Python backend server (scripts/backend_server.py).
  *
  * The server is auto-detected on localhost:4095. When available it provides
  * native HDF5 cut/merge/append which is orders of magnitude faster than the
  * WASM path for large (multi-GB) files — especially those with video data.
  */
 
-import type {
-  DatasetProcessingCutRange,
-  DatasetProcessingOperation,
-  DatasetProcessingProgress,
-  DatasetProcessingResultMeta,
+import  {
+  type DatasetProcessingCutRange,
+  type DatasetProcessingOperation,
+  type DatasetProcessingProgress,
+  type DatasetProcessingResultMeta,
 } from './pose-trace/types';
 
-const DEFAULT_PORT = __MERGE_SERVER_PORT__;
+const DEFAULT_PORT = globalThis.rebelHdf5Desktop?.backendPort ?? __PYTHON_BACKEND_PORT__;
 const BASE_URL = `http://127.0.0.1:${DEFAULT_PORT}`;
 const HEALTH_TIMEOUT_MS = 2000;
 
@@ -22,11 +22,22 @@ export const PYTHON_BACKEND_BASE_URL = BASE_URL;
 export interface PythonBackendStatus {
   available: boolean;
   rootDir: string | null;
+  rootDirs?: string[];
+  outputDir?: string;
   version: number | null;
   indexing?: boolean;
   indexReady?: boolean;
   indexedFileCount?: number;
   indexError?: string | null;
+}
+
+export interface PythonAddRootResult {
+  rootDirs: string[];
+  added: number;
+  indexedFileCount: number;
+  indexReady: boolean;
+  indexing: boolean;
+  indexError: string | null;
 }
 
 export interface PythonFileEntry {
@@ -109,6 +120,8 @@ export async function checkBackend(timeoutMs = HEALTH_TIMEOUT_MS): Promise<Pytho
     const data: {
       status: string;
       rootDir: string;
+      rootDirs?: string[];
+      outputDir?: string;
       version?: number;
       indexing?: boolean;
       indexReady?: boolean;
@@ -118,6 +131,8 @@ export async function checkBackend(timeoutMs = HEALTH_TIMEOUT_MS): Promise<Pytho
     return {
       available: data.status === 'ok',
       rootDir: data.rootDir,
+      rootDirs: data.rootDirs,
+      outputDir: data.outputDir,
       version: Number.isFinite(data.version) ? data.version ?? null : null,
       indexing: data.indexing,
       indexReady: data.indexReady,
@@ -134,7 +149,7 @@ export async function checkBackend(timeoutMs = HEALTH_TIMEOUT_MS): Promise<Pytho
 export function pollBackendStatus(
   onStatus: (status: PythonBackendStatus) => void,
   unavailableIntervalMs = 1000,
-  availableIntervalMs = 10000,
+  availableIntervalMs = 10_000,
 ): () => void {
   let cancelled = false;
   let timeoutId: ReturnType<typeof globalThis.setTimeout> | null = null;
@@ -150,7 +165,7 @@ export function pollBackendStatus(
       () => {
         void tick();
       },
-      status.available && !status.indexing ? availableIntervalMs : unavailableIntervalMs,
+      status.available ? availableIntervalMs : unavailableIntervalMs,
     );
   }
 
@@ -188,14 +203,25 @@ export async function listFiles(
   return data;
 }
 
-/** Resolve filenames to absolute paths on the server. */
+/** Resolve explicit file paths on the server.
+ *
+ * Pass `paths[name] = absolutePath` for any opened file whose absolute server
+ * path is already known. The server trusts real files directly and does not
+ * scan directories or guess by basename.
+ */
 export async function resolveFiles(
   names: string[],
+  paths: Record<string, string | undefined> = {},
 ): Promise<PythonResolvedFilesResult> {
+  const cleanPaths: Record<string, string> = {};
+  for (const [name, p] of Object.entries(paths)) {
+    if (p) {cleanPaths[name] = p;}
+  }
+
   const response = await fetch(`${BASE_URL}/api/resolve-files`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ names }),
+    body: JSON.stringify({ names, paths: cleanPaths }),
   });
 
   if (!response.ok) {
@@ -204,6 +230,21 @@ export async function resolveFiles(
 
   const data: PythonResolvedFilesResult = await response.json();
   return data;
+}
+
+/** Add a directory to the backend's explicit file-listing roots. */
+export async function addBackendRoot(path: string): Promise<PythonAddRootResult> {
+  const response = await fetch(`${BASE_URL}/api/index/add`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path }),
+  });
+
+  if (!response.ok) {
+    throw new Error(await parseErrorResponse(response));
+  }
+
+  return await response.json() as PythonAddRootResult;
 }
 
 /** Scan files for their keys and demo counts. */
@@ -262,7 +303,7 @@ export async function runProcess(
 
     if (response.status === 404 && endpoint === '/api/process') {
       throw new Error(
-        'Your Python backend is outdated and does not support this operation. Restart `scripts/merge_server.py` to load the current API.',
+        'Your Python backend is outdated and does not support this operation. Restart `scripts/backend_server.py` to load the current API.',
       );
     }
 
@@ -306,7 +347,8 @@ export async function runProcess(
         continue;
       }
 
-      if (event.type === 'progress') {
+      switch (event.type) {
+      case 'progress':
         callbacks.onProgress?.({
           phase: event.phase as DatasetProcessingProgress['phase'],
           overallDemoIndex: event.overallDemoIndex as number,
@@ -314,7 +356,10 @@ export async function runProcess(
           currentSourceName: event.currentSourceName as string,
           currentDemoName: event.currentDemoName as string,
         });
-      } else if (event.type === 'done') {
+      
+      break;
+      
+      case 'done': {
         const fileName = event.fileName as string;
         finalResult = {
           fileName,
@@ -323,8 +368,13 @@ export async function runProcess(
           fileSize: event.fileSize as number,
           downloadUrl: `${BASE_URL}/api/download/${encodeURIComponent(fileName)}`,
         };
-      } else if (event.type === 'error') {
+      
+      break;
+      }
+      case 'error':
         throw new Error(event.message as string);
+      
+      // No default
       }
     }
   }

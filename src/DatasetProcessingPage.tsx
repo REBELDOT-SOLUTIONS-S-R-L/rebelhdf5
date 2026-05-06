@@ -10,32 +10,29 @@ import {
   FiServer,
 } from 'react-icons/fi';
 import { HiFolder } from 'react-icons/hi';
-import { Link, createSearchParams, useSearchParams } from 'react-router-dom';
+import { createSearchParams, Link, useSearchParams } from 'react-router-dom';
 
+import styles from './DatasetProcessingPage.module.css';
 import {
   getDatasetProcessingInfo,
   openPoseTraceSource,
   processDataset,
 } from './pose-trace/hdf5';
-import type {
-  DatasetProcessingKeyInfo,
-  DatasetProcessingOperation,
-  DatasetProcessingProgress,
-  DatasetProcessingSourceInfo,
-  PoseTraceSource,
+import  {
+  type DatasetProcessingKeyInfo,
+  type DatasetProcessingOperation,
+  type DatasetProcessingProgress,
+  type DatasetProcessingSourceInfo,
+  type PoseTraceSource,
 } from './pose-trace/types';
 import {
-  listFiles,
   pollBackendStatus,
-  resolveFiles,
+  type PythonBackendStatus,
+  type PythonScanResult,
   runProcess,
   scanFiles,
-  type PythonBackendStatus,
-  type PythonFileEntry,
-  type PythonScanResult,
 } from './python-backend';
-import { FileService, type H5File, useStore } from './stores';
-import styles from './DatasetProcessingPage.module.css';
+import { type H5File, useStore } from './stores';
 import { resolveFileUrl } from './utils';
 
 interface ResolvedFileState {
@@ -89,7 +86,7 @@ function getBackendSourceId(path: string): string {
 }
 
 function stripExtension(filename: string): string {
-  return filename.replace(/\.(hdf5|h5)$/i, '');
+  return filename.replace(/\.(h5|hdf5)$/iu, '');
 }
 
 function triggerDownloadBlob(fileName: string, blob: Blob) {
@@ -98,7 +95,7 @@ function triggerDownloadBlob(fileName: string, blob: Blob) {
   link.href = url;
   link.download = fileName;
   link.click();
-  window.setTimeout(() => {
+  globalThis.setTimeout(() => {
     URL.revokeObjectURL(url);
   }, 0);
 }
@@ -112,7 +109,7 @@ function triggerDownloadUrl(fileName: string, downloadUrl: string) {
 
 function buildDefaultOutputName(
   operation: DatasetProcessingOperation,
-  sourceFiles: Array<{ name: string }>,
+  sourceFiles: { name: string }[],
   cutDemoNames: string[],
 ): string {
   if (operation === 'cut') {
@@ -430,7 +427,7 @@ function useDatasetProcessingSources(
     }
 
     let cancelled = false;
-    const cleanups: Array<() => void> = [];
+    const cleanups: (() => void)[] = [];
 
     setState(
       Object.fromEntries(
@@ -562,10 +559,6 @@ function DatasetProcessingPage() {
   const [backendScan, setBackendScan] = useState<PythonScanResult | null>(null);
   const [backendLoading, setBackendLoading] = useState(false);
   const [backendError, setBackendError] = useState<string | null>(null);
-  const [backendFiles, setBackendFiles] = useState<PythonFileEntry[]>([]);
-  const [backendFilesLoading, setBackendFilesLoading] = useState(false);
-  const [backendFilesError, setBackendFilesError] = useState<string | null>(null);
-  const [resolveRetryKey, setResolveRetryKey] = useState(0);
   const previousAvailableKeyPathsRef = useRef<string[]>([]);
   const backendAutoEnabledRef = useRef(false);
 
@@ -587,36 +580,6 @@ function DatasetProcessingPage() {
     }
   }, [backend.available, useBackend]);
 
-  useEffect(() => {
-    if (!useBackend || !backend.available || !backend.rootDir) {
-      setBackendFiles([]);
-      setBackendFilesLoading(false);
-      setBackendFilesError(null);
-      return;
-    }
-
-    let cancelled = false;
-    setBackendFilesLoading(true);
-    setBackendFilesError(null);
-
-    void listFiles(backend.rootDir, true)
-      .then((result) => {
-        if (!cancelled) {
-          setBackendFiles(result.files);
-          setBackendFilesLoading(false);
-        }
-      })
-      .catch((error: unknown) => {
-        if (!cancelled) {
-          setBackendFiles([]);
-          setBackendFilesError(error instanceof Error ? error.message : 'Could not list server files.');
-          setBackendFilesLoading(false);
-        }
-      });
-
-    return () => { cancelled = true; };
-  }, [backend.available, backend.rootDir, useBackend]);
-
   const availableFiles = useMemo(() => {
     const byUrl = new Map<string, H5File>();
     if (file) {
@@ -631,19 +594,36 @@ function DatasetProcessingPage() {
     return [...byUrl.values()];
   }, [file, opened]);
 
-  // Unified source option IDs. Backend-listed files carry absolute server paths.
-  const sourceOptions = useMemo<SourceOption[]>(() => {
-    if (useBackend && backend.available && backendFiles.length > 0) {
-      return backendFiles.map((entry) => ({
-        id: getBackendSourceId(entry.path),
-        name: entry.name,
-        label: entry.relativePath ?? entry.name,
-        backendPath: entry.path,
-      }));
+  // Source options are always restricted to files the user has opened. In
+  // desktop backend mode we only use explicit filesystem paths from Electron;
+  // guessing by basename is unreliable and no longer needed locally.
+  const { sourceOptions, skippedNames } = useMemo<{
+    sourceOptions: SourceOption[];
+    skippedNames: string[];
+  }>(() => {
+    if (useBackend && backend.available) {
+      const options: SourceOption[] = [];
+      const skipped: string[] = [];
+      for (const f of availableFiles) {
+        if (f.serverPath) {
+          options.push({
+            id: getBackendSourceId(f.serverPath),
+            name: f.name,
+            label: f.name,
+            backendPath: f.serverPath,
+          });
+        } else {
+          skipped.push(f.name);
+        }
+      }
+      return { sourceOptions: options, skippedNames: skipped };
     }
 
-    return availableFiles.map((f) => ({ id: f.url, name: f.name, label: f.name }));
-  }, [availableFiles, backend.available, backendFiles, useBackend]);
+    return {
+      sourceOptions: availableFiles.map((f) => ({ id: f.url, name: f.name, label: f.name })),
+      skippedNames: [],
+    };
+  }, [availableFiles, backend.available, useBackend]);
 
   const sourceOptionMap = useMemo(
     () => new Map(sourceOptions.map((entry) => [entry.id, entry])),
@@ -707,83 +687,19 @@ function DatasetProcessingPage() {
     [orderedSelectedSourceUrls, sourceOptionMap],
   );
 
-  // Resolve opened file names to server-side paths via the resolve-files endpoint.
-  const [resolvedPaths, setResolvedPaths] = useState<Record<string, string | null>>({});
-  const [resolveError, setResolveError] = useState<string | null>(null);
-
-  const namesToResolve = useMemo(
-    () => {
-      if (!useBackend || !backend.available) {
-        return [];
-      }
-
-      return orderedSelectedSourceUrls
-        .map((url) => sourceOptionMap.get(url))
-        .filter((entry): entry is SourceOption => entry !== undefined && !entry.backendPath)
-        .map((entry) => entry.name)
-        .filter((name): name is string => Boolean(name));
-    },
-    [backend.available, orderedSelectedSourceUrls, sourceOptionMap, useBackend],
-  );
-
-  useEffect(() => {
-    if (namesToResolve.length === 0) {
-      setResolvedPaths({});
-      setResolveError(null);
-      return;
+  const resolveError = useMemo(() => {
+    if (!useBackend || !backend.available) {
+      return null;
     }
 
-    let cancelled = false;
-    let retryTimeout: ReturnType<typeof globalThis.setTimeout> | null = null;
+    const missingPaths = selectedSourceOptions
+      .filter((entry) => !entry.backendPath)
+      .map((entry) => entry.name);
 
-    async function resolveSelectedFiles() {
-      try {
-        const result = await resolveFiles(namesToResolve);
-        if (cancelled) {
-          return;
-        }
-
-        setResolvedPaths(result.resolved);
-        const missing = namesToResolve.filter((n) => !result.resolved[n]);
-
-        if (result.indexError) {
-          setResolveError(`Python server file index failed: ${result.indexError}`);
-          return;
-        }
-
-        if (missing.length > 0 && result.indexing) {
-          setResolveError(null);
-          retryTimeout = globalThis.setTimeout(() => {
-            setResolveRetryKey((current) => current + 1);
-          }, 1500);
-          return;
-        }
-
-        setResolveError(
-          missing.length > 0
-            ? `Could not find on server: ${missing.join(', ')}. Check MERGE_SERVER_DIR.`
-            : null,
-        );
-      } catch (error: unknown) {
-        if (!cancelled) {
-          setResolveError(
-            error instanceof Error
-              ? error.message
-              : 'Could not resolve files on the Python backend.',
-          );
-        }
-      }
-    }
-
-    void resolveSelectedFiles();
-
-    return () => {
-      cancelled = true;
-      if (retryTimeout) {
-        globalThis.clearTimeout(retryTimeout);
-      }
-    };
-  }, [namesToResolve, resolveRetryKey]);
+    return missingPaths.length > 0
+      ? `No local filesystem path for: ${missingPaths.join(', ')}. Reopen the file with the desktop file picker.`
+      : null;
+  }, [backend.available, selectedSourceOptions, useBackend]);
 
   const backendScanPaths = useMemo(
     () => {
@@ -795,10 +711,10 @@ function DatasetProcessingPage() {
         return [];
       }
 
-      const paths = selectedSourceOptions.map((entry) => entry.backendPath ?? resolvedPaths[entry.name]);
+      const paths = selectedSourceOptions.map((entry) => entry.backendPath);
       return paths.every((p): p is string => Boolean(p)) ? paths : [];
     },
-    [resolveError, resolvedPaths, selectedSourceOptions],
+    [resolveError, selectedSourceOptions],
   );
 
   // Demo names for the primary source in backend mode.
@@ -812,14 +728,13 @@ function DatasetProcessingPage() {
       return [];
     }
 
-    const resolvedPath = primaryOption.backendPath ?? resolvedPaths[primaryOption.name];
-    if (!resolvedPath) {
+    if (!primaryOption.backendPath) {
       return [];
     }
 
-    const fileInfo = backendScan.files.find((f) => f.path === resolvedPath);
+    const fileInfo = backendScan.files.find((f) => f.path === primaryOption.backendPath);
     return fileInfo?.demoNames ?? [];
-  }, [backendScan, primarySourceUrl, resolvedPaths, sourceOptionMap, useBackend]);
+  }, [backendScan, primarySourceUrl, sourceOptionMap, useBackend]);
 
   useEffect(() => {
     if (!useBackend || !backend.available || !backend.rootDir) {
@@ -901,14 +816,14 @@ function DatasetProcessingPage() {
 
     const startIndex = primaryDemos.findIndex((demo) => demo.name === cutStartDemoName);
     const endIndex = primaryDemos.findIndex((demo) => demo.name === cutEndDemoName);
-    if (startIndex >= 0 && endIndex >= 0 && startIndex > endIndex) {
+    if (startIndex !== -1 && endIndex !== -1 && startIndex > endIndex) {
       setCutEndDemoName(cutStartDemoName);
     }
   }, [cutEndDemoName, cutStartDemoName, primaryDemos]);
 
   const selectedSourceStates = orderedSelectedSourceUrls
     .map((url) => sourceStates[url])
-    .filter((entry): entry is ProcessingSourceState => Boolean(entry));
+    .filter(Boolean);
   const selectedSourceFiles = selectedSourceStates.map((entry) => entry.file);
   const selectedSourceRefs = useBackend && backend.available
     ? selectedSourceOptions.map((entry) => ({ name: entry.name }))
@@ -924,7 +839,7 @@ function DatasetProcessingPage() {
     if (useBackend && backendScan) {
       if (operation === 'cut') {
         const primaryOption = primarySourceUrl ? sourceOptionMap.get(primarySourceUrl) ?? null : null;
-        const primaryPath = primaryOption ? primaryOption.backendPath ?? resolvedPaths[primaryOption.name] ?? null : null;
+        const primaryPath = primaryOption?.backendPath ?? null;
         const primaryInfo = backendScan.files.find((entry) => entry.path === primaryPath) ?? null;
         return buildBackendKeyInfos(primaryInfo);
       }
@@ -942,7 +857,7 @@ function DatasetProcessingPage() {
 
     const readySources = selectedSourceStates.filter((entry) => entry.info);
     return sumKeyInfos(readySources.flatMap((entry) => entry.info?.keyPaths ?? []));
-  }, [backendScan, operation, primarySourceState, primarySourceUrl, resolvedPaths, selectedSourceStates, sourceOptionMap, useBackend]);
+  }, [backendScan, operation, primarySourceState, primarySourceUrl, selectedSourceStates, sourceOptionMap, useBackend]);
 
   const availableKeySet = useMemo(
     () => new Set(availableKeyInfos.map((keyInfo) => keyInfo.path)),
@@ -983,7 +898,7 @@ function DatasetProcessingPage() {
 
     const startIndex = primaryDemos.findIndex((demo) => demo.name === cutStartDemoName);
     const endIndex = primaryDemos.findIndex((demo) => demo.name === cutEndDemoName);
-    if (startIndex < 0 || endIndex < 0 || startIndex > endIndex) {
+    if (startIndex === -1 || endIndex === -1 || startIndex > endIndex) {
       return [];
     }
 
@@ -1115,9 +1030,9 @@ function DatasetProcessingPage() {
       } else {
         // WASM worker processing.
         const chunks: ArrayBuffer[] = [];
-        const orderedSourceIds = selectedSourceStates.map((entry) => entry.source?.sourceId).filter(
-          (sourceId): sourceId is string => Boolean(sourceId),
-        );
+        const orderedSourceIds = selectedSourceStates
+          .map((entry) => entry.source?.sourceId)
+          .filter((id): id is string => Boolean(id));
 
         const result = await processDataset(
           {
@@ -1231,14 +1146,7 @@ function DatasetProcessingPage() {
               <p className={styles.backendTitle}>Python Processing Server</p>
               <p className={styles.backendSubtitle}>
                 Native processing — orders of magnitude faster for large files with video data.
-                {backend.rootDir && <> Serving <code>{backend.rootDir}</code></>}
-                {backend.indexing && (
-                  <>
-                    {' '}Indexing HDF5 files
-                    {typeof backend.indexedFileCount === 'number' && ` (${backend.indexedFileCount} found so far)`}
-                    …
-                  </>
-                )}
+                {backend.outputDir && <> Output directory: <code>{backend.outputDir}</code></>}
               </p>
             </div>
             <label className={styles.backendToggle}>
@@ -1258,11 +1166,14 @@ function DatasetProcessingPage() {
           {useBackend && backendLoading && !backendError && (
             <p className={styles.infoText} style={{ marginTop: '0.75rem' }}>Scanning files…</p>
           )}
-          {useBackend && backendFilesLoading && !backendFilesError && (
-            <p className={styles.infoText} style={{ marginTop: '0.75rem' }}>Loading server HDF5 files…</p>
+          {useBackend && skippedNames.length > 0 && (
+            <p className={styles.infoText} style={{ marginTop: '0.75rem' }}>
+              Hidden from backend processing because they were opened without a desktop filesystem path:{' '}
+              {skippedNames.join(', ')}. Reopen them with the desktop file picker or turn the backend off to process them via WASM.
+            </p>
           )}
-          {useBackend && backendFilesError && (
-            <p className={styles.errorText} style={{ marginTop: '0.75rem' }}>{backendFilesError}</p>
+          {useBackend && resolveError && (
+            <p className={styles.errorText} style={{ marginTop: '0.75rem' }}>{resolveError}</p>
           )}
         </section>
       )}
@@ -1281,10 +1192,10 @@ function DatasetProcessingPage() {
         </section>
       )}
 
-      {useBackend && backend.available && !backendFilesLoading && sourceOptions.length === 0 && (
+      {useBackend && backend.available && sourceOptions.length === 0 && skippedNames.length === 0 && (
         <section className={styles.messageCard}>
           <p className={styles.infoText}>
-            No HDF5 files found under the Python server root. Set <code>MERGE_SERVER_DIR</code> to your dataset directory or open files in the browser and turn the backend off.
+            Open one or more HDF5 files from the home page to enable processing.
           </p>
         </section>
       )}
@@ -1432,7 +1343,7 @@ function DatasetProcessingPage() {
 
             <div className={styles.statusRow}>
               <div className={styles.statusItem}>
-                <span className={styles.statusKey}>{useBackend ? 'Server Files:' : 'Opened:'}</span> {sourceOptions.length}
+                <span className={styles.statusKey}>Opened:</span> {sourceOptions.length}
               </div>
               <div className={styles.statusItem}>
                 <span className={styles.statusKey}>Selected Sources:</span> {orderedSelectedSourceUrls.length}
