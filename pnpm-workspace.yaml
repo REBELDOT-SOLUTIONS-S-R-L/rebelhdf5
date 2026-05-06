@@ -1,27 +1,28 @@
+dedupePeerDependents: false
 # Enforce Node and pnpm versions specified in `engines` field of `package.json`
 engineStrict: true
 
 # Use pnpm from environment
 managePackageManagerVersions: false
 
-# Save exact dependency versions in `package.json`
-savePrefix: ''
-
-# Manage peer dependencies explicitly and predictibly
-strictPeerDependencies: true
-dedupePeerDependents: false
-
-# Fail install if any dependency has unreviewed build scripts
-strictDepBuilds: true
-onlyBuiltDependencies:
-  - 'electron'
-  - 'esbuild'
-
 # Only install packages that are at least 2 days old
 minimumReleaseAge: 2880
 minimumReleaseAgeExclude:
   - '@h5web/*'
   - '@esrf/eslint-config'
+onlyBuiltDependencies:
+  - 'electron'
+  - es5-ext
+  - 'esbuild'
+
+# Save exact dependency versions in `package.json`
+savePrefix: ''
+
+# Fail install if any dependency has unreviewed build scripts
+strictDepBuilds: true
+
+# Manage peer dependencies explicitly and predictibly
+strictPeerDependencies: true
 
 # Check that `node_modules` is up to date before running scripts
 verifyDepsBeforeRun: 'install'
