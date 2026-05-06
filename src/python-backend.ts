@@ -83,6 +83,13 @@ export interface PythonProcessRequest {
   cutRange?: DatasetProcessingCutRange;
 }
 
+export interface PythonLeRobotConvertRequest {
+  paths: string[];
+  outputName: string;
+  skipFailed: boolean;
+  maxEpisodes?: number;
+}
+
 export interface PythonProcessCallbacks {
   onProgress?: (progress: DatasetProcessingProgress) => void;
 }
@@ -90,6 +97,10 @@ export interface PythonProcessCallbacks {
 export type PythonProcessResult = DatasetProcessingResultMeta & {
   fileSize: number;
   downloadUrl: string;
+};
+
+export type PythonLeRobotConvertResult = DatasetProcessingResultMeta & {
+  fileSize: number;
 };
 
 async function parseErrorResponse(response: Response): Promise<string> {
@@ -381,6 +392,101 @@ export async function runProcess(
 
   if (!finalResult) {
     throw new Error('Processing stream ended without a completion event.');
+  }
+
+  return finalResult;
+}
+
+/** Convert selected HDF5 files to a LeRobot v2.1 dataset directory. */
+export async function runLeRobotConvert(
+  request: PythonLeRobotConvertRequest,
+  callbacks: PythonProcessCallbacks,
+): Promise<PythonLeRobotConvertResult> {
+  const response = await fetch(`${BASE_URL}/api/convert/lerobot`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      paths: request.paths,
+      outputName: request.outputName,
+      skipFailed: request.skipFailed,
+      maxEpisodes: request.maxEpisodes,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(await parseErrorResponse(response));
+  }
+
+  const reader = response.body?.getReader();
+  if (!reader) {
+    throw new Error('Server did not return a readable stream.');
+  }
+
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let finalResult: PythonLeRobotConvertResult | null = null;
+
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+
+    buffer += decoder.decode(value, { stream: true });
+
+    const parts = buffer.split('\n\n');
+    buffer = parts.pop() ?? '';
+
+    for (const part of parts) {
+      const trimmed = part.trim();
+      if (!trimmed.startsWith('data: ')) {
+        continue;
+      }
+
+      let event: Record<string, unknown>;
+      try {
+        event = JSON.parse(trimmed.slice(6));
+      } catch {
+        continue;
+      }
+
+      switch (event.type) {
+      case 'progress':
+        callbacks.onProgress?.({
+          phase: event.phase as DatasetProcessingProgress['phase'],
+          overallDemoIndex: event.overallDemoIndex as number,
+          overallDemoCount: event.overallDemoCount as number,
+          currentSourceName: event.currentSourceName as string,
+          currentDemoName: event.currentDemoName as string,
+        });
+
+      break;
+
+      case 'done':
+        finalResult = {
+          fileName: event.fileName as string,
+          demoCount: event.demoCount as number,
+          selectedKeyCount: event.selectedKeyCount as number,
+          fileSize: event.fileSize as number,
+          outputPath: event.outputPath as string | undefined,
+          outputType: event.outputType as 'file' | 'directory' | undefined,
+          skippedDemoCount: event.skippedDemoCount as number | undefined,
+          totalFrames: event.totalFrames as number | undefined,
+          taskCount: event.taskCount as number | undefined,
+        };
+
+      break;
+
+      case 'error':
+        throw new Error(event.message as string);
+
+      // No default
+      }
+    }
+  }
+
+  if (!finalResult) {
+    throw new Error('Conversion stream ended without a completion event.');
   }
 
   return finalResult;

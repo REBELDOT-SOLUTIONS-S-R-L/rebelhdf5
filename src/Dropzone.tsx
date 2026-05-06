@@ -95,7 +95,12 @@ function Dropzone(props: PropsWithChildren<Props>) {
   });
 
   const openFilePicker = useCallback(async () => {
-    if (globalThis.rebelHdf5Desktop && globalThis.showOpenFilePicker) {
+    if (globalThis.rebelHdf5Desktop) {
+      open();
+      return;
+    }
+
+    if (globalThis.showOpenFilePicker) {
       try {
         const handles = await globalThis.showOpenFilePicker(OPEN_PICKER_OPTIONS);
         const files = await Promise.all(

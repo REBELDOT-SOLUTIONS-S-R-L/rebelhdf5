@@ -353,6 +353,19 @@
   word-break: break-word;
 }
 
+.inlineOption {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  margin-top: 0.9rem;
+  color: var(--color-gray);
+  font-weight: 600;
+}
+
+.inlineOption input {
+  accent-color: #ffd000;
+}
+
 .actionRow {
   display: flex;
   gap: 0.85rem;

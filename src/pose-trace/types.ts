@@ -99,7 +99,7 @@ export interface DemoVideoFrames extends DemoVideoInfo {
   frames: Uint8Array;
 }
 
-export type DatasetProcessingOperation = 'cut' | 'merge' | 'append';
+export type DatasetProcessingOperation = 'cut' | 'merge' | 'append' | 'lerobot';
 
 export interface DatasetProcessingKeyInfo {
   path: string;
@@ -124,7 +124,7 @@ export interface DatasetProcessingRequest {
 }
 
 export interface DatasetProcessingProgress {
-  phase: 'copying' | 'flushing' | 'streaming';
+  phase: 'copying' | 'flushing' | 'streaming' | 'converting' | 'encoding' | 'stats' | 'metadata';
   overallDemoIndex: number;
   overallDemoCount: number;
   currentSourceName: string;
@@ -141,6 +141,11 @@ export interface DatasetProcessingResultMeta {
   fileName: string;
   demoCount: number;
   selectedKeyCount: number;
+  outputPath?: string;
+  outputType?: 'file' | 'directory';
+  skippedDemoCount?: number;
+  totalFrames?: number;
+  taskCount?: number;
 }
 
 /** @deprecated Use DatasetProcessingResultMeta + chunk streaming instead. */

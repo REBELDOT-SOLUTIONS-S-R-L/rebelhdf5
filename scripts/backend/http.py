@@ -15,6 +15,7 @@ import h5py
 
 from . import databricks as databricks_ops
 from . import hdf5_ops
+from . import lerobot as lerobot_ops
 from .files import list_hdf5_files_in_dir
 
 if TYPE_CHECKING:
@@ -156,6 +157,9 @@ class BackendHandler(BaseHTTPRequestHandler):
         if path == "/api/process":
             return self._handle_process()
 
+        if path == "/api/convert/lerobot":
+            return self._handle_lerobot_convert()
+
         self._error(404, "Not found")
 
     # -- Handlers ------------------------------------------------------------
@@ -167,7 +171,7 @@ class BackendHandler(BaseHTTPRequestHandler):
             "rootDir": self.server.root_dir,
             "rootDirs": list(self.server.root_dirs),
             "outputDir": self.server.output_dir,
-            "version": 5,
+            "version": 7,
             "indexing": index_status["indexing"],
             "indexReady": index_status["ready"],
             "indexedFileCount": index_status["count"],
@@ -176,6 +180,20 @@ class BackendHandler(BaseHTTPRequestHandler):
 
     def _resolve_file(self, filename: str) -> Path | None:
         return self.server.resolve_file(filename)
+
+    def _resolve_body_paths(self, raw_paths: list[Any]) -> tuple[list[Path], str | None]:
+        if not isinstance(raw_paths, list):
+            return [], "Expected 'paths' to be a list."
+
+        paths: list[Path] = []
+        for raw_path in raw_paths:
+            if not isinstance(raw_path, str) or not raw_path:
+                return [], "Invalid file path in request."
+            resolved = self._resolve_file(raw_path)
+            if not resolved:
+                return [], f"File not found or ambiguous: {raw_path}"
+            paths.append(resolved)
+        return paths, None
 
     def _handle_files(self, directories: list[str], *, recursive: bool = False) -> None:
         try:
@@ -267,11 +285,9 @@ class BackendHandler(BaseHTTPRequestHandler):
     def _handle_scan(self) -> None:
         try:
             body = self._read_json_body()
-            paths = [Path(p) for p in body.get("paths", [])]
-
-            for p in paths:
-                if not p.exists():
-                    return self._error(400, f"File not found: {p}")
+            paths, path_error = self._resolve_body_paths(body.get("paths", []))
+            if path_error:
+                return self._error(400, path_error)
 
             all_key_sets: list[set[str]] = []
             file_infos: list[dict[str, Any]] = []
@@ -318,20 +334,18 @@ class BackendHandler(BaseHTTPRequestHandler):
     def _handle_process(self) -> None:
         try:
             body = self._read_json_body()
-            paths = [Path(p) for p in body.get("paths", [])]
+            paths, path_error = self._resolve_body_paths(body.get("paths", []))
             selected_keys = body.get("selectedKeys", [])
             output_name = body.get("outputName", "processed.hdf5")
             operation = body.get("operation", "merge")
             cut_range = body.get("cutRange")
 
+            if path_error:
+                return self._error(400, path_error)
             if not paths:
                 return self._error(400, "No input files specified.")
             if not selected_keys:
                 return self._error(400, "No keys selected.")
-
-            for p in paths:
-                if not p.exists():
-                    return self._error(400, f"File not found: {p}")
 
             # Create output file path, avoiding overwrites.
             output_dir = Path(self.server.output_dir)
@@ -348,6 +362,65 @@ class BackendHandler(BaseHTTPRequestHandler):
             try:
                 for event in hdf5_ops.process_with_progress(
                     paths, output_path, selected_keys, operation, cut_range,
+                ):
+                    self._send_sse(event)
+
+                self.server.register_output(output_path)
+
+            except Exception as exc:
+                self._send_sse({
+                    "type": "error",
+                    "message": str(exc),
+                    "traceback": traceback.format_exc(),
+                })
+
+        except Exception as exc:
+            try:
+                self._error(500, str(exc))
+            except Exception:
+                pass
+
+    def _handle_lerobot_convert(self) -> None:
+        try:
+            body = self._read_json_body()
+            paths, path_error = self._resolve_body_paths(body.get("paths", []))
+            output_name = Path(str(body.get("outputName", "lerobot-v21"))).name.strip() or "lerobot-v21"
+            skip_failed = bool(body.get("skipFailed", True))
+            max_episodes_raw = body.get("maxEpisodes")
+            max_episodes = int(max_episodes_raw) if max_episodes_raw is not None else None
+            modality_json_raw = body.get("modalityJson")
+            if modality_json_raw:
+                modality_json = Path(modality_json_raw)
+            else:
+                default_modality = (
+                    Path("/workspace/IsaacTools/ROBOTICS-lehome-challenge")
+                    / "configs/gr00t/modality.json"
+                )
+                modality_json = default_modality if default_modality.exists() else None
+
+            if path_error:
+                return self._error(400, path_error)
+            if not paths:
+                return self._error(400, "No input files specified.")
+            if max_episodes is not None and max_episodes < 1:
+                return self._error(400, "maxEpisodes must be >= 1.")
+
+            output_dir = Path(self.server.output_dir)
+            output_path = output_dir / output_name
+            counter = 1
+            while output_path.exists():
+                output_path = output_dir / f"{output_name}-{counter}"
+                counter += 1
+
+            self._start_sse()
+
+            try:
+                for event in lerobot_ops.convert_with_progress(
+                    paths,
+                    output_path,
+                    modality_json,
+                    skip_failed=skip_failed,
+                    max_episodes=max_episodes,
                 ):
                     self._send_sse(event)
 

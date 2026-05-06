@@ -58,13 +58,33 @@ class BackendServer(ThreadingHTTPServer):
         }
 
     def resolve_file(self, location: str) -> Path | None:
-        """Resolve an explicit local filesystem path if it exists."""
+        """Resolve an explicit local path, or a unique basename under root dirs."""
         try:
             path = Path(location).expanduser()
             if path.is_file():
                 return path.resolve()
         except (OSError, RuntimeError, ValueError):
             return None
+
+        # Electron builds created before serverPath metadata existed can still
+        # send only the File.name. Resolve that case only when it is unambiguous.
+        if Path(location).name != location:
+            return None
+
+        matches: list[Path] = []
+        for root in self.root_dirs:
+            root_path = Path(root)
+            try:
+                for match in root_path.rglob(location):
+                    if match.is_file() and match.name == location:
+                        matches.append(match.resolve())
+                        if len(matches) > 1:
+                            return None
+            except (OSError, RuntimeError, ValueError):
+                continue
+
+        if len(matches) == 1:
+            return matches[0]
 
         return None
 

@@ -29,6 +29,7 @@ import {
   pollBackendStatus,
   type PythonBackendStatus,
   type PythonScanResult,
+  runLeRobotConvert,
   runProcess,
   scanFiles,
 } from './python-backend';
@@ -53,6 +54,11 @@ interface ProcessResultState {
   fileName: string;
   demoCount: number;
   selectedKeyCount: number;
+  outputPath?: string;
+  outputType?: 'file' | 'directory';
+  skippedDemoCount?: number;
+  totalFrames?: number;
+  taskCount?: number;
   downloadUrl?: string;
   downloadBlob?: Blob;
 }
@@ -78,7 +84,9 @@ const OPERATION_LABELS: Record<DatasetProcessingOperation, string> = {
   cut: 'Cut',
   merge: 'Merge',
   append: 'Append',
+  lerobot: 'LeRobot',
 };
+const DATASET_PROCESSING_OPERATIONS: DatasetProcessingOperation[] = ['cut', 'merge', 'append', 'lerobot'];
 const BACKEND_SOURCE_PREFIX = 'backend:';
 
 function getBackendSourceId(path: string): string {
@@ -112,6 +120,14 @@ function buildDefaultOutputName(
   sourceFiles: { name: string }[],
   cutDemoNames: string[],
 ): string {
+  if (operation === 'lerobot') {
+    if (sourceFiles.length === 1) {
+      return `${stripExtension(sourceFiles[0].name)}-lerobot-v21`;
+    }
+
+    return `lerobot-v21-${sourceFiles.length}-datasets`;
+  }
+
   if (operation === 'cut') {
     const baseName = stripExtension(sourceFiles[0]?.name ?? 'dataset');
     const firstDemo = cutDemoNames[0] ?? 'start';
@@ -514,7 +530,7 @@ function EmptyState({
     <div className={styles.emptyState}>
       <h2 className={styles.emptyTitle}>Dataset Processing</h2>
       <p className={styles.emptyText}>
-        Open one or more HDF5 files in rebelHDF5, then switch to this page to cut, merge, or append datasets.
+        Open one or more HDF5 files in rebelHDF5, then switch to this page to cut, merge, append, or convert datasets.
       </p>
       <div className={styles.emptyActions}>
         <Link className={styles.openBtn} to="/">
@@ -538,6 +554,8 @@ function DatasetProcessingPage() {
   const [primarySourceUrl, setPrimarySourceUrl] = useState<string | null>(null);
   const [mergeSourceUrls, setMergeSourceUrls] = useState<string[]>([]);
   const [appendSourceUrls, setAppendSourceUrls] = useState<string[]>([]);
+  const [lerobotSourceUrls, setLerobotSourceUrls] = useState<string[]>([]);
+  const [skipFailedDemos, setSkipFailedDemos] = useState(true);
   const [cutStartDemoName, setCutStartDemoName] = useState<string | null>(null);
   const [cutEndDemoName, setCutEndDemoName] = useState<string | null>(null);
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
@@ -580,6 +598,12 @@ function DatasetProcessingPage() {
     }
   }, [backend.available, useBackend]);
 
+  useEffect(() => {
+    if (operation === 'lerobot' && backend.available && !useBackend) {
+      setUseBackend(true);
+    }
+  }, [backend.available, operation, useBackend]);
+
   const availableFiles = useMemo(() => {
     const byUrl = new Map<string, H5File>();
     if (file) {
@@ -595,28 +619,24 @@ function DatasetProcessingPage() {
   }, [file, opened]);
 
   // Source options are always restricted to files the user has opened. In
-  // desktop backend mode we only use explicit filesystem paths from Electron;
-  // guessing by basename is unreliable and no longer needed locally.
+  // backend mode we prefer explicit Electron filesystem paths, with a backend
+  // unique-basename fallback for files opened before path metadata existed.
   const { sourceOptions, skippedNames } = useMemo<{
     sourceOptions: SourceOption[];
     skippedNames: string[];
   }>(() => {
     if (useBackend && backend.available) {
       const options: SourceOption[] = [];
-      const skipped: string[] = [];
       for (const f of availableFiles) {
-        if (f.serverPath) {
-          options.push({
-            id: getBackendSourceId(f.serverPath),
-            name: f.name,
-            label: f.name,
-            backendPath: f.serverPath,
-          });
-        } else {
-          skipped.push(f.name);
-        }
+        const backendPath = f.serverPath ?? f.name;
+        options.push({
+          id: getBackendSourceId(backendPath),
+          name: f.name,
+          label: f.name,
+          backendPath,
+        });
       }
-      return { sourceOptions: options, skippedNames: skipped };
+      return { sourceOptions: options, skippedNames: [] };
     }
 
     return {
@@ -666,11 +686,26 @@ function DatasetProcessingPage() {
 
       return firstOther ? [firstOther] : [];
     });
+
+    setLerobotSourceUrls((current) => {
+      const valid = current.filter((url) => availableIds.has(url));
+      if (valid.length > 0) {
+        return valid;
+      }
+
+      return sourceOptions.map((entry) => entry.id);
+    });
   }, [primarySourceUrl, sourceOptions]);
 
   const orderedSelectedSourceUrls = useMemo(() => {
     if (operation === 'cut') {
       return primarySourceUrl ? [primarySourceUrl] : [];
+    }
+
+    if (operation === 'lerobot') {
+      return sourceOptions
+        .map((entry) => entry.id)
+        .filter((id) => lerobotSourceUrls.includes(id));
     }
 
     return sourceOptions
@@ -679,7 +714,7 @@ function DatasetProcessingPage() {
         id === primarySourceUrl
           || (operation === 'append' ? appendSourceUrls.includes(id) : mergeSourceUrls.includes(id)),
       );
-  }, [appendSourceUrls, mergeSourceUrls, operation, primarySourceUrl, sourceOptions]);
+  }, [appendSourceUrls, lerobotSourceUrls, mergeSourceUrls, operation, primarySourceUrl, sourceOptions]);
   const selectedSourceOptions = useMemo(
     () => orderedSelectedSourceUrls
       .map((id) => sourceOptionMap.get(id))
@@ -836,6 +871,10 @@ function DatasetProcessingPage() {
     && selectedSourceStates.every((entry) => entry.source && entry.info && !entry.loading && !entry.error);
 
   const availableKeyInfos = useMemo(() => {
+    if (operation === 'lerobot') {
+      return [];
+    }
+
     if (useBackend && backendScan) {
       if (operation === 'cut') {
         const primaryOption = primarySourceUrl ? sourceOptionMap.get(primarySourceUrl) ?? null : null;
@@ -910,6 +949,10 @@ function DatasetProcessingPage() {
     [cutDemoNames, operation, selectedSourceRefs],
   );
   const processingDescription = useMemo(() => {
+    if (operation === 'lerobot') {
+      return `Converting ${orderedSelectedSourceUrls.length} HDF5 dataset${orderedSelectedSourceUrls.length === 1 ? '' : 's'} to LeRobot v2.1 with GPU video encoding.`;
+    }
+
     if (operation === 'merge') {
       return `Merging ${orderedSelectedSourceUrls.length} datasets into a new file. Video-heavy keys can take a while to copy.`;
     }
@@ -922,6 +965,16 @@ function DatasetProcessingPage() {
   }, [appendSourceUrls.length, cutDemoNames.length, operation, orderedSelectedSourceUrls.length]);
 
   const canProcess = useMemo(() => {
+    if (operation === 'lerobot') {
+      return useBackend
+        && backend.available
+        && Boolean(backendScan)
+        && orderedSelectedSourceUrls.length > 0
+        && backendScanPaths.length === orderedSelectedSourceUrls.length
+        && !backendLoading
+        && !resolveError;
+    }
+
     if (selectedKeys.length === 0) {
       return false;
     }
@@ -971,6 +1024,8 @@ function DatasetProcessingPage() {
       primarySourceUrl,
       mergeSourceUrls,
       appendSourceUrls,
+      lerobotSourceUrls,
+      skipFailedDemos,
       cutStartDemoName,
       cutEndDemoName,
       selectedKeys,
@@ -979,10 +1034,12 @@ function DatasetProcessingPage() {
       appendSourceUrls,
       cutEndDemoName,
       cutStartDemoName,
+      lerobotSourceUrls,
       mergeSourceUrls,
       operation,
       primarySourceUrl,
       selectedKeys,
+      skipFailedDemos,
     ],
   );
   const hasDownloadReady = Boolean(lastResult?.downloadUrl || lastResult?.downloadBlob);
@@ -1006,6 +1063,29 @@ function DatasetProcessingPage() {
         // Python backend processing.
         if (backendScanPaths.length === 0 || resolveError) {
           throw new Error(resolveError ?? 'Could not resolve file paths on the Python backend.');
+        }
+
+        if (operation === 'lerobot') {
+          const result = await runLeRobotConvert(
+            {
+              paths: backendScanPaths,
+              outputName: defaultOutputName,
+              skipFailed: skipFailedDemos,
+            },
+            { onProgress: setProgress },
+          );
+
+          setLastResult({
+            fileName: result.fileName,
+            demoCount: result.demoCount,
+            selectedKeyCount: result.selectedKeyCount,
+            outputPath: result.outputPath,
+            outputType: result.outputType,
+            skippedDemoCount: result.skippedDemoCount,
+            totalFrames: result.totalFrames,
+            taskCount: result.taskCount,
+          });
+          return;
         }
 
         const result = await runProcess(
@@ -1133,7 +1213,7 @@ function DatasetProcessingPage() {
           <p className={styles.eyebrow}>Processing</p>
           <h1 className={styles.title}>Dataset Processing</h1>
           <p className={styles.subtitle}>
-            Cut demos, merge multiple datasets, or append one dataset to another. Processing always creates a new HDF5 file and leaves the original files unchanged.
+            Cut demos, merge multiple datasets, append one dataset to another, or convert HDF5 files to LeRobot v2.1. Processing leaves the original files unchanged.
           </p>
         </div>
       </header>
@@ -1215,9 +1295,12 @@ function DatasetProcessingPage() {
                   onChange={(event) => {
                     const nextOperation = event.target.value as DatasetProcessingOperation;
                     setOperation(nextOperation);
+                    if (nextOperation === 'lerobot' && backend.available) {
+                      setUseBackend(true);
+                    }
                   }}
                 >
-                  {(['cut', 'merge', 'append'] as DatasetProcessingOperation[]).map((value) => (
+                  {DATASET_PROCESSING_OPERATIONS.map((value) => (
                     <option key={value} value={value}>
                       {OPERATION_LABELS[value]}
                     </option>
@@ -1225,27 +1308,29 @@ function DatasetProcessingPage() {
                 </select>
               </div>
 
-              <div className={styles.field}>
-                <label className={styles.fieldLabel} htmlFor="dataset-processing-primary-source">
-                  {operation === 'cut' ? 'Source Dataset' : 'Base Dataset'}
-                </label>
-                <select
-                  id="dataset-processing-primary-source"
-                  className={styles.select}
-                  value={primarySourceUrl ?? ''}
-                  onChange={(event) => {
-                    const nextUrl = event.target.value;
-                    setPrimarySourceUrl(nextUrl || null);
-                  }}
-                  disabled={sourceOptions.length === 0}
-                >
-                  {sourceOptions.map((entry) => (
-                    <option key={entry.id} value={entry.id}>
-                      {entry.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              {operation !== 'lerobot' && (
+                <div className={styles.field}>
+                  <label className={styles.fieldLabel} htmlFor="dataset-processing-primary-source">
+                    {operation === 'cut' ? 'Source Dataset' : 'Base Dataset'}
+                  </label>
+                  <select
+                    id="dataset-processing-primary-source"
+                    className={styles.select}
+                    value={primarySourceUrl ?? ''}
+                    onChange={(event) => {
+                      const nextUrl = event.target.value;
+                      setPrimarySourceUrl(nextUrl || null);
+                    }}
+                    disabled={sourceOptions.length === 0}
+                  >
+                    {sourceOptions.map((entry) => (
+                      <option key={entry.id} value={entry.id}>
+                        {entry.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
             </div>
 
             {operation === 'cut' && (
@@ -1341,6 +1426,39 @@ function DatasetProcessingPage() {
               </>
             )}
 
+            {operation === 'lerobot' && (
+              <>
+                <p className={styles.sectionLabel}>Datasets To Convert</p>
+                <div className={styles.checkboxGrid}>
+                  {sourceOptions.map((entry) => (
+                    <label key={entry.id} className={styles.checkboxItem}>
+                      <input
+                        type="checkbox"
+                        checked={lerobotSourceUrls.includes(entry.id)}
+                        onChange={() => {
+                          toggleSource(entry.id, lerobotSourceUrls, setLerobotSourceUrls);
+                        }}
+                      />
+                      <span>{entry.label}</span>
+                    </label>
+                  ))}
+                </div>
+                <label className={styles.inlineOption}>
+                  <input
+                    type="checkbox"
+                    checked={skipFailedDemos}
+                    onChange={(event) => {
+                      setSkipFailedDemos(event.target.checked);
+                    }}
+                  />
+                  <span>Skip demos whose success attribute is false</span>
+                </label>
+                <p className={styles.infoText}>
+                  The converter writes LeRobot v2.1 parquet, metadata, modality.json, and GPU-encoded MP4 videos.
+                </p>
+              </>
+            )}
+
             <div className={styles.statusRow}>
               <div className={styles.statusItem}>
                 <span className={styles.statusKey}>Opened:</span> {sourceOptions.length}
@@ -1349,7 +1467,10 @@ function DatasetProcessingPage() {
                 <span className={styles.statusKey}>Selected Sources:</span> {orderedSelectedSourceUrls.length}
               </div>
               <div className={styles.statusItem}>
-                <span className={styles.statusKey}>Selected Keys:</span> {selectedKeys.length}
+                <span className={styles.statusKey}>
+                  {operation === 'lerobot' ? 'Output Format:' : 'Selected Keys:'}
+                </span>{' '}
+                {operation === 'lerobot' ? 'LeRobot v2.1' : selectedKeys.length}
               </div>
               {operation === 'cut' && (
                 <div className={styles.statusItem}>
@@ -1371,6 +1492,7 @@ function DatasetProcessingPage() {
 
       {availableFiles.length > 0 && (
         <>
+          {operation !== 'lerobot' && (
           <section className={styles.keysCard}>
             <div className={styles.keysHeader}>
               <div>
@@ -1440,19 +1562,32 @@ function DatasetProcessingPage() {
               </div>
             )}
           </section>
+          )}
 
           <section className={styles.actionsCard}>
             <div>
               <h2 className={styles.sectionTitle}>Create Output</h2>
               <p className={styles.sectionText}>
-                The processed output will be created as <code>{defaultOutputName}</code>.
+                {operation === 'lerobot'
+                  ? <>The LeRobot dataset directory will be created as <code>{defaultOutputName}</code>.</>
+                  : <>The processed output will be created as <code>{defaultOutputName}</code>.</>}
               </p>
             </div>
 
             {processingError && <p className={styles.errorText}>{processingError}</p>}
             {lastResult && (
               <p className={styles.successText}>
-                Created {lastResult.fileName} with {lastResult.demoCount} demos and {lastResult.selectedKeyCount} keys. Ready to download.
+                {lastResult.outputType === 'directory'
+                  ? (
+                    <>
+                      Created {lastResult.fileName} with {lastResult.demoCount} demos
+                      {typeof lastResult.totalFrames === 'number' && <> and {lastResult.totalFrames} frames</>}
+                      {typeof lastResult.taskCount === 'number' && <> across {lastResult.taskCount} task{lastResult.taskCount === 1 ? '' : 's'}</>}.
+                      {lastResult.outputPath && <> Output: <code>{lastResult.outputPath}</code></>}
+                      {Boolean(lastResult.skippedDemoCount) && <> Skipped {lastResult.skippedDemoCount} incompatible demo{lastResult.skippedDemoCount === 1 ? '' : 's'}.</>}
+                    </>
+                  )
+                  : `Created ${lastResult.fileName} with ${lastResult.demoCount} demos and ${lastResult.selectedKeyCount} keys. Ready to download.`}
               </p>
             )}
             {isProcessing && (
@@ -1464,12 +1599,20 @@ function DatasetProcessingPage() {
                       ? 'Flushing output file…'
                       : progress?.phase === 'streaming'
                         ? 'Preparing download…'
-                        : 'Processing dataset operation…'}
+                        : progress?.phase === 'encoding'
+                          ? 'Encoding MP4 videos on GPU…'
+                          : progress?.phase === 'converting'
+                            ? 'Converting HDF5 demos…'
+                            : progress?.phase === 'stats'
+                              ? 'Aggregating LeRobot stats…'
+                              : progress?.phase === 'metadata'
+                                ? 'Writing LeRobot metadata…'
+                                : 'Processing dataset operation…'}
                   </p>
-                  {progress?.phase === 'copying' ? (
+                  {progress && ['copying', 'converting', 'encoding'].includes(progress.phase) ? (
                     <>
                       <p className={styles.processingText}>
-                        Copying <strong>{progress.currentDemoName}</strong> from{' '}
+                        {progress.phase === 'copying' ? 'Copying' : progress.phase === 'encoding' ? 'Encoding' : 'Converting'} <strong>{progress.currentDemoName}</strong> from{' '}
                         <strong>{progress.currentSourceName}</strong>
                         {' — '}demo {progress.overallDemoIndex + 1} of {progress.overallDemoCount}
                         {progress.datasetDetail && (
@@ -1488,7 +1631,10 @@ function DatasetProcessingPage() {
                     </>
                   ) : (
                     <p className={styles.processingText}>
-                      {processingDescription} The output will be ready to download when processing finishes.
+                      {processingDescription}{' '}
+                      {operation === 'lerobot'
+                        ? 'The output directory path will be shown when conversion finishes.'
+                        : 'The output will be ready to download when processing finishes.'}
                     </p>
                   )}
                 </div>
@@ -1497,7 +1643,11 @@ function DatasetProcessingPage() {
 
             {!canProcess && (
               <p className={styles.infoText}>
-                {operation === 'merge'
+                {operation === 'lerobot'
+                  ? backend.available
+                    ? 'Select at least one backend-backed HDF5 file to convert to LeRobot v2.1.'
+                    : 'LeRobot conversion requires the local Python processing server.'
+                  : operation === 'merge'
                   ? 'Select at least two datasets and one key to create a merged output.'
                   : operation === 'append'
                     ? 'Select a base dataset, at least one dataset to append, and one key to create the output.'
@@ -1521,22 +1671,26 @@ function DatasetProcessingPage() {
               >
                 {hasDownloadReady ? <FiDownload aria-hidden /> : <FiFile aria-hidden />}
                 <span>
-                  {isProcessing ? 'Processing…' : hasDownloadReady ? 'Download' : 'Create'}
+                  {isProcessing
+                    ? operation === 'lerobot' ? 'Converting…' : 'Processing…'
+                    : hasDownloadReady ? 'Download' : operation === 'lerobot' ? 'Convert' : 'Create'}
                 </span>
               </button>
-              <button
-                type="button"
-                className={styles.secondaryBtn}
-                onClick={() => {
-                  setSelectedKeys(availableKeyInfos.map((keyInfo) => keyInfo.path));
-                  setProcessingError(null);
-                  setLastResult(null);
-                }}
-                disabled={availableKeyInfos.length === 0}
-              >
-                <FiRefreshCw aria-hidden />
-                <span>Reset Key Selection</span>
-              </button>
+              {operation !== 'lerobot' && (
+                <button
+                  type="button"
+                  className={styles.secondaryBtn}
+                  onClick={() => {
+                    setSelectedKeys(availableKeyInfos.map((keyInfo) => keyInfo.path));
+                    setProcessingError(null);
+                    setLastResult(null);
+                  }}
+                  disabled={availableKeyInfos.length === 0}
+                >
+                  <FiRefreshCw aria-hidden />
+                  <span>Reset Key Selection</span>
+                </button>
+              )}
             </div>
           </section>
         </>

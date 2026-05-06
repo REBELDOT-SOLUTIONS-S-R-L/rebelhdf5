@@ -17,7 +17,9 @@ const backendPreferredPort = Number(process.env.PYTHON_BACKEND_PORT ?? process.e
 const backendDir = process.env.PYTHON_BACKEND_DIR
   ?? process.env.MERGE_SERVER_DIR
   ?? path.resolve(projectRoot, '..');
-const backendPython = process.env.PYTHON_BACKEND_PYTHON ?? 'python3';
+const lehomePython = path.resolve(projectRoot, '..', 'ROBOTICS-lehome-challenge', '.venv', 'bin', 'python');
+const backendPython = process.env.PYTHON_BACKEND_PYTHON
+  ?? (fs.existsSync(lehomePython) ? lehomePython : 'python3');
 const smokeTest = process.argv.includes('--smoke-test');
 
 app.setName('rebelHDF5');
