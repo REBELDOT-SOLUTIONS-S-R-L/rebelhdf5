@@ -1,0 +1,203 @@
+import { describe, expect, it } from 'vitest';
+
+import {
+  build2DData,
+  build2DLayout,
+  build3DData,
+  build3DDataForStep,
+  build3DLayout,
+  buildClothDistributionData,
+  buildClothDistributionLayout,
+  buildEmptyLayout,
+} from './plotConfig';
+import type {
+  ClothDistributionPoint,
+  ClothDistributionResult,
+  DemoRow,
+} from './types';
+
+function makeRow(step: number, overrides: Partial<DemoRow> = {}): DemoRow {
+  return {
+    dataset_name: 'ds',
+    demo_name: 'demo_0',
+    step,
+    env_id: 0,
+    episode_index: null,
+    episode_step: step,
+    source_episode_index: null,
+    num_samples: 100,
+    success: null,
+    completed_attempts: null,
+    completed_successes: null,
+    eef_left_arm_z: 0.5 + step * 0.01,
+    eef_right_arm_z: 0.5 + step * 0.01,
+    keypoint_garment_left_lower_z: 0.4,
+    keypoint_garment_left_middle_z: 0.4,
+    keypoint_garment_left_upper_z: 0.4,
+    keypoint_garment_right_lower_z: 0.4,
+    keypoint_garment_right_middle_z: 0.4,
+    keypoint_garment_right_upper_z: 0.4,
+    dist_left_arm_to_garment_left_middle_m: 0.1,
+    dist_left_arm_to_garment_left_lower_m: 0.1,
+    dist_left_arm_to_garment_left_upper_m: 0.1,
+    dist_right_arm_to_garment_right_middle_m: 0.1,
+    dist_right_arm_to_garment_right_lower_m: 0.1,
+    dist_right_arm_to_garment_right_upper_m: 0.1,
+    eef_left_arm_x: 0.1,
+    eef_left_arm_y: 0.1,
+    eef_right_arm_x: -0.1,
+    eef_right_arm_y: 0.1,
+    ...overrides,
+  };
+}
+
+describe('buildEmptyLayout', () => {
+  it('returns a 2D layout with the title and message annotated', () => {
+    const layout = buildEmptyLayout('No data', 'Please pick a file');
+    expect(layout.title).toEqual(
+      expect.objectContaining({ text: 'No data' }),
+    );
+    expect(layout.annotations?.[0]).toMatchObject({ text: 'Please pick a file' });
+    expect(layout.height).toBe(520);
+    // 2D layout hides plain xaxis, doesn't add a 3D scene.
+    expect(layout.xaxis).toMatchObject({ visible: false });
+    expect(layout.scene).toBeUndefined();
+  });
+
+  it('returns a 3D layout with hidden scene axes when is3d=true', () => {
+    const layout = buildEmptyLayout('Empty', 'No file', true);
+    expect(layout.scene).toBeDefined();
+    expect(layout.height).toBe(760);
+    expect(layout.xaxis).toBeUndefined();
+  });
+});
+
+describe('build2DData', () => {
+  it('returns no traces for an empty rows array', () => {
+    expect(build2DData([], 'left')).toEqual([]);
+  });
+
+  it('produces traces for the requested side only', () => {
+    const rows = Array.from({ length: 5 }, (_, i) => makeRow(i));
+    const leftTraces = build2DData(rows, 'left') as Array<{ name?: string }>;
+    expect(leftTraces.length).toBeGreaterThan(0);
+    for (const trace of leftTraces) {
+      // Side label is part of the human-friendly trace name.
+      expect(trace.name?.toLowerCase()).not.toContain('right');
+    }
+  });
+});
+
+describe('build2DLayout', () => {
+  it('emits three subplot rows with the side prefix in the annotations', () => {
+    const layout = build2DLayout([], 'left');
+    expect(layout.height).toBe(980);
+    const annotations = layout.annotations ?? [];
+    expect(annotations).toHaveLength(3);
+    for (const annotation of annotations) {
+      const text = (annotation as { text?: string }).text ?? '';
+      expect(text.toLowerCase()).toContain('left');
+    }
+  });
+});
+
+describe('build3DData / build3DDataForStep', () => {
+  it('returns [] for empty rows', () => {
+    expect(build3DData([])).toEqual([]);
+    expect(build3DDataForStep([], 0)).toEqual([]);
+  });
+
+  it('builds traces from non-empty rows', () => {
+    const rows = Array.from({ length: 4 }, (_, i) => makeRow(i));
+    const traces = build3DData(rows);
+    expect(traces.length).toBeGreaterThan(0);
+  });
+});
+
+describe('build3DLayout', () => {
+  it('uses the default camera when none provided', () => {
+    const layout = build3DLayout([makeRow(0)]) as {
+      scene?: { camera?: { eye?: { y?: number } } };
+    };
+    expect(layout.scene?.camera?.eye?.y).toBeDefined();
+  });
+
+  it('respects a caller-provided camera', () => {
+    const camera = { eye: { x: 1, y: 2, z: 3 } };
+    const layout = build3DLayout([makeRow(0)], camera) as {
+      scene?: { camera?: typeof camera };
+    };
+    expect(layout.scene?.camera).toEqual(camera);
+  });
+});
+
+describe('buildClothDistribution helpers', () => {
+  function emptyResult(): ClothDistributionResult {
+    return {
+      anchor: 'left',
+      successPoints: [],
+      failedPoints: [],
+      teleopPoints: [],
+      teleopDiagnostics: null,
+    };
+  }
+
+  function makePoint(
+    category: 'success' | 'failed' | 'teleop',
+    x = 0,
+    y = 0,
+  ): ClothDistributionPoint {
+    return {
+      category,
+      datasetName: 'ds',
+      demoName: 'demo_0',
+      x,
+      y,
+      initialX: x,
+      initialY: y,
+      initialRx: 0,
+      initialRy: 0,
+      numSamples: null,
+      sourceLeft: '',
+      sourceRight: '',
+      sourceLeftDetails: [],
+      sourceRightDetails: [],
+    };
+  }
+
+  it('returns no traces for a null result', () => {
+    expect(buildClothDistributionData(null, null)).toEqual([]);
+  });
+
+  it('returns category traces when points are present, no selection', () => {
+    const result = emptyResult();
+    result.successPoints.push(makePoint('success', 0.1, 0.1));
+    result.failedPoints.push(makePoint('failed', 0.2, 0.2));
+    const traces = buildClothDistributionData(result, null);
+    expect(traces.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('appends selected-episode trace when a non-teleop point is selected', () => {
+    const result = emptyResult();
+    const selected = makePoint('success', 0.1, 0.1);
+    result.successPoints.push(selected);
+    const tracesWithoutSelection = buildClothDistributionData(result, null);
+    const tracesWithSelection = buildClothDistributionData(result, selected);
+    expect(tracesWithSelection.length).toBeGreaterThan(
+      tracesWithoutSelection.length,
+    );
+  });
+
+  it('does not append a selected-episode trace for teleop selection', () => {
+    const result = emptyResult();
+    const teleop = makePoint('teleop', 0.1, 0.1);
+    result.teleopPoints.push(teleop);
+    const traces = buildClothDistributionData(result, teleop);
+    expect(traces).toHaveLength(1);
+  });
+
+  it('returns a layout regardless of result presence', () => {
+    expect(buildClothDistributionLayout(null, 'left').height).toBe(820);
+    expect(buildClothDistributionLayout(emptyResult(), 'right').height).toBe(820);
+  });
+});

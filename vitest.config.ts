@@ -9,6 +9,11 @@ export default defineConfig({
   test: {
     globals: false,
     environment: 'jsdom',
+    environmentOptions: {
+      jsdom: {
+        localStorage: true,
+      },
+    },
     setupFiles: ['./vitest.setup.ts'],
     include: ['{src,electron}/**/*.test.{ts,tsx,mjs}'],
     css: false,

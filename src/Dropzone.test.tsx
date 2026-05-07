@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import Dropzone from './Dropzone';
+import Dropzone, { useDropzoneContext } from './Dropzone';
 import { FileService, useStore } from './stores';
 
 const initialState = useStore.getState();
@@ -63,5 +63,110 @@ describe('Dropzone', () => {
       expect(opened[0]?.name).toBe('demo.h5');
       expect(opened[0]?.service).toBe(FileService.Local);
     });
+  });
+
+});
+
+function PickerProbe() {
+  const { openFilePicker } = useDropzoneContext();
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        void openFilePicker();
+      }}
+    >
+      Pick
+    </button>
+  );
+}
+
+function renderWithPicker() {
+  return render(
+    <MemoryRouter>
+      <Dropzone>
+        <PickerProbe />
+      </Dropzone>
+    </MemoryRouter>,
+  );
+}
+
+describe('Dropzone openFilePicker', () => {
+  afterEach(() => {
+    Reflect.deleteProperty(globalThis, 'rebelHdf5Desktop');
+    Reflect.deleteProperty(globalThis, 'showOpenFilePicker');
+  });
+
+  it('falls back to the hidden input when no native picker is available', async () => {
+    renderWithPicker();
+    const input = findFileInput();
+    if (!input) {
+      throw new Error('Dropzone did not render its file input.');
+    }
+    const inputClick = vi.spyOn(input, 'click');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Pick' }));
+    expect(inputClick).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses the desktop launcher when window.rebelHdf5Desktop is present', async () => {
+    Object.assign(globalThis, { rebelHdf5Desktop: { getPathForFile: vi.fn() } });
+
+    renderWithPicker();
+    const input = findFileInput();
+    if (!input) {
+      throw new Error('Dropzone did not render its file input.');
+    }
+    const inputClick = vi.spyOn(input, 'click');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Pick' }));
+    expect(inputClick).toHaveBeenCalledTimes(1);
+  });
+
+  it('opens via showOpenFilePicker when supported and adds returned files', async () => {
+    const file = new File(['x'], 'fsa.h5', { type: 'application/x-hdf5' });
+    const handle = { getFile: vi.fn().mockResolvedValue(file) };
+    Object.assign(globalThis, {
+      showOpenFilePicker: vi.fn().mockResolvedValue([handle]),
+    });
+
+    renderWithPicker();
+    await userEvent.click(screen.getByRole('button', { name: 'Pick' }));
+
+    await vi.waitFor(() => {
+      const { opened } = useStore.getState();
+      expect(opened.map((f) => f.name)).toEqual(['fsa.h5']);
+    });
+  });
+
+  it('silently returns when the user aborts showOpenFilePicker', async () => {
+    Object.assign(globalThis, {
+      showOpenFilePicker: vi
+        .fn()
+        .mockRejectedValue(
+          new DOMException('User cancelled', 'AbortError'),
+        ),
+    });
+
+    renderWithPicker();
+    await userEvent.click(screen.getByRole('button', { name: 'Pick' }));
+
+    expect(useStore.getState().opened).toHaveLength(0);
+  });
+
+  it('falls through to the hidden input when showOpenFilePicker fails for any other reason', async () => {
+    Object.assign(globalThis, {
+      showOpenFilePicker: vi.fn().mockRejectedValue(new Error('boom')),
+    });
+
+    renderWithPicker();
+    const input = findFileInput();
+    if (!input) {
+      throw new Error('Dropzone did not render its file input.');
+    }
+    const inputClick = vi.spyOn(input, 'click');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Pick' }));
+    expect(inputClick).toHaveBeenCalledTimes(1);
   });
 });
