@@ -10,6 +10,8 @@ import {
   build3DDataForStep,
   build3DLayout,
   buildEmptyLayout,
+  get2DTraceGroups,
+  getDefaultHidden3DTraceGroups,
   type PlotSceneCamera,
 } from './pose-trace/plotConfig';
 import type { DemoInfo, DemoRow, PoseTraceSource } from './pose-trace/types';
@@ -37,13 +39,6 @@ interface PlotLegendClickEvent {
   curveNumber?: number;
   data?: PlotLegendTraceState[];
 }
-
-const DEFAULT_HIDDEN_3D_TRACE_GROUPS = new Set([
-  'ik_input_eef_left_arm',
-  'ik_input_eef_right_arm',
-  'eef_post_step_left_arm',
-  'eef_post_step_right_arm',
-]);
 
 function usePrefersDarkMode(): boolean {
   const [prefersDarkMode, setPrefersDarkMode] = useState(() => {
@@ -232,11 +227,13 @@ function PoseTraceCharts({
   const currentStepRow = rows[currentStepIndex];
   const currentStepLabel = currentStepRow?.episode_step ?? currentStepIndex;
   const threeDimensionalChartKey = `${rows[0]?.dataset_name ?? 'dataset'}-${rows[0]?.demo_name ?? 'demo'}-3d-${themeKey}`;
+  const twoDimensionalGroups = useMemo(() => get2DTraceGroups(rows), [rows]);
+  const defaultHiddenTraceGroups = useMemo(() => getDefaultHidden3DTraceGroups(rows), [rows]);
 
   if (sceneCameraIdentityRef.current !== threeDimensionalChartKey) {
     sceneCameraIdentityRef.current = threeDimensionalChartKey;
     sceneCameraRef.current = null;
-    hiddenTraceGroupsRef.current = new Set(DEFAULT_HIDDEN_3D_TRACE_GROUPS);
+    hiddenTraceGroupsRef.current = defaultHiddenTraceGroups;
   }
 
   const threeDimensionalData = useMemo(
@@ -324,16 +321,16 @@ function PoseTraceCharts({
       </section>
 
       <section className={styles.splitCharts}>
-        {(['left', 'right'] as const).map((side) => (
-          <div key={side} className={styles.chartCard}>
+        {twoDimensionalGroups.map((group) => (
+          <div key={group.id} className={styles.chartCard}>
             <Plot
-              key={`${rows[0]?.dataset_name ?? 'dataset'}-${rows[0]?.demo_name ?? 'demo'}-${side}-${themeKey}`}
-              data={hasData ? build2DData(rows, side) : []}
+              key={`${rows[0]?.dataset_name ?? 'dataset'}-${rows[0]?.demo_name ?? 'demo'}-${group.id}-${themeKey}`}
+              data={hasData ? build2DData(rows, group) : []}
               layout={
                 hasData
-                  ? build2DLayout(rows, side)
+                  ? build2DLayout(rows, group)
                   : buildEmptyLayout(
-                      side === 'left' ? 'Left EEF 2D Pose Trace' : 'Right EEF 2D Pose Trace',
+                      `${group.label} 2D Pose Trace`,
                       emptyMessage,
                     )
               }

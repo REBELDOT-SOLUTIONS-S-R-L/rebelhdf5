@@ -73,7 +73,16 @@ export const TRACE_3D_SPECS: Trace3DSpec[] = [
 
 export function humanizeColumnName(column: string): string {
   let label = column;
-  for (const prefix of ['dist_', 'threshold_', 'keypoint_', 'eef_']) {
+  for (const prefix of [
+    'dist_',
+    'threshold_',
+    'target_eef_',
+    'ik_input_eef_',
+    'eef_post_step_',
+    'keypoint_',
+    'object_',
+    'eef_',
+  ]) {
     label = label.replaceAll(prefix, '');
   }
   label = label.replaceAll('_m', '');

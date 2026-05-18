@@ -8,6 +8,7 @@ import Layout from './Layout';
 import Loader from './Loader';
 
 const ClothDistributionPage = lazy(async () => import('./ClothDistributionPage'));
+const DatasetAttributesPage = lazy(async () => import('./DatasetAttributesPage'));
 const DatabricksPage = lazy(async () => import('./DatabricksPage'));
 const DatasetProcessingPage = lazy(async () => import('./DatasetProcessingPage'));
 const PoseTracePage = lazy(async () => import('./PoseTracePage'));
@@ -49,6 +50,7 @@ function App() {
               <Route path="/pose-trace" element={<PoseTracePage />} />
               <Route path="/video-converter" element={<VideoConverterPage />} />
               <Route path="/dataset-processing" element={<DatasetProcessingPage />} />
+              <Route path="/dataset-attributes" element={<DatasetAttributesPage />} />
               <Route path="/cloth-distribution" element={<ClothDistributionPage />} />
               <Route path="/databricks" element={<DatabricksPage />} />
             </Routes>

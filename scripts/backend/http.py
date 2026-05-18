@@ -145,6 +145,12 @@ class BackendHandler(BaseHTTPRequestHandler):
         if path == "/api/scan":
             return self._handle_scan()
 
+        if path == "/api/dataset-attributes":
+            return self._handle_dataset_attributes()
+
+        if path == "/api/dataset-attributes/articulation":
+            return self._handle_dataset_articulation()
+
         if path == "/api/databricks/put-secrets":
             return self._handle_databricks_put_secrets()
 
@@ -171,7 +177,7 @@ class BackendHandler(BaseHTTPRequestHandler):
             "rootDir": self.server.root_dir,
             "rootDirs": list(self.server.root_dirs),
             "outputDir": self.server.output_dir,
-            "version": 8,
+            "version": 9,
             "indexing": index_status["indexing"],
             "indexReady": index_status["ready"],
             "indexedFileCount": index_status["count"],
@@ -338,6 +344,43 @@ class BackendHandler(BaseHTTPRequestHandler):
                 "files": file_infos,
                 "commonKeys": sorted(common_keys),
             })
+        except Exception as exc:
+            self._error(500, str(exc))
+
+    def _handle_dataset_attributes(self) -> None:
+        try:
+            body = self._read_json_body()
+            path, path_error = self._resolve_optional_file(body.get("path"), "path")
+            if path_error:
+                return self._error(400, path_error)
+            if not path:
+                return self._error(400, "Missing 'path' field.")
+
+            self._json_response(hdf5_ops.read_dataset_attributes(path))
+        except ValueError as exc:
+            self._error(400, str(exc))
+        except Exception as exc:
+            self._error(500, str(exc))
+
+    def _handle_dataset_articulation(self) -> None:
+        try:
+            body = self._read_json_body()
+            path, path_error = self._resolve_optional_file(body.get("path"), "path")
+            if path_error:
+                return self._error(400, path_error)
+            if not path:
+                return self._error(400, "Missing 'path' field.")
+
+            self._json_response(
+                hdf5_ops.write_dataset_articulation(
+                    path,
+                    body.get("articulation", {}),
+                )
+            )
+        except ValueError as exc:
+            self._error(400, str(exc))
+        except OSError as exc:
+            self._error(500, f"Could not write dataset attributes: {exc}")
         except Exception as exc:
             self._error(500, str(exc))
 

@@ -19,11 +19,6 @@ import styles from './VideoConverterPage.module.css';
 import { resolveFileUrl } from './utils';
 
 const PREVIEW_FPS = 30;
-const VIDEO_LABELS: Record<DemoVideoKey, string> = {
-  left_wrist: 'Left Wrist',
-  right_wrist: 'Right Wrist',
-  top: 'Top',
-};
 
 interface ResolvedFileState {
   file: H5File | null;
@@ -54,10 +49,6 @@ function formatDemoOption(demo: DemoInfo): string {
   if (demo.success != null) parts.push(`success=${demo.success ? 1 : 0}`);
   if (demo.source_episode_index != null) parts.push(`source=${demo.source_episode_index}`);
   return parts.join(' | ');
-}
-
-function formatVideoLabel(key: DemoVideoKey): string {
-  return VIDEO_LABELS[key];
 }
 
 function sanitizeFilenamePart(value: string): string {
@@ -393,13 +384,16 @@ function VideoConverterPage() {
         }
 
         setVideoOptions(nextVideos);
-        setSelectedVideoKey((current) =>
-          current && nextVideos.some((video) => video.key === current)
-            ? current
-            : nextVideos.some((video) => video.key === 'top')
-              ? 'top'
-              : nextVideos[0]?.key ?? null,
-        );
+        setSelectedVideoKey((current) => {
+          if (current && nextVideos.some((video) => video.key === current)) {
+            return current;
+          }
+          // Prefer a third-person/overview camera when available, otherwise the first one.
+          const preferred = nextVideos.find((video) =>
+            /(?:^|_)(?:top|overview|third_person|external|front|scene)(?:_|$)/iu.test(video.key),
+          );
+          return preferred?.key ?? nextVideos[0]?.key ?? null;
+        });
         setVideoOptionsLoading(false);
       })
       .catch((error: unknown) => {
@@ -461,12 +455,7 @@ function VideoConverterPage() {
     [selectedVideoKey, videoOptions],
   );
 
-  const missingVideoLabels = useMemo(() => {
-    const availableKeys = new Set(videoOptions.map((video) => video.key));
-    return (['left_wrist', 'right_wrist', 'top'] as DemoVideoKey[])
-      .filter((key) => !availableKeys.has(key))
-      .map((key) => formatVideoLabel(key));
-  }, [videoOptions]);
+  // The schema discovers cameras dynamically, so we don't enforce a specific set.
 
   const selectionText = useMemo(() => {
     if (!selectedDemo) {
@@ -682,7 +671,7 @@ function VideoConverterPage() {
                   )}
                   {videoOptions.map((video) => (
                     <option key={video.key} value={video.key}>
-                      {formatVideoLabel(video.key)}
+                      {video.label}
                     </option>
                   ))}
                 </select>
@@ -721,11 +710,6 @@ function VideoConverterPage() {
               )}
             </div>
 
-            {missingVideoLabels.length > 0 && (
-              <p className={styles.hintText}>
-                Missing expected videos: {missingVideoLabels.join(', ')}.
-              </p>
-            )}
           </section>
 
           {videoOptionsError && (
@@ -738,7 +722,7 @@ function VideoConverterPage() {
             <div className={styles.previewHeader}>
               <div>
                 <h2 className={styles.previewTitle}>
-                  {selectedVideoInfo ? `${formatVideoLabel(selectedVideoInfo.key)} Preview` : 'Video Preview'}
+                  {selectedVideoInfo ? `${selectedVideoInfo.label} Preview` : 'Video Preview'}
                 </h2>
                 <p className={styles.previewMeta}>
                   {selectedVideoInfo
@@ -769,7 +753,7 @@ function VideoConverterPage() {
 
             {videoOptions.length === 0 && !videoOptionsLoading && !videoOptionsError ? (
               <p className={styles.infoText}>
-                No supported video datasets were found. Expected one or more of `obs/left_wrist`, `obs/right_wrist`, or `obs/top`.
+                No supported video datasets were found. Expected one or more (T, H, W, C) datasets under `obs/cameras/` or directly under `obs/`.
               </p>
             ) : videoLoading ? (
               <p className={styles.infoText}>Loading video frames…</p>

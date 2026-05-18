@@ -75,6 +75,30 @@ export interface PythonScanResult {
   commonKeys: string[];
 }
 
+export interface DatasetArticulationSegment {
+  target: string;
+  obs: string;
+}
+
+export interface DatasetArticulationEndEffector {
+  pose: string;
+  gripper: string;
+}
+
+export interface DatasetArticulation {
+  name: string;
+  joint_number: number | null;
+  segmentation: Record<string, DatasetArticulationSegment>;
+  end_effectors: Record<string, DatasetArticulationEndEffector>;
+}
+
+export interface DatasetAttributesResult {
+  path: string;
+  attrs: Record<string, unknown>;
+  articulation: DatasetArticulation;
+  articulationSource: 'attribute' | 'group' | 'default';
+}
+
 export interface PythonProcessRequest {
   paths: string[];
   selectedKeys: string[];
@@ -278,6 +302,37 @@ export async function scanFiles(paths: string[]): Promise<PythonScanResult> {
 
   const data: PythonScanResult = await response.json();
   return data;
+}
+
+export async function getDatasetAttributes(path: string): Promise<DatasetAttributesResult> {
+  const response = await fetch(`${BASE_URL}/api/dataset-attributes`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path }),
+  });
+
+  if (!response.ok) {
+    throw new Error(await parseErrorResponse(response));
+  }
+
+  return await response.json() as DatasetAttributesResult;
+}
+
+export async function updateDatasetArticulation(
+  path: string,
+  articulation: DatasetArticulation,
+): Promise<DatasetAttributesResult> {
+  const response = await fetch(`${BASE_URL}/api/dataset-attributes/articulation`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path, articulation }),
+  });
+
+  if (!response.ok) {
+    throw new Error(await parseErrorResponse(response));
+  }
+
+  return await response.json() as DatasetAttributesResult;
 }
 
 /** Run a dataset processing operation with SSE progress streaming. */

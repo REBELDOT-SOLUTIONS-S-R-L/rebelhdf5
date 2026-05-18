@@ -9,15 +9,12 @@ import { Plugin } from '@h5web/h5wasm';
 import { getPlugin } from '../plugin-utils';
 import {
   TRACE_EEF_KEYPOINT_GROUPS,
-  TRACE_EEF_NAMES,
-  TRACE_KEYPOINT_NAMES,
   TRACE_SUCCESS_DISTANCE_SPECS,
 } from './schema';
 import {
   CLOTH_DISTRIBUTION_ANCHORS,
   CLOTH_DISTRIBUTION_DERIVED_ANCHORS,
   CLOTH_DISTRIBUTION_DIRECT_ANCHORS,
-  DEMO_VIDEO_KEYS,
 } from './types';
 import type {
   ClothDistributionAnchor,
@@ -463,12 +460,62 @@ function findVideoDataset(demoGroup: H5WasmGroup, name: DemoVideoKey): H5WasmDat
     return null;
   }
 
+  // New standard schema: cameras live under `obs/cameras/<name>`.
+  const camerasGroup = maybeChildGroup(obsGroup, 'cameras');
+  if (camerasGroup) {
+    const cameraDataset = maybeChildDataset(camerasGroup, name);
+    if (cameraDataset) {
+      return cameraDataset;
+    }
+  }
+
+  // Legacy fallback: camera datasets stored directly under `obs/`.
   const directDataset = maybeChildDataset(obsGroup, name);
   if (directDataset) {
     return directDataset;
   }
 
   return findDescendantDataset(obsGroup, name);
+}
+
+function listCameraNames(demoGroup: H5WasmGroup): string[] {
+  const obsGroup = maybeChildGroup(demoGroup, 'obs');
+  if (!obsGroup) {
+    return [];
+  }
+
+  const names = new Set<string>();
+
+  // New standard schema: `obs/cameras/<name>` (T, H, W, C) datasets.
+  const camerasGroup = maybeChildGroup(obsGroup, 'cameras');
+  if (camerasGroup) {
+    for (const childName of camerasGroup.keys()) {
+      const child = camerasGroup.get(childName);
+      if (isDataset(child) && isVideoShape(child.shape)) {
+        names.add(childName);
+      }
+    }
+  }
+
+  // Legacy schema: video datasets stored directly under `obs/`.
+  for (const childName of obsGroup.keys()) {
+    const child = obsGroup.get(childName);
+    if (isDataset(child) && isVideoShape(child.shape)) {
+      names.add(childName);
+    }
+  }
+
+  return [...names];
+}
+
+function humanizeCameraLabel(name: string): string {
+  return name
+    .replaceAll(/[_-]+/g, ' ')
+    .replaceAll(/\s+/g, ' ')
+    .trim()
+    .split(' ')
+    .map((word) => (word.length === 0 ? word : word[0].toUpperCase() + word.slice(1)))
+    .join(' ');
 }
 
 function isPoseShape(shape: number[] | null): shape is [number, number, number] {
@@ -488,7 +535,7 @@ function isVideoShape(shape: number[] | null): shape is [number, number, number,
 
 function loadPoseArrays(
   group: H5WasmGroup | null,
-  names: readonly string[],
+  names?: readonly string[],
 ): Record<string, PoseSeries> {
   const poseArrays: Record<string, PoseSeries> = {};
 
@@ -496,7 +543,8 @@ function loadPoseArrays(
     return poseArrays;
   }
 
-  for (const name of names) {
+  const candidateNames = names ?? group.keys();
+  for (const name of candidateNames) {
     const dataset = group.get(name);
     if (!isDataset(dataset) || !isPoseShape(dataset.shape)) {
       continue;
@@ -511,6 +559,43 @@ function loadPoseArrays(
   }
 
   return poseArrays;
+}
+
+function loadNestedPoseArrays(
+  parentGroup: H5WasmGroup | null,
+): Record<string, PoseSeries> {
+  const poseArrays: Record<string, PoseSeries> = {};
+
+  if (!parentGroup) {
+    return poseArrays;
+  }
+
+  for (const childName of parentGroup.keys()) {
+    const childGroup = maybeChildGroup(parentGroup, childName);
+    const dataset = childGroup ? maybeChildDataset(childGroup, 'pose') : null;
+    if (!dataset || !isPoseShape(dataset.shape)) {
+      continue;
+    }
+
+    const values = dataset.to_array();
+    if (!Array.isArray(values)) {
+      continue;
+    }
+
+    poseArrays[childName] = values as PoseSeries;
+  }
+
+  return poseArrays;
+}
+
+function mergePoseArrays(
+  ...sources: Record<string, PoseSeries>[]
+): Record<string, PoseSeries> {
+  const merged: Record<string, PoseSeries> = {};
+  for (const source of sources) {
+    Object.assign(merged, source);
+  }
+  return merged;
 }
 
 function extractXYZAtStep(
@@ -592,22 +677,52 @@ function getDemoGroup(entry: OpenSourceEntry, demoName: string): H5WasmGroup {
   return demoGroup;
 }
 
+function loadEndEffectorPoses(
+  demoGroup: H5WasmGroup,
+): Record<string, PoseSeries> {
+  // New standard schema: `obs/end_effectors/<name>/pose` (T, 4, 4).
+  const obsGroup = maybeChildGroup(demoGroup, 'obs');
+  const endEffectorsGroup = obsGroup ? maybeChildGroup(obsGroup, 'end_effectors') : null;
+
+  // Legacy schema: `obs/eef_pose/<name>` (T, 4, 4) or `datagen_info/eef_pose/<name>`.
+  const legacyGroup = findPoseGroup(demoGroup, 'eef_pose');
+  return mergePoseArrays(
+    loadPoseArrays(legacyGroup),
+    loadNestedPoseArrays(endEffectorsGroup),
+  );
+}
+
+function loadObjectKeypointPoses(
+  demoGroup: H5WasmGroup,
+): Record<string, PoseSeries> {
+  // New schema: `obs/objects/<name>/pose` (T, 4, 4).
+  const obsGroup = maybeChildGroup(demoGroup, 'obs');
+  const objectsGroup = obsGroup ? maybeChildGroup(obsGroup, 'objects') : null;
+
+  // New schema (datagen): `obs/datagen_info/object_pose/<name>` or legacy `obs/object_pose/<name>`.
+  const legacyGroup = findPoseGroup(demoGroup, 'object_pose');
+  return mergePoseArrays(
+    loadPoseArrays(legacyGroup),
+    loadNestedPoseArrays(objectsGroup),
+  );
+}
+
 function buildDemoRows(entry: OpenSourceEntry, demoName: string): DemoRow[] {
   const demoGroup = getDemoGroup(entry, demoName);
 
-  const eefPoseGroup = findPoseGroup(demoGroup, 'eef_pose');
-  const ikInputEefPoseGroup = findPoseGroup(demoGroup, 'ik_input_eef_pose');
+  // Target EEF pose: new schema → `obs/datagen_info/target_eef_pose`, legacy → `ik_input_eef_pose`.
+  const targetEefPoseGroup = findPoseGroup(demoGroup, 'target_eef_pose')
+    ?? findPoseGroup(demoGroup, 'ik_input_eef_pose');
   const eefPosePostStepGroup = findPoseGroup(demoGroup, 'eef_pose_post_step');
-  const objectPoseGroup = findPoseGroup(demoGroup, 'object_pose');
 
-  const eefPose = loadPoseArrays(eefPoseGroup, TRACE_EEF_NAMES);
-  const ikInputEefPose = loadPoseArrays(ikInputEefPoseGroup, TRACE_EEF_NAMES);
-  const eefPosePostStep = loadPoseArrays(eefPosePostStepGroup, TRACE_EEF_NAMES);
-  const objectPose = loadPoseArrays(objectPoseGroup, TRACE_KEYPOINT_NAMES);
+  const eefPose = loadEndEffectorPoses(demoGroup);
+  const targetEefPose = loadPoseArrays(targetEefPoseGroup);
+  const eefPosePostStep = loadPoseArrays(eefPosePostStepGroup);
+  const objectPose = loadObjectKeypointPoses(demoGroup);
 
   if (
     Object.keys(eefPose).length === 0
-    && Object.keys(ikInputEefPose).length === 0
+    && Object.keys(targetEefPose).length === 0
     && Object.keys(eefPosePostStep).length === 0
     && Object.keys(objectPose).length === 0
   ) {
@@ -616,7 +731,7 @@ function buildDemoRows(entry: OpenSourceEntry, demoName: string): DemoRow[] {
 
   const poseArrays = [
     ...Object.values(eefPose),
-    ...Object.values(ikInputEefPose),
+    ...Object.values(targetEefPose),
     ...Object.values(eefPosePostStep),
     ...Object.values(objectPose),
   ];
@@ -655,35 +770,60 @@ function buildDemoRows(entry: OpenSourceEntry, demoName: string): DemoRow[] {
     const eefPositions: Record<string, [number, number, number] | null> = {};
     const keypointPositions: Record<string, [number, number, number] | null> = {};
 
-    for (const eefName of TRACE_EEF_NAMES) {
+    for (const eefName of Object.keys(eefPose).sort((left, right) => left.localeCompare(right))) {
       const xyz = extractXYZAtStep(eefPose[eefName], stepIdx);
       eefPositions[eefName] = xyz;
       row[`eef_${eefName}_x`] = xyz?.[0] ?? null;
       row[`eef_${eefName}_y`] = xyz?.[1] ?? null;
       row[`eef_${eefName}_z`] = xyz?.[2] ?? null;
+    }
 
-      const ikInputXYZ = extractXYZAtStep(ikInputEefPose[eefName], stepIdx);
-      row[`ik_input_eef_${eefName}_x`] = ikInputXYZ?.[0] ?? null;
-      row[`ik_input_eef_${eefName}_y`] = ikInputXYZ?.[1] ?? null;
-      row[`ik_input_eef_${eefName}_z`] = ikInputXYZ?.[2] ?? null;
+    for (const eefName of Object.keys(targetEefPose).sort((left, right) => left.localeCompare(right))) {
+      const targetXYZ = extractXYZAtStep(targetEefPose[eefName], stepIdx);
+      row[`target_eef_${eefName}_x`] = targetXYZ?.[0] ?? null;
+      row[`target_eef_${eefName}_y`] = targetXYZ?.[1] ?? null;
+      row[`target_eef_${eefName}_z`] = targetXYZ?.[2] ?? null;
+      row[`ik_input_eef_${eefName}_x`] = targetXYZ?.[0] ?? null;
+      row[`ik_input_eef_${eefName}_y`] = targetXYZ?.[1] ?? null;
+      row[`ik_input_eef_${eefName}_z`] = targetXYZ?.[2] ?? null;
+    }
 
+    for (const eefName of Object.keys(eefPosePostStep).sort((left, right) => left.localeCompare(right))) {
       const postStepXYZ = extractXYZAtStep(eefPosePostStep[eefName], stepIdx);
       row[`eef_post_step_${eefName}_x`] = postStepXYZ?.[0] ?? null;
       row[`eef_post_step_${eefName}_y`] = postStepXYZ?.[1] ?? null;
       row[`eef_post_step_${eefName}_z`] = postStepXYZ?.[2] ?? null;
     }
 
-    for (const keypointName of TRACE_KEYPOINT_NAMES) {
-      const xyz = extractXYZAtStep(objectPose[keypointName], stepIdx);
-      keypointPositions[keypointName] = xyz;
-      row[`keypoint_${keypointName}_x`] = xyz?.[0] ?? null;
-      row[`keypoint_${keypointName}_y`] = xyz?.[1] ?? null;
-      row[`keypoint_${keypointName}_z`] = xyz?.[2] ?? null;
+    for (const objectName of Object.keys(objectPose).sort((left, right) => left.localeCompare(right))) {
+      const xyz = extractXYZAtStep(objectPose[objectName], stepIdx);
+      keypointPositions[objectName] = xyz;
+      row[`object_${objectName}_x`] = xyz?.[0] ?? null;
+      row[`object_${objectName}_y`] = xyz?.[1] ?? null;
+      row[`object_${objectName}_z`] = xyz?.[2] ?? null;
+    }
+
+    for (const eefName of Object.keys(eefPose).sort((left, right) => left.localeCompare(right))) {
+      const eefXYZ = eefPositions[eefName];
+      for (const objectName of Object.keys(objectPose).sort((left, right) => left.localeCompare(right))) {
+        row[`dist_${eefName}_to_${objectName}_m`] = distanceXYZ(
+          eefXYZ,
+          keypointPositions[objectName] ?? null,
+        );
+      }
     }
 
     for (const [eefName, keypointNames] of Object.entries(TRACE_EEF_KEYPOINT_GROUPS)) {
+      if (!eefPose[eefName]) {
+        continue;
+      }
+
       const eefXYZ = eefPositions[eefName];
       for (const keypointName of keypointNames) {
+        if (!objectPose[keypointName]) {
+          continue;
+        }
+
         row[`dist_${eefName}_to_${keypointName}_m`] = distanceXYZ(
           eefXYZ,
           keypointPositions[keypointName] ?? null,
@@ -756,23 +896,27 @@ function asPoseMatrix(value: unknown): number[][] | null {
 }
 
 function readInitialPose(demoGroup: H5WasmGroup): number[] | null {
+  // Legacy: a single dataset at `initial_state/garment_initial_pose`.
   const garmentInitialPose = maybeChildDataset(demoGroup, 'initial_state/garment_initial_pose');
   if (garmentInitialPose) {
     return asNumberVector(readDatasetArray(garmentInitialPose));
   }
 
-  const garmentRoot = maybeChildGroup(demoGroup, 'initial_state/garment');
-  if (!garmentRoot) {
+  // New standard schema: `initial_state/objects/<name>/initial_pose`.
+  // Legacy variant: `initial_state/garment/<name>/initial_pose`.
+  const objectsRoot = maybeChildGroup(demoGroup, 'initial_state/objects')
+    ?? maybeChildGroup(demoGroup, 'initial_state/garment');
+  if (!objectsRoot) {
     return null;
   }
 
-  for (const garmentName of garmentRoot.keys()) {
-    const garmentGroup = maybeChildGroup(garmentRoot, garmentName);
-    if (!garmentGroup) {
+  for (const objectName of objectsRoot.keys()) {
+    const objectGroup = maybeChildGroup(objectsRoot, objectName);
+    if (!objectGroup) {
       continue;
     }
 
-    const initialPose = maybeChildDataset(garmentGroup, 'initial_pose');
+    const initialPose = maybeChildDataset(objectGroup, 'initial_pose');
     if (!initialPose) {
       continue;
     }
@@ -787,11 +931,46 @@ function readInitialPose(demoGroup: H5WasmGroup): number[] | null {
 }
 
 function findObjectPoseGroup(demoGroup: H5WasmGroup): H5WasmGroup | null {
+  // For per-keypoint scalar object positions we look (in order) at:
+  //   1. New schema datagen: `obs/datagen_info/object_pose/<name>` (T, 4, 4)
+  //   2. Legacy: `obs/object_pose/<name>`
+  //   3. Any descendant group named `object_pose`
+  // Note: `obs/objects/<name>/pose` lives one level deeper, handled separately.
   return (
-    maybeChildGroup(demoGroup, 'obs/object_pose')
-    ?? maybeChildGroup(demoGroup, 'obs/datagen_info/object_pose')
+    maybeChildGroup(demoGroup, 'obs/datagen_info/object_pose')
+    ?? maybeChildGroup(demoGroup, 'obs/object_pose')
     ?? findPoseGroup(demoGroup, 'object_pose')
   );
+}
+
+function readObjectPositionAtName(
+  demoGroup: H5WasmGroup,
+  keypointName: string,
+): [number, number, number] | null {
+  // New schema: `obs/objects/<name>/pose` (T, 4, 4).
+  const obsGroup = maybeChildGroup(demoGroup, 'obs');
+  const objectsGroup = obsGroup ? maybeChildGroup(obsGroup, 'objects') : null;
+  if (objectsGroup) {
+    const sub = maybeChildGroup(objectsGroup, keypointName);
+    const dataset = sub ? maybeChildDataset(sub, 'pose') : null;
+    if (dataset) {
+      const matrix = asPoseMatrix(readDatasetArray(dataset));
+      const x = matrix?.[0]?.[3];
+      const y = matrix?.[1]?.[3];
+      const z = matrix?.[2]?.[3];
+      if (isFiniteNumber(x) && isFiniteNumber(y) && isFiniteNumber(z)) {
+        return [roundFloat(x), roundFloat(y), roundFloat(z)];
+      }
+    }
+  }
+
+  // Fallback: legacy / datagen layout where each keypoint is a sibling dataset.
+  const fallbackGroup = findObjectPoseGroup(demoGroup);
+  if (fallbackGroup) {
+    return readObjectPosePosition(fallbackGroup, keypointName);
+  }
+
+  return null;
 }
 
 function readObjectPosePosition(
@@ -830,13 +1009,8 @@ function readAnchorXY(
     return [roundFloat(x), roundFloat(y)];
   }
 
-  const objectPoseGroup = findObjectPoseGroup(demoGroup);
-  if (!objectPoseGroup) {
-    return null;
-  }
-
   if ((CLOTH_DISTRIBUTION_DIRECT_ANCHORS as readonly string[]).includes(anchor)) {
-    const directPosition = readObjectPosePosition(objectPoseGroup, anchor);
+    const directPosition = readObjectPositionAtName(demoGroup, anchor);
     if (!directPosition) {
       return null;
     }
@@ -852,7 +1026,7 @@ function readAnchorXY(
   }
 
   const points = derivedKeypoints
-    .map((keypointName) => readObjectPosePosition(objectPoseGroup, keypointName))
+    .map((keypointName) => readObjectPositionAtName(demoGroup, keypointName))
     .filter((position): position is [number, number, number] => Boolean(position));
   if (points.length === 0) {
     return null;
@@ -867,14 +1041,9 @@ function readObjectPositions(
   demoGroup: H5WasmGroup,
   keypointNames: readonly string[],
 ): Record<string, [number, number, number]> | null {
-  const objectPoseGroup = findObjectPoseGroup(demoGroup);
-  if (!objectPoseGroup) {
-    return null;
-  }
-
   const positions: Record<string, [number, number, number]> = {};
   for (const keypointName of keypointNames) {
-    const position = readObjectPosePosition(objectPoseGroup, keypointName);
+    const position = readObjectPositionAtName(demoGroup, keypointName);
     if (!position) {
       return null;
     }
@@ -911,6 +1080,18 @@ function readSourceDemoIndices(
 }
 
 function episodeLength(demoGroup: H5WasmGroup): number | null {
+  // New schema: `actions/pose` and `actions/joints` both have a leading T dim.
+  const actionsJoints = maybeChildDataset(demoGroup, 'actions/joints');
+  if (actionsJoints?.shape?.[0] != null) {
+    return actionsJoints.shape[0];
+  }
+
+  const actionsPose = maybeChildDataset(demoGroup, 'actions/pose');
+  if (actionsPose?.shape?.[0] != null) {
+    return actionsPose.shape[0];
+  }
+
+  // Legacy schema: a single `actions` dataset.
   const actions = maybeChildDataset(demoGroup, 'actions');
   if (actions?.shape?.[0] != null) {
     return actions.shape[0];
@@ -1144,8 +1325,15 @@ function collectGeneratedClothPoints(
     }
 
     const objectPositions = readObjectPositions(demoGroup, COMMON_CLOTH_KEYPOINTS) ?? {};
-    const leftIndices = readSourceDemoIndices(demoGroup, 'source_demo_indices/left_arm');
-    const rightIndices = readSourceDemoIndices(demoGroup, 'source_demo_indices/right_arm');
+    // New schema uses `reference_demo_indices/<articulation_name>`; legacy used `source_demo_indices`.
+    const leftIndices = [
+      ...readSourceDemoIndices(demoGroup, 'reference_demo_indices/left_arm'),
+      ...readSourceDemoIndices(demoGroup, 'source_demo_indices/left_arm'),
+    ];
+    const rightIndices = [
+      ...readSourceDemoIndices(demoGroup, 'reference_demo_indices/right_arm'),
+      ...readSourceDemoIndices(demoGroup, 'source_demo_indices/right_arm'),
+    ];
     const leftSource = resolveClothSideSourceDetails(
       leftIndices,
       'left',
@@ -1776,7 +1964,10 @@ function listDemoVideoInfo(entry: OpenSourceEntry, demoName: string): DemoVideoI
   const demoGroup = getDemoGroup(entry, demoName);
   const videos: DemoVideoInfo[] = [];
 
-  for (const key of DEMO_VIDEO_KEYS) {
+  const cameraNames = listCameraNames(demoGroup);
+  cameraNames.sort((left, right) => left.localeCompare(right));
+
+  for (const key of cameraNames) {
     const dataset = findVideoDataset(demoGroup, key);
     if (!dataset || !isVideoShape(dataset.shape)) {
       continue;
@@ -1785,6 +1976,7 @@ function listDemoVideoInfo(entry: OpenSourceEntry, demoName: string): DemoVideoI
     const [frameCount, height, width, channels] = dataset.shape;
     videos.push({
       key,
+      label: humanizeCameraLabel(key),
       path: dataset.path,
       frameCount,
       height,
@@ -1822,7 +2014,8 @@ function loadDemoVideo(
 
   if (!dataset || !isVideoShape(dataset.shape)) {
     throw new Error(
-      `Demo '${demoName}' does not contain a supported video dataset at obs/${videoKey}.`,
+      `Demo '${demoName}' does not contain a supported video dataset for camera '${videoKey}' `
+      + `(expected at obs/cameras/${videoKey} or obs/${videoKey}).`,
     );
   }
 
@@ -1835,6 +2028,7 @@ function loadDemoVideo(
 
   return {
     key: videoKey,
+    label: humanizeCameraLabel(videoKey),
     path: dataset.path,
     frameCount,
     height,

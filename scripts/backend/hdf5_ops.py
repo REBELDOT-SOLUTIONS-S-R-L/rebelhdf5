@@ -1,11 +1,275 @@
-"""HDF5 dataset traversal and cut/merge/append processing."""
+"""HDF5 dataset traversal, metadata, and cut/merge/append processing."""
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any, Generator
 
 import h5py
+import numpy as np
+
+
+def _jsonable(value: Any) -> Any:
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    if isinstance(value, np.generic):
+        return _jsonable(value.item())
+    if isinstance(value, np.ndarray):
+        return [_jsonable(item) for item in value.tolist()]
+    if isinstance(value, (list, tuple)):
+        return [_jsonable(item) for item in value]
+    if isinstance(value, dict):
+        return {str(key): _jsonable(item) for key, item in value.items()}
+    return value
+
+
+def _default_articulation() -> dict[str, Any]:
+    return {
+        "name": "",
+        "joint_number": None,
+        "segmentation": {},
+        "end_effectors": {},
+    }
+
+
+def _normalize_index_range(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, (list, tuple)) and len(value) == 2:
+        return f"[{value[0]}:{value[1]}]"
+    return str(value)
+
+
+def normalize_articulation(value: Any) -> dict[str, Any]:
+    if isinstance(value, (bytes, str)):
+        text = value.decode("utf-8", errors="replace") if isinstance(value, bytes) else value
+        try:
+            value = json.loads(text) if text.strip() else {}
+        except json.JSONDecodeError:
+            value = {}
+
+    if not isinstance(value, dict):
+        value = {}
+
+    raw_joint_number = value.get("joint_number")
+    try:
+        joint_number = int(raw_joint_number) if raw_joint_number not in (None, "") else None
+    except (TypeError, ValueError):
+        joint_number = None
+
+    segmentation: dict[str, dict[str, str]] = {}
+    raw_segmentation = value.get("segmentation", {})
+    if isinstance(raw_segmentation, dict):
+        for raw_name, raw_segment in raw_segmentation.items():
+            segment_name = str(raw_name).strip()
+            if not segment_name:
+                continue
+            segment = raw_segment if isinstance(raw_segment, dict) else {}
+            segmentation[segment_name] = {
+                "target": _normalize_index_range(segment.get("target")),
+                "obs": _normalize_index_range(segment.get("obs")),
+            }
+
+    end_effectors: dict[str, dict[str, str]] = {}
+    raw_end_effectors = value.get("end_effectors", {})
+    if isinstance(raw_end_effectors, dict):
+        for raw_name, raw_eef in raw_end_effectors.items():
+            eef_name = str(raw_name).strip()
+            if not eef_name:
+                continue
+            end_effector = raw_eef if isinstance(raw_eef, dict) else {}
+            end_effectors[eef_name] = {
+                "pose": _normalize_index_range(end_effector.get("pose")),
+                "gripper": _normalize_index_range(end_effector.get("gripper")),
+            }
+
+    return {
+        "name": str(value.get("name", "") or ""),
+        "joint_number": joint_number,
+        "segmentation": segmentation,
+        "end_effectors": end_effectors,
+    }
+
+
+def _normalize_segmentation(value: Any) -> dict[str, dict[str, str]]:
+    if isinstance(value, bytes):
+        value = value.decode("utf-8", errors="replace")
+    if isinstance(value, str):
+        try:
+            value = json.loads(value) if value.strip() else {}
+        except json.JSONDecodeError:
+            value = {}
+
+    if isinstance(value, dict):
+        return normalize_articulation({"segmentation": value})["segmentation"]
+
+    segmentation: dict[str, dict[str, str]] = {}
+    if isinstance(value, list):
+        for entry in value:
+            if not isinstance(entry, dict):
+                continue
+            raw_name = entry.get("name") or entry.get("segment_name")
+            segment_name = str(raw_name or "").strip()
+            if not segment_name:
+                continue
+            segmentation[segment_name] = {
+                "target": _normalize_index_range(entry.get("target")),
+                "obs": _normalize_index_range(entry.get("obs")),
+            }
+
+    return segmentation
+
+
+def _normalize_end_effectors(value: Any) -> dict[str, dict[str, str]]:
+    if isinstance(value, bytes):
+        value = value.decode("utf-8", errors="replace")
+    if isinstance(value, str):
+        try:
+            value = json.loads(value) if value.strip() else {}
+        except json.JSONDecodeError:
+            value = {}
+
+    if isinstance(value, dict):
+        return normalize_articulation({"end_effectors": value})["end_effectors"]
+
+    end_effectors: dict[str, dict[str, str]] = {}
+    if isinstance(value, list):
+        for entry in value:
+            if not isinstance(entry, dict):
+                continue
+            raw_name = entry.get("name") or entry.get("eef_name")
+            eef_name = str(raw_name or "").strip()
+            if not eef_name:
+                continue
+            end_effectors[eef_name] = {
+                "pose": _normalize_index_range(entry.get("pose")),
+                "gripper": _normalize_index_range(entry.get("gripper")),
+            }
+
+    return end_effectors
+
+
+def _read_articulation_attrs(data_group: h5py.Group) -> dict[str, Any] | None:
+    names = data_group.attrs
+    has_articulation_attrs = any(
+        key in names
+        for key in (
+            "articulation/name",
+            "articulation/joint_number",
+            "articulation/segmentation",
+            "articulation/end_effectors",
+        )
+    )
+    if not has_articulation_attrs:
+        return None
+
+    return normalize_articulation({
+        "name": _jsonable(names.get("articulation/name", "")),
+        "joint_number": _jsonable(names.get("articulation/joint_number", None)),
+        "segmentation": _normalize_segmentation(
+            _jsonable(names.get("articulation/segmentation", {})),
+        ),
+        "end_effectors": _normalize_end_effectors(
+            _jsonable(names.get("articulation/end_effectors", {})),
+        ),
+    })
+
+
+def _read_articulation_group(data_group: h5py.Group) -> dict[str, Any] | None:
+    articulation_group = data_group.get("articulation")
+    if not isinstance(articulation_group, h5py.Group):
+        return None
+
+    payload: dict[str, Any] = {
+        "name": _jsonable(articulation_group.attrs.get("name", "")),
+        "joint_number": _jsonable(articulation_group.attrs.get("joint_number", None)),
+        "segmentation": {},
+        "end_effectors": {},
+    }
+    segmentation_group = articulation_group.get("segmentation")
+    if isinstance(segmentation_group, h5py.Group):
+        for segment_name, segment_obj in segmentation_group.items():
+            if not isinstance(segment_obj, h5py.Group):
+                continue
+            payload["segmentation"][segment_name] = {
+                "target": _jsonable(segment_obj.attrs.get("target", "")),
+                "obs": _jsonable(segment_obj.attrs.get("obs", "")),
+            }
+    end_effectors_group = articulation_group.get("end_effectors")
+    if isinstance(end_effectors_group, h5py.Group):
+        for eef_name, eef_obj in end_effectors_group.items():
+            if not isinstance(eef_obj, h5py.Group):
+                continue
+            payload["end_effectors"][eef_name] = {
+                "pose": _jsonable(eef_obj.attrs.get("pose", "")),
+                "gripper": _jsonable(eef_obj.attrs.get("gripper", "")),
+            }
+
+    return normalize_articulation(payload)
+
+
+def read_dataset_attributes(file_path: Path) -> dict[str, Any]:
+    with h5py.File(file_path, "r") as f:
+        data = require_data_group(f, file_path)
+        attrs = {
+            name: _jsonable(value)
+            for name, value in data.attrs.items()
+            if name != "articulation" and not name.startswith("articulation/")
+        }
+
+        articulation = _default_articulation()
+        source = "default"
+        articulation_attrs = _read_articulation_attrs(data)
+        if articulation_attrs is not None:
+            articulation = articulation_attrs
+            source = "attribute"
+        elif "articulation" in data.attrs:
+            articulation = normalize_articulation(_jsonable(data.attrs["articulation"]))
+            source = "attribute"
+        else:
+            articulation_group = _read_articulation_group(data)
+            if articulation_group is not None:
+                articulation = articulation_group
+                source = "group"
+
+        return {
+            "path": str(file_path),
+            "attrs": attrs,
+            "articulation": articulation,
+            "articulationSource": source,
+        }
+
+
+def write_dataset_articulation(file_path: Path, articulation: Any) -> dict[str, Any]:
+    normalized = normalize_articulation(articulation)
+    with h5py.File(file_path, "r+") as f:
+        data = require_data_group(f, file_path)
+        for attr_name in (
+            "articulation",
+            "articulation/name",
+            "articulation/joint_number",
+            "articulation/segmentation",
+            "articulation/end_effectors",
+        ):
+            if attr_name in data.attrs:
+                del data.attrs[attr_name]
+
+        data.attrs.create("articulation/name", normalized["name"])
+        if normalized["joint_number"] is not None:
+            data.attrs.create("articulation/joint_number", normalized["joint_number"])
+        data.attrs.create(
+            "articulation/segmentation",
+            json.dumps(normalized["segmentation"], sort_keys=True),
+        )
+        data.attrs.create(
+            "articulation/end_effectors",
+            json.dumps(normalized["end_effectors"], sort_keys=True),
+        )
+
+    return read_dataset_attributes(file_path)
 
 
 def collect_dataset_paths(group: h5py.Group) -> list[str]:

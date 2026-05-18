@@ -44,9 +44,11 @@ function OpenedFiles() {
         ? '/video-converter'
         : location.pathname === '/dataset-processing'
           ? '/dataset-processing'
-          : location.pathname === '/cloth-distribution'
-            ? '/cloth-distribution'
-        : '/view'
+          : location.pathname === '/dataset-attributes'
+            ? '/dataset-attributes'
+            : location.pathname === '/cloth-distribution'
+              ? '/cloth-distribution'
+              : '/view'
   );
 
   function removeFile(file: H5File, index: number, isActive: boolean) {

@@ -1,9 +1,10 @@
-import { FiActivity, FiAperture, FiCloud, FiEye, FiFileText, FiFilm, FiLayers, FiPlusCircle } from 'react-icons/fi';
+import { FiActivity, FiAperture, FiCloud, FiDatabase, FiEye, FiFileText, FiFilm, FiLayers, FiPlusCircle } from 'react-icons/fi';
 import { NavLink, useMatch, useSearchParams } from 'react-router-dom';
 
 import { useStore } from '../stores';
 import {
   getClothDistributionLink,
+  getDatasetAttributesLink,
   getDatasetProcessingLink,
   getPoseTraceLink,
   getVideoConverterLink,
@@ -131,6 +132,29 @@ function Sidebar() {
             >
               <FiLayers className={styles.icon} />
               <span className={styles.label}>Dataset Processing</span>
+            </button>
+          )}
+
+          {activeFileUrl ? (
+            <NavLink
+              className={styles.mainNavItem}
+              to={getDatasetAttributesLink(activeFileUrl)}
+              aria-label="Dataset Attributes"
+              title="Dataset Attributes"
+            >
+              <FiDatabase className={styles.icon} />
+              <span className={styles.label}>Dataset Attributes</span>
+            </NavLink>
+          ) : (
+            <button
+              type="button"
+              className={styles.navBtn}
+              aria-label="Dataset Attributes"
+              title="Dataset Attributes"
+              disabled
+            >
+              <FiDatabase className={styles.icon} />
+              <span className={styles.label}>Dataset Attributes</span>
             </button>
           )}
 

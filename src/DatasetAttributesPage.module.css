@@ -1,0 +1,276 @@
+.root {
+  composes: page from './utils.module.css';
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 1.5rem;
+  overflow-y: auto;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+}
+
+.eyebrow {
+  margin: 0;
+  color: var(--color-gray);
+  font-size: 0.82em;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.title {
+  margin: 0.25rem 0 0;
+  color: var(--color-gray);
+  font-family: var(--font-logo);
+  font-size: clamp(2.1em, 3vw, 2.8em);
+  font-weight: normal;
+}
+
+.subtitle {
+  margin: 0.5rem 0 0;
+  max-width: 54rem;
+  color: var(--color-gray);
+}
+
+.panel {
+  width: 100%;
+  padding: 1.25rem 1.5rem;
+  border: 1px solid var(--color-border);
+  border-radius: 1rem;
+  background: var(--color-surface-alt);
+  box-shadow: 0 0.75rem 1.75rem var(--color-shadow-soft);
+}
+
+.panelHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.panelTitle {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.statusText {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 0.9rem;
+}
+
+.errorText {
+  margin: 0;
+  color: var(--color-danger, #b00020);
+}
+
+.successText {
+  margin: 0;
+  color: var(--color-success, #207a3a);
+}
+
+.fieldGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(10rem, 16rem);
+  gap: 1rem;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.label {
+  color: var(--color-text-muted);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.input {
+  width: 100%;
+  min-height: 2.4rem;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-input-bg, var(--color-surface));
+  color: var(--color-text);
+}
+
+.segmentTable {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.segmentTable th,
+.segmentTable td {
+  padding: 0.55rem 0.5rem;
+  border-bottom: 1px solid var(--color-border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.segmentTable th {
+  color: var(--color-text-muted);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+}
+
+.keyTree {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 0.45rem 0.35rem;
+  border: 1px solid var(--color-border);
+  border-radius: 0.85rem;
+  background: rgba(255, 255, 255, 0.015);
+}
+
+.treeBranch {
+  display: flex;
+  flex-direction: column;
+}
+
+.treeBranchRow {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.45rem;
+  min-height: 1.9rem;
+  padding-top: 0.12rem;
+  padding-right: 0.5rem;
+  padding-bottom: 0.12rem;
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-text);
+  font-size: 0.95em;
+  font-weight: 700;
+}
+
+.treeBranchIcon {
+  flex: 0 0 auto;
+  color: #ffd000;
+  opacity: 0.9;
+}
+
+.treeBranchName,
+.treeLeafLabel {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.treeChildren {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.treeLeaf {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.45rem;
+  min-height: 1.9rem;
+  padding-top: 0.12rem;
+  padding-right: 0.5rem;
+  padding-bottom: 0.12rem;
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-text);
+  font-size: 0.93em;
+}
+
+.treeLeafIcon {
+  flex: 0 0 auto;
+  opacity: 0.72;
+}
+
+.treeMeta {
+  max-width: min(42rem, 52vw);
+  margin-left: auto;
+  overflow: hidden;
+  color: var(--color-text-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.84rem;
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.segmentActions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+}
+
+.addRow {
+  display: grid;
+  grid-template-columns: minmax(12rem, 1fr) auto;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.button,
+.secondaryButton,
+.dangerButton {
+  min-height: 2.35rem;
+  padding: 0.5rem 0.8rem;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.button {
+  background: var(--color-primary-btn);
+  color: var(--color-primary-btn-text);
+}
+
+.secondaryButton {
+  border-color: var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
+.dangerButton {
+  border-color: var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-danger, #b00020);
+}
+
+.button:disabled,
+.secondaryButton:disabled,
+.dangerButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.footerActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+@media (max-width: 760px) {
+  .root {
+    padding: 1rem;
+  }
+
+  .header,
+  .panelHeader {
+    flex-direction: column;
+  }
+
+  .fieldGrid,
+  .addRow {
+    grid-template-columns: 1fr;
+  }
+}

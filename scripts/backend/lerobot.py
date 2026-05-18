@@ -36,18 +36,14 @@ DEFAULT_CONVERSION_CONFIG: dict[str, Any] = {
     "fps": DEFAULT_FPS,
     "robot_type": "so101_bimanual",
     "exclude_name_substrings": ["_failed"],
-    # Backwards-compatible defaults for the current LeHome bimanual datasets.
-    # For other embodiments, provide a conversion config JSON next to
-    # modality.json with state_sources/action_sources/video_sources.
-    "state_sources": {
-        "observation.state": [
-            {"path": "obs/left_joint_pos", "target_start": 0, "target_end": 6},
-            {"path": "obs/right_joint_pos", "target_start": 6, "target_end": 12},
-        ],
-    },
-    "action_sources": {
-        "action": ["obs/actions", "processed_actions"],
-    },
+    # With the new standard schema we do not hardcode any embodiment-specific
+    # paths. Provide a conversion config JSON next to modality.json with
+    # state_sources/action_sources/video_sources for non-default cases — the
+    # discovery fallbacks (`source_path_candidates`, `video_source_candidates`)
+    # cover the standard locations (`actions/joints`, `obs/articulation/*`,
+    # `obs/cameras/*`) automatically.
+    "state_sources": {},
+    "action_sources": {},
 }
 
 DATA_PATH_TEMPLATE = "data/chunk-{episode_chunk:03d}/episode_{episode_index:06d}.parquet"
@@ -175,10 +171,28 @@ def source_path_candidates(feature_key: str, modality_type: str) -> list[str]:
     if "." in feature_key:
         candidates.append(feature_key.replace(".", "/"))
     if modality_type == "action":
-        candidates.extend(["obs/actions", "processed_actions", "actions"])
+        # New standard schema: action vectors live under `actions/joints` (joint
+        # space) or `actions/pose` (EEF pose). Legacy variants are kept for
+        # backwards compatibility with older datasets.
+        candidates.extend([
+            "actions/joints",
+            "actions/pose",
+            "obs/actions",
+            "processed_actions",
+            "actions",
+        ])
     if modality_type == "state":
         suffix = feature_key.rsplit(".", 1)[-1]
-        candidates.extend([f"obs/{suffix}", f"states/{suffix}"])
+        # New standard schema: joint state for an articulation is at
+        # `obs/articulation/<articulation_name>/joint_position`. We try the
+        # explicit suffix first, then a few common location patterns.
+        candidates.extend([
+            f"obs/articulation/{suffix}/joint_position",
+            f"obs/articulation/{suffix}/joint_velocity",
+            f"obs/articulation/{suffix}",
+            f"obs/{suffix}",
+            f"states/{suffix}",
+        ])
 
     out: list[str] = []
     for candidate in candidates:
@@ -192,9 +206,14 @@ def video_source_candidates(original_key: str, modality_key: str) -> list[str]:
     if "/" in original_key:
         candidates.append(original_key)
     if original_key.startswith("observation.images."):
-        candidates.append(f"obs/{original_key.rsplit('.', 1)[-1]}")
+        suffix = original_key.rsplit(".", 1)[-1]
+        # New standard schema: cameras live at `obs/cameras/<name>`.
+        candidates.append(f"obs/cameras/{suffix}")
+        candidates.append(f"obs/{suffix}")
     if "." in original_key:
         candidates.append(original_key.replace(".", "/"))
+    # Camera path candidates for the inferred modality_key.
+    candidates.append(f"obs/cameras/{modality_key}")
     candidates.append(f"obs/{modality_key}")
     candidates.append(modality_key)
 

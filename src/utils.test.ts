@@ -4,6 +4,7 @@ import { FileService, type LocalFile, type RemoteFile } from './stores';
 import {
   buildMailto,
   getClothDistributionLink,
+  getDatasetAttributesLink,
   getDatasetProcessingLink,
   getFileLink,
   getPoseTraceLink,
@@ -26,6 +27,9 @@ describe('getFileLink helpers', () => {
     );
     expect(getDatasetProcessingLink(href)).toBe(
       '/dataset-processing?url=https%3A%2F%2Fexample.com%2Ffile.h5',
+    );
+    expect(getDatasetAttributesLink(href)).toBe(
+      '/dataset-attributes?url=https%3A%2F%2Fexample.com%2Ffile.h5',
     );
     expect(getClothDistributionLink(href)).toBe(
       '/cloth-distribution?url=https%3A%2F%2Fexample.com%2Ffile.h5',

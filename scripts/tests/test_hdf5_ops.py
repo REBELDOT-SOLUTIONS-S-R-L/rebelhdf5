@@ -17,8 +17,10 @@ from backend.hdf5_ops import (
     collect_file_dataset_paths,
     get_cut_demo_names,
     process_with_progress,
+    read_dataset_attributes,
     require_data_group,
     sort_demo_names,
+    write_dataset_articulation,
 )
 
 
@@ -109,6 +111,83 @@ def test_require_data_group_raises_when_missing(make_h5_demo_file: object) -> No
     with h5py.File(target, "r") as f:
         with pytest.raises(ValueError, match="no top-level /data group"):
             require_data_group(f, target)
+
+
+def test_read_dataset_attributes_defaults_empty_articulation(make_h5_demo_file: object) -> None:
+    target = Path(make_h5_demo_file())  # type: ignore[operator]
+
+    payload = read_dataset_attributes(target)
+
+    assert payload["attrs"]["total"] == 12
+    assert payload["articulation"] == {
+        "name": "",
+        "joint_number": None,
+        "segmentation": {},
+        "end_effectors": {},
+    }
+    assert payload["articulationSource"] == "default"
+
+
+def test_read_dataset_attributes_parses_slash_named_articulation_attrs(make_h5_demo_file: object) -> None:
+    target = Path(make_h5_demo_file())  # type: ignore[operator]
+    with h5py.File(target, "r+") as f:
+        data = f["data"]
+        data.attrs.create("articulation/name", "robot")
+        data.attrs.create("articulation/joint_number", 53)
+        data.attrs.create(
+            "articulation/segmentation",
+            '{"arm": {"target": "[0:7]", "obs": "[2:9]"}}',
+        )
+        data.attrs.create(
+            "articulation/end_effectors",
+            '{"left_gripper": {"pose": "[0:7]", "gripper": "[7:8]"}}',
+        )
+
+    payload = read_dataset_attributes(target)
+
+    assert "articulation/name" not in payload["attrs"]
+    assert payload["articulation"] == {
+        "name": "robot",
+        "joint_number": 53,
+        "segmentation": {
+            "arm": {"target": "[0:7]", "obs": "[2:9]"},
+        },
+        "end_effectors": {
+            "left_gripper": {"pose": "[0:7]", "gripper": "[7:8]"},
+        },
+    }
+    assert payload["articulationSource"] == "attribute"
+
+
+def test_write_dataset_articulation_round_trips(make_h5_demo_file: object) -> None:
+    target = Path(make_h5_demo_file())  # type: ignore[operator]
+
+    payload = write_dataset_articulation(
+        target,
+        {
+            "name": "robot",
+            "joint_number": "7",
+            "segmentation": {
+                "arm": {"target": "[0:7]", "obs": [0, 7]},
+                "": {"target": "ignored", "obs": "ignored"},
+            },
+            "end_effectors": {
+                "left_gripper": {"pose": "[0:7]", "gripper": [7, 8]},
+            },
+        },
+    )
+
+    assert payload["articulation"] == {
+        "name": "robot",
+        "joint_number": 7,
+        "segmentation": {
+            "arm": {"target": "[0:7]", "obs": "[0:7]"},
+        },
+        "end_effectors": {
+            "left_gripper": {"pose": "[0:7]", "gripper": "[7:8]"},
+        },
+    }
+    assert payload["articulationSource"] == "attribute"
 
 
 class TestProcessWithProgress:

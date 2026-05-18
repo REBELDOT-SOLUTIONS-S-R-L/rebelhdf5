@@ -226,6 +226,63 @@ class TestScan:
         assert "not found" in json.loads(body)["error"].lower()
 
 
+class TestDatasetAttributes:
+    def test_reads_default_attributes(
+        self,
+        server_url: str,
+        running_server: BackendServer,
+        make_h5_demo_file: Any,
+    ) -> None:
+        root = Path(running_server.root_dirs[0])
+        target = make_h5_demo_file("attrs.h5", target_dir=root, demo_count=1)
+
+        result = _post_json(
+            f"{server_url}/api/dataset-attributes",
+            {"path": str(target)},
+        )
+
+        assert result["attrs"]["total"] == 4
+        assert result["articulationSource"] == "default"
+        assert result["articulation"]["segmentation"] == {}
+        assert result["articulation"]["end_effectors"] == {}
+
+    def test_updates_articulation(
+        self,
+        server_url: str,
+        running_server: BackendServer,
+        make_h5_demo_file: Any,
+    ) -> None:
+        root = Path(running_server.root_dirs[0])
+        target = make_h5_demo_file("attrs.h5", target_dir=root, demo_count=1)
+
+        result = _post_json(
+            f"{server_url}/api/dataset-attributes/articulation",
+            {
+                "path": str(target),
+                "articulation": {
+                    "name": "robot",
+                    "joint_number": 12,
+                    "segmentation": {
+                        "left_arm": {"target": "[0:6]", "obs": "[2:8]"},
+                    },
+                    "end_effectors": {
+                        "left_gripper": {"pose": "[0:7]", "gripper": "[7:8]"},
+                    },
+                },
+            },
+        )
+
+        assert result["articulationSource"] == "attribute"
+        assert result["articulation"]["name"] == "robot"
+        assert result["articulation"]["joint_number"] == 12
+        assert result["articulation"]["segmentation"] == {
+            "left_arm": {"target": "[0:6]", "obs": "[2:8]"},
+        }
+        assert result["articulation"]["end_effectors"] == {
+            "left_gripper": {"pose": "[0:7]", "gripper": "[7:8]"},
+        }
+
+
 class TestProcess:
     def test_streams_progress_and_writes_output(
         self,

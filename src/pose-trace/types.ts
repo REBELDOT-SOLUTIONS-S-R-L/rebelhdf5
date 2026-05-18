@@ -6,8 +6,9 @@ export interface DemoInfo {
   source_episode_index: number | null;
 }
 
-export const DEMO_VIDEO_KEYS = ['left_wrist', 'right_wrist', 'top'] as const;
-export type DemoVideoKey = (typeof DEMO_VIDEO_KEYS)[number];
+// Camera names are no longer fixed — they are discovered from `obs/cameras/`
+// (new standard schema) with legacy fallback to direct datasets under `obs/`.
+export type DemoVideoKey = string;
 
 export const CLOTH_DISTRIBUTION_DIRECT_ANCHORS = [
   'garment_left_lower',
@@ -88,6 +89,7 @@ export interface ClothDistributionResult {
 
 export interface DemoVideoInfo {
   key: DemoVideoKey;
+  label: string;
   path: string;
   frameCount: number;
   height: number;

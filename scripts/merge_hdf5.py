@@ -8,8 +8,10 @@ approach is too slow — especially when video keys are included.
 Usage:
     python scripts/merge_hdf5.py input1.hdf5 input2.hdf5 -o merged.hdf5
     python scripts/merge_hdf5.py *.hdf5 -o merged.hdf5
-    python scripts/merge_hdf5.py *.hdf5 -o merged.hdf5 --exclude obs/left_wrist obs/right_wrist obs/top
-    python scripts/merge_hdf5.py *.hdf5 -o merged.hdf5 --only actions obs/left_joint_pos obs/right_joint_pos
+    # Exclude all camera streams under the standard schema:
+    python scripts/merge_hdf5.py *.hdf5 -o merged.hdf5 --exclude obs/cameras/top obs/cameras/left_wrist
+    # Only include actions and a specific articulation's joint observations:
+    python scripts/merge_hdf5.py *.hdf5 -o merged.hdf5 --only actions/joints actions/pose obs/articulation/robot/joint_position
 
 Requires: pip install h5py tqdm
 """
@@ -181,7 +183,7 @@ def main() -> None:
         "--exclude",
         nargs="+",
         default=None,
-        help="Dataset key paths to exclude (e.g. obs/left_wrist obs/right_wrist obs/top)",
+        help="Dataset key paths to exclude (e.g. obs/cameras/top obs/cameras/left_wrist)",
     )
     parser.add_argument(
         "--only",
