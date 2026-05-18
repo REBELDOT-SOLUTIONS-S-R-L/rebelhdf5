@@ -136,7 +136,18 @@ corepack pnpm desktop:run
 │   ├── <span class="file">actions_frame</span><span class="comment"># world, robot, etc</span>
 │   ├── <span class="file">num_episodes</span><span class="comment"># number of total episodes</span>
 │   ├── <span class="file">total_samples</span><span class="comment"># number of total samples</span>
-│   └── <span class="file">description</span><span class="comment"># human format description</span>
+│   ├── <span class="file">description</span><span class="comment"># human format description</span>
+│   └── <span class="file">articulation</span><span class="comment"># articulation present in the dataset</span>
+│       ├── <span class="file">name</span><span class="comment"># Name of the robot</span>
+│       ├── <span class="file">joint_number</span><span class="comment"># Total number of joints</span>
+│       └── <span class="file">segmentation</span><span class="comment"># List of human readable names for articulation segments, containing column indices from the corresponding segment</span>
+│           ├── <span class="file">segment_name</span><span class="comment"># The segment name</span>
+│           │   ├── <span class="file">target</span><span class="comment"># [x:y] index of column from actons/ which is mapped to the segment</span>
+│           │   └── <span class="file">obs</span><span class="comment"># [x:y] index of column from obs/ which is mapped to the segment</span>
+│           ├── <span class="file">segment_name</span>
+│           │   ├── <span class="file">target</span>
+│           │   └── <span class="file">obs</span>
+│            
 ├── <span class="folder">demo_&lt;N&gt;/</span>
 │   ├── <span class="folder">attrs/</span>
 │   │   ├── <span class="file">num_samples</span><span class="comment"># number of total samples</span>
