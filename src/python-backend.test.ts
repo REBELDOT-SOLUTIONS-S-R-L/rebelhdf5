@@ -4,8 +4,10 @@ import {
   addBackendRoot,
   checkBackend,
   listFiles,
+  pollBackendStatus,
   PYTHON_BACKEND_BASE_URL,
   resolveFiles,
+  runLeRobotConvert,
   runProcess,
   scanFiles,
 } from './python-backend';
@@ -354,5 +356,189 @@ describe('runProcess (SSE streaming)', () => {
         {},
       ),
     ).rejects.toThrow('kaboom');
+  });
+
+  it('ignores malformed SSE JSON lines without aborting the stream', async () => {
+    const body =
+      `data: not-json\n\n` +
+      `: heartbeat comment\n\n` +
+      `data: ${JSON.stringify({
+        type: 'done',
+        fileName: 'merged.h5',
+        demoCount: 1,
+        selectedKeyCount: 1,
+        fileSize: 1,
+      })}\n\n`;
+    fetchMock.mockResolvedValueOnce(
+      new Response(body, {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' },
+      }),
+    );
+
+    const result = await runProcess(
+      {
+        paths: ['/a.h5'],
+        selectedKeys: [],
+        outputName: 'merged.h5',
+        operation: 'merge',
+      },
+      {},
+    );
+    expect(result.fileName).toBe('merged.h5');
+  });
+});
+
+describe('runLeRobotConvert (SSE streaming)', () => {
+  function basicRequest() {
+    return {
+      paths: ['/a.h5'],
+      outputName: 'out',
+      skipFailed: false,
+      modalityJson: null,
+      conversionConfigJson: null,
+      modalityPython: null,
+      defaultTask: 'task',
+      taskRules: [],
+      maxEpisodes: null,
+    };
+  }
+
+  it('forwards progress and resolves with the done payload', async () => {
+    fetchMock.mockResolvedValueOnce(
+      sseResponse([
+        {
+          type: 'progress',
+          phase: 'reading',
+          overallDemoIndex: 0,
+          overallDemoCount: 1,
+          currentSourceName: 'a.h5',
+          currentDemoName: 'demo_0',
+        },
+        {
+          type: 'done',
+          fileName: 'out',
+          demoCount: 1,
+          selectedKeyCount: 1,
+          fileSize: 1,
+          outputPath: '/abs/out',
+          outputType: 'directory',
+          skippedDemoCount: 0,
+          totalFrames: 10,
+          taskCount: 1,
+        },
+      ]),
+    );
+
+    const onProgress =
+      vi.fn<NonNullable<Parameters<typeof runLeRobotConvert>[1]['onProgress']>>();
+    const result = await runLeRobotConvert(basicRequest(), { onProgress });
+
+    expect(onProgress).toHaveBeenCalledTimes(1);
+    expect(result.outputType).toBe('directory');
+    expect(result.taskCount).toBe(1);
+  });
+
+  it('throws the server-supplied error message on non-ok responses', async () => {
+    fetchMock.mockResolvedValueOnce(
+      Response.json({ error: 'bad request' }, { status: 400 }),
+    );
+    await expect(runLeRobotConvert(basicRequest(), {})).rejects.toThrow(
+      'bad request',
+    );
+  });
+
+  it('throws when the response has no body stream', async () => {
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 200 }));
+    await expect(runLeRobotConvert(basicRequest(), {})).rejects.toThrow(
+      'Server did not return a readable stream.',
+    );
+  });
+
+  it('rejects when the stream ends without a done event', async () => {
+    fetchMock.mockResolvedValueOnce(sseResponse([]));
+    await expect(runLeRobotConvert(basicRequest(), {})).rejects.toThrow(
+      /without a completion event/u,
+    );
+  });
+
+  it('propagates server-side error events', async () => {
+    fetchMock.mockResolvedValueOnce(
+      sseResponse([{ type: 'error', message: 'conversion failed' }]),
+    );
+    await expect(runLeRobotConvert(basicRequest(), {})).rejects.toThrow(
+      'conversion failed',
+    );
+  });
+
+  it('ignores malformed SSE JSON lines', async () => {
+    const body =
+      `data: this-is-not-json\n\n` +
+      `data: ${JSON.stringify({
+        type: 'done',
+        fileName: 'out',
+        demoCount: 1,
+        selectedKeyCount: 1,
+        fileSize: 1,
+      })}\n\n`;
+    fetchMock.mockResolvedValueOnce(
+      new Response(body, {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' },
+      }),
+    );
+    const result = await runLeRobotConvert(basicRequest(), {});
+    expect(result.fileName).toBe('out');
+  });
+});
+
+describe('pollBackendStatus', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('invokes onStatus on every tick and stops after cancel', async () => {
+    fetchMock.mockResolvedValue(
+      Response.json({
+        status: 'ok',
+        rootDir: '/data',
+        rootDirs: ['/data'],
+        version: 1,
+        indexReady: true,
+        indexedFileCount: 0,
+      }),
+    );
+
+    const onStatus = vi.fn();
+    const cancel = pollBackendStatus(onStatus, 100, 200);
+
+    await vi.waitFor(() => {
+      expect(onStatus).toHaveBeenCalledTimes(1);
+    });
+    expect(onStatus.mock.calls[0]?.[0].available).toBe(true);
+
+    await vi.advanceTimersByTimeAsync(200);
+    expect(onStatus).toHaveBeenCalledTimes(2);
+
+    cancel();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(onStatus).toHaveBeenCalledTimes(2);
+  });
+
+  it('reports available=false when the server returns an error', async () => {
+    fetchMock.mockResolvedValue(new Response('', { status: 500 }));
+    const onStatus = vi.fn();
+    const cancel = pollBackendStatus(onStatus, 50, 5_000);
+
+    await vi.waitFor(() => {
+      expect(onStatus).toHaveBeenCalled();
+    });
+    expect(onStatus.mock.calls[0]?.[0].available).toBe(false);
+
+    cancel();
   });
 });

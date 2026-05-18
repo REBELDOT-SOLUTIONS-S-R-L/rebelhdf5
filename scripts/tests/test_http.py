@@ -398,3 +398,345 @@ class TestCors:
         with urllib.request.urlopen(req, timeout=5) as response:
             assert response.status == 204
             assert response.headers["Access-Control-Allow-Origin"] == "*"
+
+
+class TestLeRobotConvertValidation:
+    """Cover the request-validation paths of /api/convert/lerobot.
+
+    The actual conversion path needs ffmpeg + pyarrow + a real dataset and
+    is intentionally out of scope; these tests stop at the input checks.
+    """
+
+    def test_rejects_empty_paths(self, server_url: str) -> None:
+        status, _h, body = _request(
+            f"{server_url}/api/convert/lerobot",
+            method="POST",
+            body={"paths": []},
+        )
+        assert status == 400
+        assert "input files" in json.loads(body)["error"].lower()
+
+    def test_rejects_missing_path(
+        self, server_url: str,
+    ) -> None:
+        status, _h, body = _request(
+            f"{server_url}/api/convert/lerobot",
+            method="POST",
+            body={"paths": ["does-not-exist.h5"]},
+        )
+        assert status == 400
+        assert "not found" in json.loads(body)["error"].lower()
+
+    def test_rejects_zero_max_episodes(
+        self,
+        server_url: str,
+        running_server: BackendServer,
+        make_h5_demo_file: Any,
+    ) -> None:
+        a = make_h5_demo_file(
+            "a.h5", target_dir=Path(running_server.root_dirs[0]), demo_count=1,
+        )
+        status, _h, body = _request(
+            f"{server_url}/api/convert/lerobot",
+            method="POST",
+            body={"paths": [str(a)], "maxEpisodes": 0},
+        )
+        assert status == 400
+        assert "maxepisodes" in json.loads(body)["error"].lower()
+
+    def test_rejects_non_string_default_task(
+        self,
+        server_url: str,
+        running_server: BackendServer,
+        make_h5_demo_file: Any,
+    ) -> None:
+        a = make_h5_demo_file(
+            "a.h5", target_dir=Path(running_server.root_dirs[0]), demo_count=1,
+        )
+        status, _h, body = _request(
+            f"{server_url}/api/convert/lerobot",
+            method="POST",
+            body={"paths": [str(a)], "defaultTask": 42},
+        )
+        assert status == 400
+        assert "defaulttask" in json.loads(body)["error"].lower()
+
+    def test_rejects_non_list_task_rules(
+        self,
+        server_url: str,
+        running_server: BackendServer,
+        make_h5_demo_file: Any,
+    ) -> None:
+        a = make_h5_demo_file(
+            "a.h5", target_dir=Path(running_server.root_dirs[0]), demo_count=1,
+        )
+        status, _h, body = _request(
+            f"{server_url}/api/convert/lerobot",
+            method="POST",
+            body={"paths": [str(a)], "taskRules": {"not": "a list"}},
+        )
+        assert status == 400
+        assert "taskrules" in json.loads(body)["error"].lower()
+
+
+class TestDatabricksRoutes:
+    """Cover the validation paths of the databricks GET/POST routes.
+
+    Most happy paths need a configured Databricks workspace, so this layer
+    only verifies the 400s raised before any SDK call is attempted.
+    """
+
+    def test_put_secrets_requires_secrets(self, server_url: str) -> None:
+        status, _h, body = _request(
+            f"{server_url}/api/databricks/put-secrets",
+            method="POST",
+            body={"scope": "brev"},
+        )
+        assert status == 400
+        assert "no secrets" in json.loads(body)["error"].lower()
+
+    def test_upload_dataset_requires_file_path(self, server_url: str) -> None:
+        status, _h, body = _request(
+            f"{server_url}/api/databricks/upload-dataset",
+            method="POST",
+            body={},
+        )
+        assert status == 400
+        assert "filepath" in json.loads(body)["error"].lower()
+
+    def test_upload_dataset_rejects_unknown_file(self, server_url: str) -> None:
+        status, _h, body = _request(
+            f"{server_url}/api/databricks/upload-dataset",
+            method="POST",
+            body={"filePath": "/no/such/file.h5"},
+        )
+        assert status == 400
+        assert "not found" in json.loads(body)["error"].lower()
+
+    def test_run_pipeline_requires_job_id(self, server_url: str) -> None:
+        status, _h, body = _request(
+            f"{server_url}/api/databricks/run-pipeline",
+            method="POST",
+            body={},
+        )
+        assert status == 400
+        assert "jobid" in json.loads(body)["error"].lower()
+
+    def test_job_status_requires_run_id(self, server_url: str) -> None:
+        status, _h, _body = _request(
+            f"{server_url}/api/databricks/job-status",
+        )
+        assert status == 400
+
+    def test_active_runs_requires_job_ids(self, server_url: str) -> None:
+        status, _h, _body = _request(
+            f"{server_url}/api/databricks/active-runs",
+        )
+        assert status == 400
+
+    def test_volume_files_requires_volume(self, server_url: str) -> None:
+        status, _h, _body = _request(
+            f"{server_url}/api/databricks/volume-files",
+        )
+        assert status == 400
+
+    def test_volume_download_requires_src_and_dst(self, server_url: str) -> None:
+        status, _h, _body = _request(
+            f"{server_url}/api/databricks/volume-download?src=a",
+        )
+        assert status == 400
+
+
+class TestDatabricksRoutesWithMocks:
+    """Happy-path tests for databricks routes by patching the ops layer.
+
+    The HTTP handler is the unit under test — the SDK is mocked away.
+    """
+
+    def test_run_pipeline_returns_run_id(
+        self, server_url: str, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from backend import databricks as databricks_ops
+
+        monkeypatch.setattr(
+            databricks_ops,
+            "run_pipeline",
+            lambda _job_id: {
+                "status": "ok",
+                "runId": "run-42",
+                "output": "started",
+            },
+        )
+
+        result = _post_json(
+            f"{server_url}/api/databricks/run-pipeline",
+            {"jobId": "abc"},
+        )
+        assert result == {"ok": True, "runId": "run-42", "output": "started"}
+
+    def test_run_pipeline_reports_undecoded_output(
+        self, server_url: str, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from backend import databricks as databricks_ops
+
+        monkeypatch.setattr(
+            databricks_ops,
+            "run_pipeline",
+            lambda _job_id: {"status": "undecoded", "rawOutput": "weird"},
+        )
+        result = _post_json(
+            f"{server_url}/api/databricks/run-pipeline",
+            {"jobId": "abc"},
+        )
+        assert result == {"ok": True, "runId": None, "rawOutput": "weird"}
+
+    def test_run_pipeline_propagates_error_status(
+        self, server_url: str, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from backend import databricks as databricks_ops
+
+        monkeypatch.setattr(
+            databricks_ops,
+            "run_pipeline",
+            lambda _job_id: {"status": "error", "message": "no auth"},
+        )
+        status, _h, body = _request(
+            f"{server_url}/api/databricks/run-pipeline",
+            method="POST",
+            body={"jobId": "abc"},
+        )
+        assert status == 500
+        assert "no auth" in json.loads(body)["error"]
+
+    def test_job_status_returns_payload(
+        self, server_url: str, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from backend import databricks as databricks_ops
+
+        monkeypatch.setattr(
+            databricks_ops,
+            "get_job_status",
+            lambda _run_id: (True, {"state": "RUNNING"}, ""),
+        )
+        result = _get_json(
+            f"{server_url}/api/databricks/job-status?run_id=abc",
+        )
+        assert result == {"state": "RUNNING"}
+
+    def test_job_status_returns_500_on_failure(
+        self, server_url: str, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from backend import databricks as databricks_ops
+
+        monkeypatch.setattr(
+            databricks_ops,
+            "get_job_status",
+            lambda _run_id: (False, {}, "auth failed"),
+        )
+        status, _h, body = _request(
+            f"{server_url}/api/databricks/job-status?run_id=abc",
+        )
+        assert status == 500
+        assert "auth failed" in json.loads(body)["error"]
+
+    def test_active_runs_returns_run_list(
+        self, server_url: str, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from backend import databricks as databricks_ops
+
+        monkeypatch.setattr(
+            databricks_ops,
+            "get_active_runs",
+            lambda _ids: [{"runId": 1}, {"runId": 2}],
+        )
+        result = _get_json(
+            f"{server_url}/api/databricks/active-runs?job_ids=a,b",
+        )
+        assert result == {"runs": [{"runId": 1}, {"runId": 2}]}
+
+    def test_volume_files_returns_payload(
+        self, server_url: str, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from backend import databricks as databricks_ops
+
+        monkeypatch.setattr(
+            databricks_ops,
+            "list_volume_files",
+            lambda _vol, _path: (True, {"files": [{"name": "a"}]}, ""),
+        )
+        result = _get_json(
+            f"{server_url}/api/databricks/volume-files?volume=/Volumes/x",
+        )
+        assert result == {"files": [{"name": "a"}]}
+
+    def test_put_secrets_returns_ops_result(
+        self, server_url: str, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from backend import databricks as databricks_ops
+
+        monkeypatch.setattr(
+            databricks_ops,
+            "put_secrets",
+            lambda secrets, scope: {"ok": True, "scope": scope, "count": len(secrets)},
+        )
+        result = _post_json(
+            f"{server_url}/api/databricks/put-secrets",
+            {"secrets": {"K": "V", "K2": "V2"}, "scope": "myscope"},
+        )
+        assert result == {"ok": True, "scope": "myscope", "count": 2}
+
+    def test_upload_dataset_streams_events(
+        self,
+        server_url: str,
+        running_server: BackendServer,
+        make_h5_demo_file: Any,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from backend import databricks as databricks_ops
+
+        a = make_h5_demo_file(
+            "for-upload.h5", target_dir=Path(running_server.root_dirs[0]),
+            demo_count=1,
+        )
+        monkeypatch.setattr(
+            databricks_ops,
+            "upload_dataset_events",
+            lambda _path, _vol: iter([
+                {"type": "progress", "message": "starting"},
+                {"type": "done", "uploaded": 1},
+            ]),
+        )
+
+        events = _read_sse_events(
+            f"{server_url}/api/databricks/upload-dataset",
+            {"filePath": str(a)},
+        )
+        assert [e["type"] for e in events] == ["progress", "done"]
+
+    def test_upload_dataset_propagates_missing_script(
+        self,
+        server_url: str,
+        running_server: BackendServer,
+        make_h5_demo_file: Any,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from backend import databricks as databricks_ops
+
+        a = make_h5_demo_file(
+            "for-upload.h5", target_dir=Path(running_server.root_dirs[0]),
+            demo_count=1,
+        )
+
+        def raise_missing(_path: Any, _vol: Any) -> Any:
+            raise databricks_ops.UploadScriptMissing("script missing")
+
+        monkeypatch.setattr(
+            databricks_ops, "upload_dataset_events", raise_missing,
+        )
+        status, _h, body = _request(
+            f"{server_url}/api/databricks/upload-dataset",
+            method="POST",
+            body={"filePath": str(a)},
+        )
+        assert status == 500
+        assert "script missing" in json.loads(body)["error"]
