@@ -5,16 +5,22 @@ import { Link, createSearchParams, useSearchParams } from 'react-router-dom';
 import { openPoseTraceSource, loadDemoRows } from './pose-trace/hdf5';
 import Plot from './pose-trace/PlotlyChart';
 import {
-  build2DData,
-  build2DLayout,
   build3DDataForStep,
   build3DLayout,
   buildEmptyLayout,
-  get2DTraceGroups,
+  buildJointChartData,
+  buildJointChartLayout,
   getDefaultHidden3DTraceGroups,
+  getJointChartSpecs,
   type PlotSceneCamera,
 } from './pose-trace/plotConfig';
-import type { DemoInfo, DemoRow, PoseTraceSource } from './pose-trace/types';
+import type {
+  ArticulationSegment,
+  DemoInfo,
+  DemoRow,
+  ParsedArticulation,
+  PoseTraceSource,
+} from './pose-trace/types';
 import { type H5File, useStore } from './stores';
 import styles from './PoseTracePage.module.css';
 import { resolveFileUrl } from './utils';
@@ -204,14 +210,60 @@ function clonePlotSceneCamera(camera: PlotSceneCamera | null | undefined): PlotS
   };
 }
 
+function SegmentSection({
+  segment,
+  rows,
+  hasData,
+  themeKey,
+}: {
+  segment: ArticulationSegment;
+  rows: DemoRow[];
+  hasData: boolean;
+  themeKey: string;
+}) {
+  const specs = useMemo(() => getJointChartSpecs([segment]), [segment]);
+  const datasetName = rows[0]?.dataset_name ?? 'dataset';
+  const demoName = rows[0]?.demo_name ?? 'demo';
+
+  if (specs.length === 0) {
+    return null;
+  }
+
+  return (
+    <section className={styles.segmentSection}>
+      <h2 className={styles.segmentTitle}>{segment.name}</h2>
+      <div className={styles.jointGrid}>
+        {specs.map((spec) => (
+          <div key={`${spec.segmentName}-${spec.jointIndex}`} className={styles.chartCard}>
+            <Plot
+              key={`${datasetName}-${demoName}-${spec.segmentName}-${spec.jointIndex}-${themeKey}`}
+              data={hasData ? buildJointChartData(rows, spec) : []}
+              layout={
+                hasData
+                  ? buildJointChartLayout(spec)
+                  : buildEmptyLayout(`${spec.segmentName}: ${spec.jointIndex}`, 'No data')
+              }
+              useResizeHandler
+              style={{ width: '100%' }}
+              config={{ responsive: true }}
+            />
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function PoseTraceCharts({
   rows,
   loading,
   themeKey,
+  articulation,
 }: {
   rows: DemoRow[];
   loading: boolean;
   themeKey: string;
+  articulation: ParsedArticulation | null;
 }) {
   const hasData = rows.length > 0;
   const [selectedStepIndex, setSelectedStepIndex] = useState(0);
@@ -221,14 +273,14 @@ function PoseTraceCharts({
   const hiddenTraceGroupsRef = useRef<Set<string>>(new Set());
   const emptyMessage = loading
     ? 'Loading pose-trace data…'
-    : 'Select a demo to inspect its end-effector and garment trajectories.';
+    : 'Select a demo to inspect its end-effector and joint trajectories.';
   const maxStepIndex = Math.max(rows.length - 1, 0);
   const currentStepIndex = Math.min(selectedStepIndex, maxStepIndex);
   const currentStepRow = rows[currentStepIndex];
   const currentStepLabel = currentStepRow?.episode_step ?? currentStepIndex;
   const threeDimensionalChartKey = `${rows[0]?.dataset_name ?? 'dataset'}-${rows[0]?.demo_name ?? 'demo'}-3d-${themeKey}`;
-  const twoDimensionalGroups = useMemo(() => get2DTraceGroups(rows), [rows]);
   const defaultHiddenTraceGroups = useMemo(() => getDefaultHidden3DTraceGroups(rows), [rows]);
+  const segments = articulation?.segmentation ?? [];
 
   if (sceneCameraIdentityRef.current !== threeDimensionalChartKey) {
     sceneCameraIdentityRef.current = threeDimensionalChartKey;
@@ -320,27 +372,24 @@ function PoseTraceCharts({
         )}
       </section>
 
-      <section className={styles.splitCharts}>
-        {twoDimensionalGroups.map((group) => (
-          <div key={group.id} className={styles.chartCard}>
-            <Plot
-              key={`${rows[0]?.dataset_name ?? 'dataset'}-${rows[0]?.demo_name ?? 'demo'}-${group.id}-${themeKey}`}
-              data={hasData ? build2DData(rows, group) : []}
-              layout={
-                hasData
-                  ? build2DLayout(rows, group)
-                  : buildEmptyLayout(
-                      `${group.label} 2D Pose Trace`,
-                      emptyMessage,
-                    )
-              }
-              useResizeHandler
-              style={{ width: '100%' }}
-              config={{ responsive: true }}
-            />
-          </div>
-        ))}
-      </section>
+      {segments.length === 0 && hasData && (
+        <section className={styles.messageCard}>
+          <p>
+            This dataset has no `articulation/segmentation` attrs, so no per-joint charts can be
+            shown. Configure articulation segments on the Dataset Attributes page.
+          </p>
+        </section>
+      )}
+
+      {segments.map((segment) => (
+        <SegmentSection
+          key={segment.name}
+          segment={segment}
+          rows={rows}
+          hasData={hasData}
+          themeKey={themeKey}
+        />
+      ))}
     </div>
   );
 }
@@ -545,6 +594,7 @@ function PoseTracePage() {
             rows={rows}
             loading={rowsLoading}
             themeKey={prefersDarkMode ? 'dark' : 'light'}
+            articulation={source.articulation}
           />
         </>
       )}

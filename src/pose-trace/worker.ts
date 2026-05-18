@@ -8,15 +8,13 @@ import { Plugin } from '@h5web/h5wasm';
 
 import { getPlugin } from '../plugin-utils';
 import {
-  TRACE_EEF_KEYPOINT_GROUPS,
-  TRACE_SUCCESS_DISTANCE_SPECS,
-} from './schema';
-import {
   CLOTH_DISTRIBUTION_ANCHORS,
   CLOTH_DISTRIBUTION_DERIVED_ANCHORS,
   CLOTH_DISTRIBUTION_DIRECT_ANCHORS,
 } from './types';
 import type {
+  ArticulationEndEffector,
+  ArticulationSegment,
   ClothDistributionAnchor,
   ClothDistributionSourceDiagnostics,
   ClothDistributionCategory,
@@ -32,6 +30,7 @@ import type {
   DatasetProcessingResultMeta,
   DemoVideoInfo,
   DemoVideoKey,
+  ParsedArticulation,
 } from './types';
 
 type PoseSeries = number[][][];
@@ -92,12 +91,19 @@ type LoadDemoVideoResult = DemoVideoInfo & {
 
 type ProcessDatasetResult = DatasetProcessingResultMeta;
 
+type OpenSourceResultPayload = {
+  sourceId: string;
+  datasetName: string;
+  demos: DemoInfo[];
+  articulation: ParsedArticulation | null;
+};
+
 type PoseTraceWorkerResponse =
   | {
       id: number;
       ok: true;
       result:
-        | { sourceId: string; datasetName: string; demos: DemoInfo[] }
+        | OpenSourceResultPayload
         | DemoRow[]
         | DatasetProcessingSourceInfo
         | ClothDistributionResult
@@ -112,7 +118,7 @@ type PoseTraceWorkerResponse =
 
 interface WorkerSuccessResult {
   result:
-    | { sourceId: string; datasetName: string; demos: DemoInfo[] }
+    | OpenSourceResultPayload
     | DemoRow[]
     | DatasetProcessingSourceInfo
     | ClothDistributionResult
@@ -126,6 +132,7 @@ interface WorkerSuccessResult {
 interface OpenSourceEntry {
   datasetName: string;
   demos: DemoInfo[];
+  articulation: ParsedArticulation | null;
   h5File: H5WasmFile;
   cleanup: () => void;
 }
@@ -618,17 +625,6 @@ function extractXYZAtStep(
   return [roundFloat(x), roundFloat(y), roundFloat(z)];
 }
 
-function distanceXYZ(
-  a: [number, number, number] | null,
-  b: [number, number, number] | null,
-): number | null {
-  if (!a || !b) {
-    return null;
-  }
-
-  return roundFloat(Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]));
-}
-
 function listDemos(h5File: H5WasmFile): DemoInfo[] {
   const dataGroup = getDataGroup(h5File);
   const demoNames = dataGroup.keys()
@@ -677,6 +673,305 @@ function getDemoGroup(entry: OpenSourceEntry, demoName: string): H5WasmGroup {
   return demoGroup;
 }
 
+function safeJsonParse(value: string): unknown {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
+
+function coerceArticulationValue(value: unknown): unknown {
+  if (typeof value !== 'string') {
+    return value;
+  }
+
+  const trimmed = value.trim();
+  if (trimmed === '') {
+    return null;
+  }
+
+  if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+    const parsed = safeJsonParse(trimmed);
+    if (parsed !== null) {
+      return parsed;
+    }
+  }
+
+  return value;
+}
+
+function readArticulationFromAttrs(dataGroup: H5WasmGroup): unknown {
+  const direct = getAttributeValue(dataGroup, 'articulation');
+  if (direct != null) {
+    return coerceArticulationValue(direct);
+  }
+
+  const flatKeys = [
+    'articulation/name',
+    'articulation/joint_number',
+    'articulation/segmentation',
+    'articulation/end_effectors',
+  ];
+  const hasFlat = flatKeys.some((key) => key in dataGroup.attrs);
+  if (!hasFlat) {
+    return null;
+  }
+
+  return {
+    name: coerceArticulationValue(getAttributeValue(dataGroup, 'articulation/name')),
+    joint_number: coerceArticulationValue(getAttributeValue(dataGroup, 'articulation/joint_number')),
+    segmentation: coerceArticulationValue(getAttributeValue(dataGroup, 'articulation/segmentation')),
+    end_effectors: coerceArticulationValue(getAttributeValue(dataGroup, 'articulation/end_effectors')),
+  };
+}
+
+function readArticulationFromGroup(dataGroup: H5WasmGroup): unknown {
+  const articulationGroup = maybeChildGroup(dataGroup, 'articulation');
+  if (!articulationGroup) {
+    return null;
+  }
+
+  const segmentationGroup = maybeChildGroup(articulationGroup, 'segmentation');
+  const endEffectorsGroup = maybeChildGroup(articulationGroup, 'end_effectors');
+
+  const segmentation: Record<string, { target: unknown; obs: unknown }> = {};
+  if (segmentationGroup) {
+    for (const segmentName of segmentationGroup.keys()) {
+      const segmentChild = maybeChildGroup(segmentationGroup, segmentName);
+      if (!segmentChild) {
+        continue;
+      }
+      segmentation[segmentName] = {
+        target: getAttributeValue(segmentChild, 'target'),
+        obs: getAttributeValue(segmentChild, 'obs'),
+      };
+    }
+  }
+
+  const endEffectors: Record<string, { pose: unknown; gripper: unknown }> = {};
+  if (endEffectorsGroup) {
+    for (const eefName of endEffectorsGroup.keys()) {
+      const eefChild = maybeChildGroup(endEffectorsGroup, eefName);
+      if (!eefChild) {
+        continue;
+      }
+      endEffectors[eefName] = {
+        pose: getAttributeValue(eefChild, 'pose'),
+        gripper: getAttributeValue(eefChild, 'gripper'),
+      };
+    }
+  }
+
+  return {
+    name: getAttributeValue(articulationGroup, 'name'),
+    joint_number: getAttributeValue(articulationGroup, 'joint_number'),
+    segmentation,
+    end_effectors: endEffectors,
+  };
+}
+
+function parseInclusiveRange(value: unknown): { start: number; end: number } | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const match = value.match(/^\s*\[\s*(-?\d+)\s*:\s*(-?\d+)\s*\]\s*$/u);
+  if (!match) {
+    return null;
+  }
+
+  const start = Number.parseInt(match[1], 10);
+  const end = Number.parseInt(match[2], 10);
+  if (!Number.isInteger(start) || !Number.isInteger(end) || start > end) {
+    return null;
+  }
+
+  return { start, end };
+}
+
+function parseArticulation(raw: unknown): ParsedArticulation | null {
+  if (!raw || typeof raw !== 'object') {
+    return null;
+  }
+
+  const rawRecord = raw as Record<string, unknown>;
+  const name = typeof rawRecord.name === 'string' ? rawRecord.name : '';
+  const jointNumberRaw = rawRecord.joint_number;
+  const jointNumber = optionalInt(jointNumberRaw);
+
+  const segmentation: ArticulationSegment[] = [];
+  const segRaw = rawRecord.segmentation;
+  if (segRaw && typeof segRaw === 'object' && !Array.isArray(segRaw)) {
+    for (const [segName, segValue] of Object.entries(segRaw as Record<string, unknown>)) {
+      if (!segValue || typeof segValue !== 'object') {
+        continue;
+      }
+      const segRecord = segValue as Record<string, unknown>;
+      const targetRange = parseInclusiveRange(segRecord.target);
+      const obsRange = parseInclusiveRange(segRecord.obs);
+      if (!targetRange || !obsRange) {
+        continue;
+      }
+      segmentation.push({
+        name: segName,
+        targetStart: targetRange.start,
+        targetEnd: targetRange.end,
+        obsStart: obsRange.start,
+        obsEnd: obsRange.end,
+      });
+    }
+    segmentation.sort((left, right) => left.name.localeCompare(right.name));
+  }
+
+  const endEffectors: ArticulationEndEffector[] = [];
+  const eefRaw = rawRecord.end_effectors;
+  if (eefRaw && typeof eefRaw === 'object' && !Array.isArray(eefRaw)) {
+    for (const [eefName, eefValue] of Object.entries(eefRaw as Record<string, unknown>)) {
+      if (!eefValue || typeof eefValue !== 'object') {
+        continue;
+      }
+      const eefRecord = eefValue as Record<string, unknown>;
+      const poseRange = parseInclusiveRange(eefRecord.pose);
+      const gripperRange = parseInclusiveRange(eefRecord.gripper);
+      if (!poseRange) {
+        continue;
+      }
+      endEffectors.push({
+        name: eefName,
+        poseStart: poseRange.start,
+        poseEnd: poseRange.end,
+        gripperStart: gripperRange?.start ?? null,
+        gripperEnd: gripperRange?.end ?? null,
+      });
+    }
+    endEffectors.sort((left, right) => left.name.localeCompare(right.name));
+  }
+
+  if (!name && segmentation.length === 0 && endEffectors.length === 0) {
+    return null;
+  }
+
+  return {
+    name,
+    jointNumber,
+    segmentation,
+    endEffectors,
+  };
+}
+
+function readArticulation(h5File: H5WasmFile): ParsedArticulation | null {
+  let dataGroup: H5WasmGroup;
+  try {
+    dataGroup = getDataGroup(h5File);
+  } catch {
+    return null;
+  }
+
+  const fromAttrs = readArticulationFromAttrs(dataGroup);
+  const fromAttrsParsed = parseArticulation(fromAttrs);
+  if (fromAttrsParsed) {
+    return fromAttrsParsed;
+  }
+
+  return parseArticulation(readArticulationFromGroup(dataGroup));
+}
+
+function read2DDataset(demoGroup: H5WasmGroup, path: string): number[][] | null {
+  const dataset = maybeChildDataset(demoGroup, path);
+  if (!dataset || !Array.isArray(dataset.shape) || dataset.shape.length !== 2) {
+    return null;
+  }
+
+  const [rowCount, colCount] = dataset.shape;
+  if (!Number.isInteger(rowCount) || !Number.isInteger(colCount) || rowCount <= 0 || colCount <= 0) {
+    return null;
+  }
+
+  const arrayValue = dataset.to_array();
+  if (Array.isArray(arrayValue) && arrayValue.length > 0 && Array.isArray(arrayValue[0])) {
+    return arrayValue as number[][];
+  }
+
+  const flatSource = ArrayBuffer.isView(arrayValue)
+    ? (arrayValue as ArrayLike<number>)
+    : ArrayBuffer.isView(dataset.value)
+      ? (dataset.value as ArrayLike<number>)
+      : null;
+
+  if (!flatSource || flatSource.length < rowCount * colCount) {
+    return null;
+  }
+
+  const rows: number[][] = new Array(rowCount);
+  for (let rowIdx = 0; rowIdx < rowCount; rowIdx += 1) {
+    const offset = rowIdx * colCount;
+    const row: number[] = new Array(colCount);
+    for (let colIdx = 0; colIdx < colCount; colIdx += 1) {
+      row[colIdx] = Number(flatSource[offset + colIdx]);
+    }
+    rows[rowIdx] = row;
+  }
+  return rows;
+}
+
+const OBS_ARTICULATION_GROUP_NAMES = ['articulations', 'articulation'] as const;
+
+function findObsJointPositionPath(
+  demoGroup: H5WasmGroup,
+  articulationName: string,
+): string | null {
+  const obsGroup = maybeChildGroup(demoGroup, 'obs');
+  if (!obsGroup) {
+    return null;
+  }
+
+  for (const containerName of OBS_ARTICULATION_GROUP_NAMES) {
+    const articulationGroup = maybeChildGroup(obsGroup, containerName);
+    if (!articulationGroup) {
+      continue;
+    }
+
+    if (articulationName) {
+      const directChild = maybeChildGroup(articulationGroup, articulationName);
+      if (directChild && maybeChildDataset(directChild, 'joint_position')) {
+        return `obs/${containerName}/${articulationName}/joint_position`;
+      }
+    }
+
+    for (const childName of articulationGroup.keys()) {
+      const child = maybeChildGroup(articulationGroup, childName);
+      if (child && maybeChildDataset(child, 'joint_position')) {
+        return `obs/${containerName}/${childName}/joint_position`;
+      }
+    }
+  }
+
+  return null;
+}
+
+function extractColumnAtStep(
+  data: number[][] | null,
+  stepIdx: number,
+  column: number,
+): number | null {
+  if (!data || column < 0) {
+    return null;
+  }
+
+  const row = data[stepIdx];
+  if (!Array.isArray(row) || column >= row.length) {
+    return null;
+  }
+
+  const value = row[column];
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return null;
+  }
+
+  return roundFloat(value);
+}
+
 function loadEndEffectorPoses(
   demoGroup: H5WasmGroup,
 ): Record<string, PoseSeries> {
@@ -709,41 +1004,69 @@ function loadObjectKeypointPoses(
 
 function buildDemoRows(entry: OpenSourceEntry, demoName: string): DemoRow[] {
   const demoGroup = getDemoGroup(entry, demoName);
+  const articulation = entry.articulation;
 
-  // Target EEF pose: new schema → `obs/datagen_info/target_eef_pose`, legacy → `ik_input_eef_pose`.
-  const targetEefPoseGroup = findPoseGroup(demoGroup, 'target_eef_pose')
-    ?? findPoseGroup(demoGroup, 'ik_input_eef_pose');
   const eefPosePostStepGroup = findPoseGroup(demoGroup, 'eef_pose_post_step');
-
   const eefPose = loadEndEffectorPoses(demoGroup);
-  const targetEefPose = loadPoseArrays(targetEefPoseGroup);
   const eefPosePostStep = loadPoseArrays(eefPosePostStepGroup);
   const objectPose = loadObjectKeypointPoses(demoGroup);
 
+  const usesActionsPoseTarget = (articulation?.endEffectors.length ?? 0) > 0;
+  const actionsPose = usesActionsPoseTarget
+    ? read2DDataset(demoGroup, 'actions/pose')
+    : null;
+
+  let legacyTargetEefPose: Record<string, PoseSeries> = {};
+  if (!usesActionsPoseTarget) {
+    const legacyTargetGroup = findPoseGroup(demoGroup, 'target_eef_pose')
+      ?? findPoseGroup(demoGroup, 'ik_input_eef_pose');
+    legacyTargetEefPose = loadPoseArrays(legacyTargetGroup);
+  }
+
+  const articulationName = articulation?.name?.trim() ?? '';
+  const segments = articulation?.segmentation ?? [];
+  const actionsJoints = segments.length > 0
+    ? read2DDataset(demoGroup, 'actions/joints')
+    : null;
+  const obsJointPositionPath = segments.length > 0
+    ? findObsJointPositionPath(demoGroup, articulationName)
+    : null;
+  const obsJointPosition = obsJointPositionPath
+    ? read2DDataset(demoGroup, obsJointPositionPath)
+    : null;
+
   if (
     Object.keys(eefPose).length === 0
-    && Object.keys(targetEefPose).length === 0
+    && Object.keys(legacyTargetEefPose).length === 0
     && Object.keys(eefPosePostStep).length === 0
     && Object.keys(objectPose).length === 0
+    && !actionsPose
+    && !actionsJoints
+    && !obsJointPosition
   ) {
     throw new Error(`Demo '${demoName}' does not contain usable pose datasets.`);
   }
 
   const poseArrays = [
     ...Object.values(eefPose),
-    ...Object.values(targetEefPose),
+    ...Object.values(legacyTargetEefPose),
     ...Object.values(eefPosePostStep),
     ...Object.values(objectPose),
   ];
-  const validLengths = poseArrays
+  const poseLengths = poseArrays
     .filter((series) => series.every((frame) => Array.isArray(frame) && frame.length === 4))
     .map((series) => series.length);
 
-  if (validLengths.length === 0) {
-    throw new Error(`Demo '${demoName}' does not contain valid [T,4,4] pose arrays.`);
+  const arrayLengths: number[] = [...poseLengths];
+  if (actionsPose) arrayLengths.push(actionsPose.length);
+  if (actionsJoints) arrayLengths.push(actionsJoints.length);
+  if (obsJointPosition) arrayLengths.push(obsJointPosition.length);
+
+  if (arrayLengths.length === 0) {
+    throw new Error(`Demo '${demoName}' does not contain valid pose or joint data.`);
   }
 
-  const numSteps = Math.max(...validLengths);
+  const numSteps = Math.max(...arrayLengths);
   const storedNumSamples = optionalInt(getAttributeValue(demoGroup, 'num_samples'));
   const successValue = optionalBool(getAttributeValue(demoGroup, 'success'));
   const episodeIndex = optionalInt(demoName.split('_', 2)[1]);
@@ -767,25 +1090,35 @@ function buildDemoRows(entry: OpenSourceEntry, demoName: string): DemoRow[] {
       completed_successes: null,
     };
 
-    const eefPositions: Record<string, [number, number, number] | null> = {};
-    const keypointPositions: Record<string, [number, number, number] | null> = {};
-
     for (const eefName of Object.keys(eefPose).sort((left, right) => left.localeCompare(right))) {
       const xyz = extractXYZAtStep(eefPose[eefName], stepIdx);
-      eefPositions[eefName] = xyz;
       row[`eef_${eefName}_x`] = xyz?.[0] ?? null;
       row[`eef_${eefName}_y`] = xyz?.[1] ?? null;
       row[`eef_${eefName}_z`] = xyz?.[2] ?? null;
     }
 
-    for (const eefName of Object.keys(targetEefPose).sort((left, right) => left.localeCompare(right))) {
-      const targetXYZ = extractXYZAtStep(targetEefPose[eefName], stepIdx);
-      row[`target_eef_${eefName}_x`] = targetXYZ?.[0] ?? null;
-      row[`target_eef_${eefName}_y`] = targetXYZ?.[1] ?? null;
-      row[`target_eef_${eefName}_z`] = targetXYZ?.[2] ?? null;
-      row[`ik_input_eef_${eefName}_x`] = targetXYZ?.[0] ?? null;
-      row[`ik_input_eef_${eefName}_y`] = targetXYZ?.[1] ?? null;
-      row[`ik_input_eef_${eefName}_z`] = targetXYZ?.[2] ?? null;
+    if (usesActionsPoseTarget && articulation) {
+      for (const eef of articulation.endEffectors) {
+        const targetX = extractColumnAtStep(actionsPose, stepIdx, eef.poseStart);
+        const targetY = extractColumnAtStep(actionsPose, stepIdx, eef.poseStart + 1);
+        const targetZ = extractColumnAtStep(actionsPose, stepIdx, eef.poseStart + 2);
+        row[`target_eef_${eef.name}_x`] = targetX;
+        row[`target_eef_${eef.name}_y`] = targetY;
+        row[`target_eef_${eef.name}_z`] = targetZ;
+        row[`ik_input_eef_${eef.name}_x`] = targetX;
+        row[`ik_input_eef_${eef.name}_y`] = targetY;
+        row[`ik_input_eef_${eef.name}_z`] = targetZ;
+      }
+    } else {
+      for (const eefName of Object.keys(legacyTargetEefPose).sort((left, right) => left.localeCompare(right))) {
+        const targetXYZ = extractXYZAtStep(legacyTargetEefPose[eefName], stepIdx);
+        row[`target_eef_${eefName}_x`] = targetXYZ?.[0] ?? null;
+        row[`target_eef_${eefName}_y`] = targetXYZ?.[1] ?? null;
+        row[`target_eef_${eefName}_z`] = targetXYZ?.[2] ?? null;
+        row[`ik_input_eef_${eefName}_x`] = targetXYZ?.[0] ?? null;
+        row[`ik_input_eef_${eefName}_y`] = targetXYZ?.[1] ?? null;
+        row[`ik_input_eef_${eefName}_z`] = targetXYZ?.[2] ?? null;
+      }
     }
 
     for (const eefName of Object.keys(eefPosePostStep).sort((left, right) => left.localeCompare(right))) {
@@ -797,49 +1130,30 @@ function buildDemoRows(entry: OpenSourceEntry, demoName: string): DemoRow[] {
 
     for (const objectName of Object.keys(objectPose).sort((left, right) => left.localeCompare(right))) {
       const xyz = extractXYZAtStep(objectPose[objectName], stepIdx);
-      keypointPositions[objectName] = xyz;
       row[`object_${objectName}_x`] = xyz?.[0] ?? null;
       row[`object_${objectName}_y`] = xyz?.[1] ?? null;
       row[`object_${objectName}_z`] = xyz?.[2] ?? null;
     }
 
-    for (const eefName of Object.keys(eefPose).sort((left, right) => left.localeCompare(right))) {
-      const eefXYZ = eefPositions[eefName];
-      for (const objectName of Object.keys(objectPose).sort((left, right) => left.localeCompare(right))) {
-        row[`dist_${eefName}_to_${objectName}_m`] = distanceXYZ(
-          eefXYZ,
-          keypointPositions[objectName] ?? null,
-        );
-      }
-    }
-
-    for (const [eefName, keypointNames] of Object.entries(TRACE_EEF_KEYPOINT_GROUPS)) {
-      if (!eefPose[eefName]) {
-        continue;
-      }
-
-      const eefXYZ = eefPositions[eefName];
-      for (const keypointName of keypointNames) {
-        if (!objectPose[keypointName]) {
-          continue;
-        }
-
-        row[`dist_${eefName}_to_${keypointName}_m`] = distanceXYZ(
-          eefXYZ,
-          keypointPositions[keypointName] ?? null,
-        );
-      }
-    }
-
-    for (const [metricName, srcName, dstName, threshold] of TRACE_SUCCESS_DISTANCE_SPECS) {
-      const distance = distanceXYZ(
-        keypointPositions[srcName] ?? null,
-        keypointPositions[dstName] ?? null,
+    for (const segment of segments) {
+      const jointCount = Math.min(
+        segment.targetEnd - segment.targetStart + 1,
+        segment.obsEnd - segment.obsStart + 1,
       );
-
-      row[`dist_${metricName}_m`] = distance;
-      row[`threshold_${metricName}_m`] = roundFloat(threshold);
-      row[`pass_${metricName}`] = distance == null ? null : Number(distance <= threshold);
+      for (let offset = 0; offset < jointCount; offset += 1) {
+        const targetCol = segment.targetStart + offset;
+        const obsCol = segment.obsStart + offset;
+        row[`joint_target_${segment.name}_${targetCol}`] = extractColumnAtStep(
+          actionsJoints,
+          stepIdx,
+          targetCol,
+        );
+        row[`joint_obs_${segment.name}_${targetCol}`] = extractColumnAtStep(
+          obsJointPosition,
+          stepIdx,
+          obsCol,
+        );
+      }
     }
 
     rows.push(row);
@@ -2038,7 +2352,7 @@ function loadDemoVideo(
   };
 }
 
-async function openLocalSource(file: File) {
+async function openLocalSource(file: File): Promise<OpenSourceResultPayload> {
   const module = await ensureModule();
   const { FS } = module;
   const mountPoint = `/${uniqueName(`workerfs-${sanitizeFilename(file.name)}`)}`;
@@ -2049,11 +2363,14 @@ async function openLocalSource(file: File) {
 
   const h5File = new h5wasm.File(workerFsPath, 'r');
   const demos = listDemos(h5File);
+  const articulation = readArticulation(h5File);
   const sourceId = uniqueName('source');
+  const datasetName = stripExtension(file.name);
 
   openSources.set(sourceId, {
-    datasetName: stripExtension(file.name),
+    datasetName,
     demos,
+    articulation,
     h5File,
     cleanup: () => {
       try {
@@ -2076,14 +2393,10 @@ async function openLocalSource(file: File) {
     },
   });
 
-  return {
-    sourceId,
-    datasetName: stripExtension(file.name),
-    demos,
-  };
+  return { sourceId, datasetName, demos, articulation };
 }
 
-async function openRemoteSource(buffer: ArrayBuffer, name: string) {
+async function openRemoteSource(buffer: ArrayBuffer, name: string): Promise<OpenSourceResultPayload> {
   const module = await ensureModule();
   const { FS } = module;
   const fsName = `/${uniqueName(sanitizeFilename(name))}`;
@@ -2091,11 +2404,14 @@ async function openRemoteSource(buffer: ArrayBuffer, name: string) {
   FS.writeFile(fsName, new Uint8Array(buffer), { flags: 'w+' });
   const h5File = new h5wasm.File(fsName, 'r');
   const demos = listDemos(h5File);
+  const articulation = readArticulation(h5File);
   const sourceId = uniqueName('source');
+  const datasetName = stripExtension(name);
 
   openSources.set(sourceId, {
-    datasetName: stripExtension(name),
+    datasetName,
     demos,
+    articulation,
     h5File,
     cleanup: () => {
       try {
@@ -2112,11 +2428,7 @@ async function openRemoteSource(buffer: ArrayBuffer, name: string) {
     },
   });
 
-  return {
-    sourceId,
-    datasetName: stripExtension(name),
-    demos,
-  };
+  return { sourceId, datasetName, demos, articulation };
 }
 
 async function closeSource(sourceId: string) {

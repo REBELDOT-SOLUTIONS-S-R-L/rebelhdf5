@@ -1,5 +1,7 @@
 'use strict';
 
+const fsp = require('node:fs/promises');
+
 const { contextBridge, webUtils } = require('electron');
 
 function readNumberArg(name) {
@@ -19,5 +21,16 @@ contextBridge.exposeInMainWorld('rebelHdf5Desktop', {
     }
 
     return webUtils.getPathForFile(file) || undefined;
+  },
+  async readFile(path) {
+    if (typeof path !== 'string' || path.length === 0) {
+      throw new TypeError('readFile: path must be a non-empty string');
+    }
+
+    const buffer = await fsp.readFile(path);
+    return buffer.buffer.slice(
+      buffer.byteOffset,
+      buffer.byteOffset + buffer.byteLength,
+    );
   },
 });

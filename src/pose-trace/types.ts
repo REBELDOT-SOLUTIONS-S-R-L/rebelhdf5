@@ -170,9 +170,33 @@ export interface DemoRow {
   [key: string]: string | number | null;
 }
 
+export interface ArticulationSegment {
+  name: string;
+  targetStart: number;
+  targetEnd: number;
+  obsStart: number;
+  obsEnd: number;
+}
+
+export interface ArticulationEndEffector {
+  name: string;
+  poseStart: number;
+  poseEnd: number;
+  gripperStart: number | null;
+  gripperEnd: number | null;
+}
+
+export interface ParsedArticulation {
+  name: string;
+  jointNumber: number | null;
+  segmentation: ArticulationSegment[];
+  endEffectors: ArticulationEndEffector[];
+}
+
 export interface PoseTraceSource {
   sourceId: string;
   datasetName: string;
   demos: DemoInfo[];
+  articulation: ParsedArticulation | null;
   cleanup: () => void;
 }

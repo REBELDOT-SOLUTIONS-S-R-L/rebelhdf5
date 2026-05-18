@@ -129,11 +129,7 @@ function buildAttributeTree(attributes: DatasetAttributesResult): AttributeTreeN
           name: 'segmentation',
           path: 'articulation/segmentation',
           value: segmentationChildren.length === 0 ? 'empty' : undefined,
-          children: [
-            createLeaf('articulation/segmentation/target', 'target', null),
-            createLeaf('articulation/segmentation/obs', 'obs', null),
-            ...segmentationChildren,
-          ],
+          children: segmentationChildren,
         },
         {
           name: 'end_effectors',
@@ -184,7 +180,7 @@ function AttributeTreeItem({
   return (
     <div
       className={styles.treeLeaf}
-      style={{ paddingLeft: `${depth * 1.1 + 0.75}rem` }}
+      style={{ paddingLeft: `${depth * 1.1}rem` }}
       title={node.path}
     >
       <FiFile aria-hidden className={styles.treeLeafIcon} />

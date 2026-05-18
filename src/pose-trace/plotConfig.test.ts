@@ -1,16 +1,18 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  build2DData,
-  build2DLayout,
   build3DData,
   build3DDataForStep,
   build3DLayout,
   buildClothDistributionData,
   buildClothDistributionLayout,
   buildEmptyLayout,
+  buildJointChartData,
+  buildJointChartLayout,
+  getJointChartSpecs,
 } from './plotConfig';
 import type {
+  ArticulationSegment,
   ClothDistributionPoint,
   ClothDistributionResult,
   DemoRow,
@@ -72,32 +74,63 @@ describe('buildEmptyLayout', () => {
   });
 });
 
-describe('build2DData', () => {
-  it('returns no traces for an empty rows array', () => {
-    expect(build2DData([], 'left')).toEqual([]);
+describe('getJointChartSpecs', () => {
+  function segment(overrides: Partial<ArticulationSegment> = {}): ArticulationSegment {
+    return {
+      name: 'left_arm',
+      targetStart: 0,
+      targetEnd: 4,
+      obsStart: 0,
+      obsEnd: 4,
+      ...overrides,
+    };
+  }
+
+  it('expands a single segment into one spec per joint (inclusive range)', () => {
+    const specs = getJointChartSpecs([segment()]);
+    expect(specs).toHaveLength(5);
+    expect(specs.map((spec) => spec.jointIndex)).toEqual([0, 1, 2, 3, 4]);
   });
 
-  it('produces traces for the requested side only', () => {
-    const rows = Array.from({ length: 5 }, (_, i) => makeRow(i));
-    const leftTraces = build2DData(rows, 'left') as Array<{ name?: string }>;
-    expect(leftTraces.length).toBeGreaterThan(0);
-    for (const trace of leftTraces) {
-      // Side label is part of the human-friendly trace name.
-      expect(trace.name?.toLowerCase()).not.toContain('right');
-    }
+  it('uses the smaller of target and obs lengths when ranges differ', () => {
+    const specs = getJointChartSpecs([
+      segment({ targetEnd: 5, obsEnd: 3 }),
+    ]);
+    expect(specs).toHaveLength(4);
   });
 });
 
-describe('build2DLayout', () => {
-  it('emits three subplot rows with the side prefix in the annotations', () => {
-    const layout = build2DLayout([], 'left');
-    expect(layout.height).toBe(980);
-    const annotations = layout.annotations ?? [];
-    expect(annotations).toHaveLength(3);
-    for (const annotation of annotations) {
-      const text = (annotation as { text?: string }).text ?? '';
-      expect(text.toLowerCase()).toContain('left');
-    }
+describe('buildJointChartData', () => {
+  it('returns no traces for empty rows', () => {
+    expect(
+      buildJointChartData([], { segmentName: 'left_arm', jointIndex: 0 }),
+    ).toEqual([]);
+  });
+
+  it('returns one trace per non-empty joint series', () => {
+    const rows = Array.from({ length: 3 }, (_, i) =>
+      makeRow(i, {
+        joint_target_left_arm_0: i * 0.1,
+        joint_obs_left_arm_0: i * 0.1 + 0.01,
+      }),
+    );
+    const traces = buildJointChartData(rows, {
+      segmentName: 'left_arm',
+      jointIndex: 0,
+    }) as Array<{ name?: string }>;
+    expect(traces).toHaveLength(2);
+    expect(traces.map((trace) => trace.name)).toEqual(['target', 'obs']);
+  });
+});
+
+describe('buildJointChartLayout', () => {
+  it('titles the chart with `<segment>: <joint>`', () => {
+    const layout = buildJointChartLayout({
+      segmentName: 'left_arm',
+      jointIndex: 3,
+    });
+    const title = layout.title as { text?: string } | undefined;
+    expect(title?.text).toBe('left_arm: 3');
   });
 });
 

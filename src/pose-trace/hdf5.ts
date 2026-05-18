@@ -12,6 +12,7 @@ import type {
   DemoVideoFrames,
   DemoVideoInfo,
   DemoVideoKey,
+  ParsedArticulation,
   PoseTraceSource,
 } from './types';
 
@@ -55,6 +56,7 @@ type OpenSourceResult = {
   sourceId: string;
   datasetName: string;
   demos: DemoInfo[];
+  articulation: ParsedArticulation | null;
 };
 
 type LoadDemoVideoResult = DemoVideoInfo & {
@@ -165,11 +167,41 @@ function callWorker<T>(
   });
 }
 
+async function readLocalFileFresh(serverPath: string): Promise<ArrayBuffer | null> {
+  const readFile = globalThis.rebelHdf5Desktop?.readFile;
+  if (typeof readFile !== 'function') {
+    return null;
+  }
+
+  try {
+    return await readFile(serverPath);
+  } catch {
+    return null;
+  }
+}
+
 export async function openPoseTraceSource(file: H5File): Promise<PoseTraceSource> {
   let result: OpenSourceResult;
 
   if (file.service === FileService.Local) {
-    result = await callWorker<OpenSourceResult>('openLocalSource', { file: file.file });
+    // Prefer reading fresh bytes from disk via the Electron preload when
+    // possible. The in-memory File blob becomes unreadable after the file is
+    // modified externally (e.g. articulation attrs rewritten through the
+    // Python backend), so the WORKERFS mount path fails with a stale-
+    // reference FileReaderSync error.
+    const freshBuffer = file.serverPath
+      ? await readLocalFileFresh(file.serverPath)
+      : null;
+
+    if (freshBuffer) {
+      result = await callWorker<OpenSourceResult>(
+        'openRemoteSource',
+        { buffer: freshBuffer, name: file.name },
+        [freshBuffer],
+      );
+    } else {
+      result = await callWorker<OpenSourceResult>('openLocalSource', { file: file.file });
+    }
   } else {
     const buffer = await fetchBuffer(file.resolvedUrl);
     result = await callWorker<OpenSourceResult>(
@@ -183,6 +215,7 @@ export async function openPoseTraceSource(file: H5File): Promise<PoseTraceSource
     sourceId: result.sourceId,
     datasetName: result.datasetName || stripExtension(file.name),
     demos: result.demos,
+    articulation: result.articulation,
     cleanup: () => {
       void callWorker<null>('closeSource', { sourceId: result.sourceId }).catch(() => {
         // Ignore best-effort cleanup failures during route changes/unmounts.

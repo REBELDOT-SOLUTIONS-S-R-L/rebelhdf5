@@ -4,6 +4,7 @@ import type { Data, Layout } from 'plotly.js';
 import type { FailurePlane, FailureSlice } from './clothAnalysis';
 import { humanizeColumnName, type Trace3DSpec } from './schema';
 import type {
+  ArticulationSegment,
   ClothDistributionAnchor,
   ClothDistributionPoint,
   ClothDistributionResult,
@@ -11,13 +12,6 @@ import type {
   DemoRow,
 } from './types';
 
-export interface Trace2DGroup {
-  id: string;
-  label: string;
-  eefName: string | null;
-}
-
-type LegendId = 'legend' | 'legend2' | 'legend3';
 type SceneVector = { x?: number; y?: number; z?: number };
 
 export interface PlotSceneCamera {
@@ -58,18 +52,6 @@ const TRACE_COLORS = [
   '#e377c2',
   '#bcbd22',
   '#7f7f7f',
-];
-
-const SUBPLOT_DOMAINS: [number, number][] = [
-  [0.74, 1.0],
-  [0.4, 0.62],
-  [0.06, 0.28],
-];
-
-const SUBPLOT_TITLES = [
-  'EEF To Keypoint Distances',
-  'Garment Fold-Term Distances',
-  'EEF And Garment Keypoint Heights',
 ];
 
 interface PlotTheme {
@@ -140,20 +122,6 @@ function coordinatePrefixes(rows: DemoRow[]): string[] {
 
 function entityNameFromPrefix(prefix: string, typePrefix: string): string {
   return prefix.slice(typePrefix.length);
-}
-
-function eefNames(rows: DemoRow[]): string[] {
-  return coordinatePrefixes(rows)
-    .filter((prefix) => prefix.startsWith('eef_') && !prefix.startsWith('eef_post_step_'))
-    .map((prefix) => entityNameFromPrefix(prefix, 'eef_'))
-    .sort((left, right) => left.localeCompare(right));
-}
-
-function likelySideForName(name: string): 'left' | 'right' | null {
-  const normalized = name.toLowerCase();
-  if (normalized.includes('left')) return 'left';
-  if (normalized.includes('right')) return 'right';
-  return null;
 }
 
 function colorAt(index: number): string {
@@ -272,84 +240,6 @@ export function getDefaultHidden3DTraceGroups(rows: DemoRow[]): Set<string> {
   );
 }
 
-export function get2DTraceGroups(rows: DemoRow[]): Trace2DGroup[] {
-  const names = eefNames(rows);
-  if (names.length === 0) {
-    return [{ id: 'all', label: 'Pose Metrics', eefName: null }];
-  }
-
-  return names.map((name) => ({
-    id: name,
-    label: `${humanizeColumnName(name)} EEF`,
-    eefName: name,
-  }));
-}
-
-function columnAppliesToGroup(column: string, group: Trace2DGroup): boolean {
-  if (!group.eefName) {
-    return true;
-  }
-
-  const side = likelySideForName(group.eefName);
-  const isObjectZ = column.endsWith('_z')
-    && (column.startsWith('object_') || column.startsWith('keypoint_'));
-  if (isObjectZ) {
-    return side == null || column.includes(`_${side}_`);
-  }
-
-  return column.startsWith(`dist_${group.eefName}_to_`)
-    || column === `eef_${group.eefName}_z`
-    || column === `target_eef_${group.eefName}_z`
-    || column === `ik_input_eef_${group.eefName}_z`
-    || column === `eef_post_step_${group.eefName}_z`
-    || (side != null && column.includes(`_${side}_`))
-    || (!column.startsWith('dist_') && !column.includes('_eef_') && !column.startsWith('eef_'));
-}
-
-function isEefObjectDistanceColumn(column: string): boolean {
-  return /^dist_.+_to_.+_m$/.test(column);
-}
-
-function isTermDistanceColumn(column: string): boolean {
-  return column.startsWith('dist_') && column.endsWith('_m') && !isEefObjectDistanceColumn(column);
-}
-
-function isZColumn(column: string): boolean {
-  return column.endsWith('_z')
-    && (
-      column.startsWith('eef_')
-      || column.startsWith('target_eef_')
-      || column.startsWith('ik_input_eef_')
-      || column.startsWith('eef_post_step_')
-      || column.startsWith('object_')
-      || column.startsWith('keypoint_')
-    );
-}
-
-function build2DLegendLabel(column: string, group: Trace2DGroup): string {
-  let label = humanizeColumnName(column);
-
-  if (group.eefName) {
-    label = label.replaceAll(group.eefName.replaceAll('_', ' '), 'eef');
-  }
-
-  label = label.replaceAll('garment ', '');
-  return label.trim();
-}
-
-function buildLegendLayout(theme: PlotTheme, y: number): Partial<Layout['legend']> {
-  return {
-    orientation: 'h',
-    yanchor: 'top',
-    y,
-    xanchor: 'center',
-    x: 0.5,
-    bgcolor: theme.legendBg,
-    bordercolor: theme.legendBorder,
-    borderwidth: 1,
-    font: { color: theme.textColor, family: FONT_FAMILY, size: 10 },
-  };
-}
 
 function build3DPoints(rows: DemoRow[], prefix: string): TracePoint3D[] {
   const points: TracePoint3D[] = [];
@@ -984,105 +874,77 @@ export function buildFailureSliceLayout(
   return layout;
 }
 
-export function build2DData(rows: DemoRow[], group: Trace2DGroup): Data[] {
+export interface JointChartSpec {
+  segmentName: string;
+  jointIndex: number;
+}
+
+function jointTargetKey(spec: JointChartSpec): string {
+  return `joint_target_${spec.segmentName}_${spec.jointIndex}`;
+}
+
+function jointObsKey(spec: JointChartSpec): string {
+  return `joint_obs_${spec.segmentName}_${spec.jointIndex}`;
+}
+
+export function getJointChartSpecs(
+  segments: readonly ArticulationSegment[],
+): JointChartSpec[] {
+  const specs: JointChartSpec[] = [];
+  for (const segment of segments) {
+    const jointCount = Math.min(
+      segment.targetEnd - segment.targetStart + 1,
+      segment.obsEnd - segment.obsStart + 1,
+    );
+    for (let offset = 0; offset < jointCount; offset += 1) {
+      specs.push({
+        segmentName: segment.name,
+        jointIndex: segment.targetStart + offset,
+      });
+    }
+  }
+  return specs;
+}
+
+export function buildJointChartData(
+  rows: DemoRow[],
+  spec: JointChartSpec,
+): Data[] {
   if (rows.length === 0) {
     return [];
   }
 
   const x = xAxis(rows);
-  const traces: Array<Data & { legend?: LegendId }> = [];
-  const keys = collectRowKeys(rows);
+  const targetValues = series(rows, jointTargetKey(spec));
+  const obsValues = series(rows, jointObsKey(spec));
+  const traces: Data[] = [];
 
-  for (const column of keys.filter(isEefObjectDistanceColumn)) {
-    if (!columnAppliesToGroup(column, group)) {
-      continue;
-    }
-
-    const values = series(rows, column);
-    if (!hasValues(values)) {
-      continue;
-    }
-
+  if (hasValues(targetValues)) {
     traces.push({
       type: 'scatter',
       x,
-      y: values,
+      y: targetValues,
       mode: 'lines',
-      name: build2DLegendLabel(column, group),
-      legend: 'legend',
-      line: { width: 2.4 },
-      yaxis: 'y',
+      name: 'target',
+      line: { color: '#d62728', width: 2.4 },
     });
   }
 
-  for (const distanceColumn of keys.filter(isTermDistanceColumn)) {
-    if (!columnAppliesToGroup(distanceColumn, group)) {
-      continue;
-    }
-
-    const values = series(rows, distanceColumn);
-    if (!hasValues(values)) {
-      continue;
-    }
-
-    const traceName = build2DLegendLabel(distanceColumn, group);
-    const thresholdColumn = distanceColumn.replace(/^dist_/u, 'threshold_');
+  if (hasValues(obsValues)) {
     traces.push({
       type: 'scatter',
       x,
-      y: values,
+      y: obsValues,
       mode: 'lines',
-      name: traceName,
-      legend: 'legend2',
-      line: { width: 2.4 },
-      xaxis: 'x2',
-      yaxis: 'y2',
-    });
-
-    const thresholdValue = rows.find((row) => row[thresholdColumn] != null)?.[thresholdColumn];
-    if (typeof thresholdValue === 'number' && x.length > 0) {
-      traces.push({
-        type: 'scatter',
-        x: [x[0], x[x.length - 1]],
-        y: [thresholdValue, thresholdValue],
-        mode: 'lines',
-        name: `${traceName} threshold`,
-        legend: 'legend2',
-        line: { dash: 'dash', width: 1.6 },
-        showlegend: false,
-        xaxis: 'x2',
-        yaxis: 'y2',
-      });
-    }
-  }
-
-  for (const column of keys.filter(isZColumn)) {
-    if (!columnAppliesToGroup(column, group)) {
-      continue;
-    }
-
-    const values = series(rows, column);
-    if (!hasValues(values)) {
-      continue;
-    }
-
-    traces.push({
-      type: 'scatter',
-      x,
-      y: values,
-      mode: 'lines',
-      name: build2DLegendLabel(column, group),
-      legend: 'legend3',
-      line: { width: 2.2 },
-      xaxis: 'x3',
-      yaxis: 'y3',
+      name: 'obs',
+      line: { color: '#1f77b4', width: 2.4 },
     });
   }
 
-  return traces as Data[];
+  return traces;
 }
 
-export function build2DLayout(_rows: DemoRow[], group: Trace2DGroup): Partial<Layout> {
+export function buildJointChartLayout(spec: JointChartSpec): Partial<Layout> {
   const theme = getPlotTheme();
   const axisBase = {
     showgrid: true,
@@ -1090,40 +952,34 @@ export function build2DLayout(_rows: DemoRow[], group: Trace2DGroup): Partial<La
     zerolinecolor: theme.gridColor,
     color: theme.textColor,
   };
-  const subplotTitles = SUBPLOT_TITLES.map((title) => `${group.label} ${title}`);
-  const layout: Partial<Layout> & {
-    legend2: Partial<Layout['legend']>;
-    legend3: Partial<Layout['legend']>;
-  } = {
+
+  return {
     template: PLOTLY_WHITE_TEMPLATE,
-    height: 980,
+    height: 260,
     paper_bgcolor: theme.paperBg,
     plot_bgcolor: theme.plotBg,
-    font: { color: theme.textColor, family: FONT_FAMILY },
-    legend: buildLegendLayout(theme, 0.705),
-    legend2: buildLegendLayout(theme, 0.365),
-    legend3: buildLegendLayout(theme, -0.06),
-    margin: { l: 60, r: 30, t: 60, b: 160 },
-    xaxis: { ...axisBase, domain: [0, 1], anchor: 'y', matches: 'x3' },
-    yaxis: { ...axisBase, domain: SUBPLOT_DOMAINS[0], title: { text: 'distance [m]' } },
-    xaxis2: { ...axisBase, domain: [0, 1], anchor: 'y2', matches: 'x3' },
-    yaxis2: { ...axisBase, domain: SUBPLOT_DOMAINS[1], title: { text: 'distance [m]' } },
-    xaxis3: { ...axisBase, domain: [0, 1], anchor: 'y3', title: { text: 'episode_step' } },
-    yaxis3: { ...axisBase, domain: SUBPLOT_DOMAINS[2], title: { text: 'z [m]' } },
-    annotations: subplotTitles.map((text, index) => ({
-      text,
-      x: 0.5,
-      y: SUBPLOT_DOMAINS[index][1],
-      xref: 'paper',
-      yref: 'paper',
-      xanchor: 'center',
+    font: { color: theme.textColor, family: FONT_FAMILY, size: 11 },
+    margin: { l: 50, r: 16, t: 36, b: 36 },
+    title: {
+      text: `${spec.segmentName}: ${spec.jointIndex}`,
+      x: 0.02,
+      xanchor: 'left',
+      font: { color: theme.textColor, family: FONT_FAMILY, size: 13 },
+    },
+    legend: {
+      orientation: 'h',
       yanchor: 'bottom',
-      showarrow: false,
-      font: { color: theme.textColor, family: FONT_FAMILY, size: 14 },
-    })),
+      y: 1.02,
+      xanchor: 'right',
+      x: 1,
+      bgcolor: theme.legendBg,
+      bordercolor: theme.legendBorder,
+      borderwidth: 1,
+      font: { color: theme.textColor, family: FONT_FAMILY, size: 10 },
+    },
+    xaxis: { ...axisBase, title: { text: 'episode_step' } },
+    yaxis: { ...axisBase },
   };
-
-  return layout;
 }
 
 export function build3DData(rows: DemoRow[]): Data[] {
