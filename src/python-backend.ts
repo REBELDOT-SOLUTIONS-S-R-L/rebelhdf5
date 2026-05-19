@@ -92,11 +92,17 @@ export interface DatasetArticulation {
   end_effectors: Record<string, DatasetArticulationEndEffector>;
 }
 
+export interface DatasetAttributeGroup {
+  path: string;
+  attrs: Record<string, unknown>;
+}
+
 export interface DatasetAttributesResult {
   path: string;
   attrs: Record<string, unknown>;
   articulation: DatasetArticulation;
   articulationSource: 'attribute' | 'group' | 'default';
+  groups?: DatasetAttributeGroup[];
 }
 
 export interface PythonProcessRequest {

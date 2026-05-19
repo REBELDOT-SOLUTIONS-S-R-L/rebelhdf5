@@ -211,6 +211,51 @@ def _read_articulation_group(data_group: h5py.Group) -> dict[str, Any] | None:
     return normalize_articulation(payload)
 
 
+def _attrs_to_dict(obj: h5py.HLObject) -> dict[str, Any]:
+    return {name: _jsonable(value) for name, value in obj.attrs.items()}
+
+
+def _collect_attribute_groups(f: h5py.File) -> list[dict[str, Any]]:
+    """Walk the file and collect every group/dataset's attrs.
+
+    Demos under /data share a schema, so only the first demo's subtree is
+    included; later siblings (demo_1, demo_2, ...) are skipped to avoid
+    noisy duplication. Slash-prefixed attribute names are returned as-is;
+    the UI is responsible for splitting them into a nested tree.
+    """
+    results: list[dict[str, Any]] = []
+
+    def _add(path: str, attrs: dict[str, Any]) -> None:
+        if attrs:
+            results.append({"path": path, "attrs": attrs})
+
+    _add("/", _attrs_to_dict(f))
+
+    skipped_demo_prefixes: tuple[str, ...] = ()
+    data = f.get("data")
+    if isinstance(data, h5py.Group):
+        demo_children = sort_demo_names([
+            name for name, obj in data.items()
+            if isinstance(obj, h5py.Group) and (
+                name.startswith("demo_") or name.startswith("demo-")
+            )
+        ])
+        if len(demo_children) > 1:
+            skipped_demo_prefixes = tuple(
+                f"data/{name}" for name in demo_children[1:]
+            )
+
+    def _visit(name: str, obj: h5py.HLObject) -> None:
+        for prefix in skipped_demo_prefixes:
+            if name == prefix or name.startswith(prefix + "/"):
+                return
+        _add(f"/{name}", _attrs_to_dict(obj))
+
+    f.visititems(_visit)
+
+    return results
+
+
 def read_dataset_attributes(file_path: Path) -> dict[str, Any]:
     with h5py.File(file_path, "r") as f:
         data = require_data_group(f, file_path)
@@ -235,11 +280,14 @@ def read_dataset_attributes(file_path: Path) -> dict[str, Any]:
                 articulation = articulation_group
                 source = "group"
 
+        groups = _collect_attribute_groups(f)
+
         return {
             "path": str(file_path),
             "attrs": attrs,
             "articulation": articulation,
             "articulationSource": source,
+            "groups": groups,
         }
 
 
@@ -260,14 +308,16 @@ def write_dataset_articulation(file_path: Path, articulation: Any) -> dict[str, 
         data.attrs.create("articulation/name", normalized["name"])
         if normalized["joint_number"] is not None:
             data.attrs.create("articulation/joint_number", normalized["joint_number"])
-        data.attrs.create(
-            "articulation/segmentation",
-            json.dumps(normalized["segmentation"], sort_keys=True),
-        )
-        data.attrs.create(
-            "articulation/end_effectors",
-            json.dumps(normalized["end_effectors"], sort_keys=True),
-        )
+        if normalized["segmentation"]:
+            data.attrs.create(
+                "articulation/segmentation",
+                json.dumps(normalized["segmentation"], sort_keys=True),
+            )
+        if normalized["end_effectors"]:
+            data.attrs.create(
+                "articulation/end_effectors",
+                json.dumps(normalized["end_effectors"], sort_keys=True),
+            )
 
     return read_dataset_attributes(file_path)
 
