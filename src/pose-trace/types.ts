@@ -10,29 +10,10 @@ export interface DemoInfo {
 // (new standard schema) with legacy fallback to direct datasets under `obs/`.
 export type DemoVideoKey = string;
 
-export const CLOTH_DISTRIBUTION_DIRECT_ANCHORS = [
-  'garment_left_lower',
-  'garment_left_middle',
-  'garment_left_upper',
-  'garment_right_lower',
-  'garment_right_middle',
-  'garment_right_upper',
-] as const;
-
-export const CLOTH_DISTRIBUTION_DERIVED_ANCHORS = [
-  'garment_center',
-  'garment_lower_center',
-  'garment_upper_center',
-] as const;
-
-export const CLOTH_DISTRIBUTION_ANCHORS = [
-  'initial_pose',
-  ...CLOTH_DISTRIBUTION_DIRECT_ANCHORS,
-  ...CLOTH_DISTRIBUTION_DERIVED_ANCHORS,
-] as const;
+export const CLOTH_DISTRIBUTION_ANCHORS = ['initial_pose'] as const;
 
 export type ClothDistributionAnchor = (typeof CLOTH_DISTRIBUTION_ANCHORS)[number];
-export const DEFAULT_CLOTH_DISTRIBUTION_ANCHOR: ClothDistributionAnchor = 'garment_center';
+export const DEFAULT_CLOTH_DISTRIBUTION_ANCHOR: ClothDistributionAnchor = 'initial_pose';
 
 export type ClothDistributionCategory = 'success' | 'failed' | 'teleop';
 

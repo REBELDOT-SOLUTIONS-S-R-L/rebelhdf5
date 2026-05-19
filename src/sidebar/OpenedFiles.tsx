@@ -46,8 +46,8 @@ function OpenedFiles() {
           ? '/dataset-processing'
           : location.pathname === '/dataset-attributes'
             ? '/dataset-attributes'
-            : location.pathname === '/cloth-distribution'
-              ? '/cloth-distribution'
+            : location.pathname === '/object-distribution'
+              ? '/object-distribution'
               : '/view'
   );
 

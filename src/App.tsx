@@ -7,7 +7,7 @@ import styles from './ErrorFallback.module.css';
 import Layout from './Layout';
 import Loader from './Loader';
 
-const ClothDistributionPage = lazy(async () => import('./ClothDistributionPage'));
+const ObjectDistributionPage = lazy(async () => import('./ObjectDistributionPage'));
 const DatasetAttributesPage = lazy(async () => import('./DatasetAttributesPage'));
 const DatabricksPage = lazy(async () => import('./DatabricksPage'));
 const DatasetProcessingPage = lazy(async () => import('./DatasetProcessingPage'));
@@ -51,7 +51,7 @@ function App() {
               <Route path="/video-converter" element={<VideoConverterPage />} />
               <Route path="/dataset-processing" element={<DatasetProcessingPage />} />
               <Route path="/dataset-attributes" element={<DatasetAttributesPage />} />
-              <Route path="/cloth-distribution" element={<ClothDistributionPage />} />
+              <Route path="/object-distribution" element={<ObjectDistributionPage />} />
               <Route path="/databricks" element={<DatabricksPage />} />
             </Routes>
           </Suspense>

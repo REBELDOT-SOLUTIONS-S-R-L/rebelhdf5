@@ -14,15 +14,13 @@ import {
   buildFailureSliceLayout,
 } from './pose-trace/plotConfig';
 import {
-  CLOTH_DISTRIBUTION_ANCHORS,
   DEFAULT_CLOTH_DISTRIBUTION_ANCHOR,
-  type ClothDistributionAnchor,
   type ClothDistributionPoint,
   type ClothDistributionResult,
   type PoseTraceSource,
 } from './pose-trace/types';
 import { type H5File, useStore } from './stores';
-import styles from './ClothDistributionPage.module.css';
+import styles from './ObjectDistributionPage.module.css';
 
 type ClothViewTab = 'scatter' | 'position' | 'rotation' | 'slices';
 
@@ -125,14 +123,6 @@ function guessTeleopDataset(files: H5File[]): string | null {
   return files.find(looksLikeTeleop)?.url ?? null;
 }
 
-function anchorLabel(anchor: ClothDistributionAnchor): string {
-  if (anchor === 'initial_pose') {
-    return 'Initial Pose';
-  }
-
-  return anchor.replaceAll('_', ' ');
-}
-
 function analysisTitle(tab: ClothViewTab): string {
   if (tab === 'position') {
     return 'Position Failure Map';
@@ -191,10 +181,10 @@ function resolveClickedPoint(
 function EmptyState({ openedFileCount }: { openedFileCount: number }) {
   return (
     <div className={styles.emptyState}>
-      <h2 className={styles.emptyTitle}>Cloth Distribution</h2>
+      <h2 className={styles.emptyTitle}>Object Distribution</h2>
       <p className={styles.emptyText}>
         Open HDF5 files in rebelHDF5, then use this page to compare generated datasets, inspect
-        source-demo links, and analyze failure coverage across the cloth reset space.
+        source-demo links, and analyze failure coverage across the object reset space.
       </p>
       <div className={styles.emptyActions}>
         <Link className={styles.openBtn} to="/">
@@ -208,7 +198,7 @@ function EmptyState({ openedFileCount }: { openedFileCount: number }) {
   );
 }
 
-function ClothDistributionPage() {
+function ObjectDistributionPage() {
   const opened = useStore((state) => state.opened);
   const [searchParams] = useSearchParams();
   const activeUrl = searchParams.get('url');
@@ -217,7 +207,7 @@ function ClothDistributionPage() {
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
   const [teleopUrl, setTeleopUrl] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<ClothViewTab>('scatter');
-  const [anchor, setAnchor] = useState<ClothDistributionAnchor>(DEFAULT_CLOTH_DISTRIBUTION_ANCHOR);
+  const anchor = DEFAULT_CLOTH_DISTRIBUTION_ANCHOR;
   const [includeRandomSelections, setIncludeRandomSelections] = useState(false);
   const [showTeleopOverlay, setShowTeleopOverlay] = useState(true);
   const [minGeneratedCount, setMinGeneratedCount] = useState(3);
@@ -378,7 +368,7 @@ function ClothDistributionPage() {
 
   const analysisMessage = useMemo(() => {
     if (loading) {
-      return 'Loading cloth-distribution data…';
+      return 'Loading object-distribution data…';
     }
 
     if (!hasAnalysisDatasets) {
@@ -409,16 +399,12 @@ function ClothDistributionPage() {
       return '';
     }
 
-    if (diagnostics.missingAnchorCount === diagnostics.totalDemos && anchor === 'initial_pose') {
-      return 'Selected teleop dataset does not expose initial-state poses, so it cannot be plotted with Anchor = Initial Pose. Switch to a garment anchor such as garment_center.';
+    if (diagnostics.missingAnchorCount === diagnostics.totalDemos) {
+      return 'Selected teleop dataset does not expose initial_state/rigid_objects/<name>/initial_pose, so it cannot be plotted.';
     }
 
-    if (diagnostics.missingObjectPositionsCount === diagnostics.totalDemos) {
-      return 'Selected teleop dataset does not expose the garment object-pose keypoints required by cloth distribution.';
-    }
-
-    return `Selected teleop dataset contributed 0 of ${diagnostics.totalDemos} demos for the current anchor.`;
-  }, [anchor, loadError, loading, result, teleopState.source, teleopUrl]);
+    return `Selected teleop dataset contributed 0 of ${diagnostics.totalDemos} demos for the initial pose.`;
+  }, [loadError, loading, result, teleopState.source, teleopUrl]);
 
   const plotRevision = useMemo(
     () => hashRevisionKey([
@@ -472,8 +458,8 @@ function ClothDistributionPage() {
       return buildEmptyLayout(
         'Cloth Distribution',
         loading
-          ? 'Loading cloth-distribution data…'
-          : 'Select dataset files and an anchor to render the cloth-distribution scatter plot.',
+          ? 'Loading object-distribution data…'
+          : 'Select dataset files to render the initial-pose scatter plot.',
       );
     }
 
@@ -497,10 +483,10 @@ function ClothDistributionPage() {
       <header className={styles.header}>
         <div>
           <p className={styles.eyebrow}>Distribution</p>
-          <h1 className={styles.title}>Cloth Distribution</h1>
+          <h1 className={styles.title}>Object Distribution</h1>
           <p className={styles.subtitle}>
-            Compare generated datasets, inspect source-demo links, and map failure coverage over the
-            garment reset space. Use the analysis tabs to find under-covered teleop regions.
+            Compare generated datasets and map failure coverage over the object initial-pose reset
+            space. Use the analysis tabs to find under-covered teleop regions.
           </p>
         </div>
       </header>
@@ -510,7 +496,7 @@ function ClothDistributionPage() {
       {opened.length > 0 && (
         <>
           <section className={styles.controlsCard}>
-            <div className={styles.tabBar} role="tablist" aria-label="Cloth distribution views">
+            <div className={styles.tabBar} role="tablist" aria-label="Object distribution views">
               {VIEW_TABS.map((tab) => (
                 <button
                   key={tab.id}
@@ -592,39 +578,17 @@ function ClothDistributionPage() {
               </div>
 
               {activeTab === 'scatter' ? (
-                <>
-                  <div className={styles.field}>
-                    <label className={styles.fieldLabel} htmlFor="cloth-anchor">
-                      Anchor
-                    </label>
-                    <select
-                      id="cloth-anchor"
-                      className={styles.select}
-                      value={anchor}
-                      onChange={(event) => {
-                        setAnchor(event.target.value as ClothDistributionAnchor);
-                      }}
-                    >
-                      {CLOTH_DISTRIBUTION_ANCHORS.map((anchorOption) => (
-                        <option key={anchorOption} value={anchorOption}>
-                          {anchorLabel(anchorOption)}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <label className={styles.checkboxField} htmlFor="cloth-include-random">
-                    <input
-                      id="cloth-include-random"
-                      type="checkbox"
-                      checked={includeRandomSelections}
-                      onChange={(event) => {
-                        setIncludeRandomSelections(event.target.checked);
-                      }}
-                    />
-                    <span>Include random source selections in highlighted demos</span>
-                  </label>
-                </>
+                <label className={styles.checkboxField} htmlFor="cloth-include-random">
+                  <input
+                    id="cloth-include-random"
+                    type="checkbox"
+                    checked={includeRandomSelections}
+                    onChange={(event) => {
+                      setIncludeRandomSelections(event.target.checked);
+                    }}
+                  />
+                  <span>Include random source selections in highlighted demos</span>
+                </label>
               ) : (
                 <>
                   <div className={styles.field}>
@@ -676,11 +640,7 @@ function ClothDistributionPage() {
                 <span className={styles.statusKey}>Teleop:</span> {result?.teleopPoints.length ?? 0}
               </div>
 
-              {activeTab === 'scatter' ? (
-                <div className={styles.statusItem}>
-                  <span className={styles.statusKey}>Anchor:</span> {anchorLabel(anchor)}
-                </div>
-              ) : (
+              {activeTab !== 'scatter' && (
                 <>
                   <div className={styles.statusItem}>
                     <span className={styles.statusKey}>Analyzed Generated:</span>{' '}
@@ -705,7 +665,7 @@ function ClothDistributionPage() {
           {(loadError || loading || teleopMessage) && (
             <section className={styles.messageCard}>
               {loadError && <p className={styles.errorText}>{loadError}</p>}
-              {loading && <p className={styles.infoText}>Loading cloth-distribution data…</p>}
+              {loading && <p className={styles.infoText}>Loading object-distribution data…</p>}
               {!loadError && !loading && teleopMessage && <p className={styles.infoText}>{teleopMessage}</p>}
             </section>
           )}
@@ -811,4 +771,4 @@ function ClothDistributionPage() {
   );
 }
 
-export default ClothDistributionPage;
+export default ObjectDistributionPage;

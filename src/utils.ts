@@ -8,7 +8,7 @@ import {
 import { FileService, type H5File, type RemoteFile } from './stores';
 
 export function getFileLink(
-  pathname: '/view' | '/pose-trace' | '/video-converter' | '/dataset-processing' | '/dataset-attributes' | '/cloth-distribution',
+  pathname: '/view' | '/pose-trace' | '/video-converter' | '/dataset-processing' | '/dataset-attributes' | '/object-distribution',
   href: string,
 ): string {
   const urlParam = createSearchParams({ url: href });
@@ -35,8 +35,8 @@ export function getDatasetAttributesLink(href: string): string {
   return getFileLink('/dataset-attributes', href);
 }
 
-export function getClothDistributionLink(href: string): string {
-  return getFileLink('/cloth-distribution', href);
+export function getObjectDistributionLink(href: string): string {
+  return getFileLink('/object-distribution', href);
 }
 
 function parseFilename(url: URL): string {

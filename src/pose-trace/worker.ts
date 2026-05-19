@@ -7,11 +7,7 @@ import h5wasm, {
 import { Plugin } from '@h5web/h5wasm';
 
 import { getPlugin } from '../plugin-utils';
-import {
-  CLOTH_DISTRIBUTION_ANCHORS,
-  CLOTH_DISTRIBUTION_DERIVED_ANCHORS,
-  CLOTH_DISTRIBUTION_DIRECT_ANCHORS,
-} from './types';
+import { CLOTH_DISTRIBUTION_ANCHORS } from './types';
 import type {
   ArticulationEndEffector,
   ArticulationJoint,
@@ -164,22 +160,6 @@ const COMMON_CLOTH_KEYPOINTS = [
   'garment_left_upper',
   'garment_right_upper',
 ] as const;
-
-const CLOTH_DISTRIBUTION_DERIVED_ANCHOR_GROUPS: Record<
-  (typeof CLOTH_DISTRIBUTION_DERIVED_ANCHORS)[number],
-  readonly (typeof CLOTH_DISTRIBUTION_DIRECT_ANCHORS)[number][]
-> = {
-  garment_center: [
-    'garment_left_middle',
-    'garment_right_middle',
-    'garment_left_lower',
-    'garment_right_lower',
-    'garment_left_upper',
-    'garment_right_upper',
-  ],
-  garment_lower_center: ['garment_left_lower', 'garment_right_lower'],
-  garment_upper_center: ['garment_left_upper', 'garment_right_upper'],
-};
 
 const CLOTH_SUBTASK_SELECTION_SPECS = {
   left: [
@@ -1444,6 +1424,60 @@ function asPoseMatrix(value: unknown): number[][] | null {
   return value as number[][];
 }
 
+function homogeneousMatrixToPoseVector(matrix: number[][]): number[] | null {
+  if (matrix.length < 3) {
+    return null;
+  }
+  const row0 = matrix[0];
+  const row1 = matrix[1];
+  const row2 = matrix[2];
+  if (row0.length < 4 || row1.length < 4 || row2.length < 4) {
+    return null;
+  }
+
+  const x = row0[3];
+  const y = row1[3];
+  const z = row2[3];
+
+  const r00 = row0[0]; const r01 = row0[1]; const r02 = row0[2];
+  const r10 = row1[0]; const r11 = row1[1]; const r12 = row1[2];
+  const r20 = row2[0]; const r21 = row2[1]; const r22 = row2[2];
+
+  // Shepperd's method: numerically stable rotation matrix → quaternion (wxyz).
+  const trace = r00 + r11 + r22;
+  let qw: number; let qx: number; let qy: number; let qz: number;
+  if (trace > 0) {
+    const s = Math.sqrt(trace + 1) * 2;
+    qw = 0.25 * s;
+    qx = (r21 - r12) / s;
+    qy = (r02 - r20) / s;
+    qz = (r10 - r01) / s;
+  } else if (r00 > r11 && r00 > r22) {
+    const s = Math.sqrt(1 + r00 - r11 - r22) * 2;
+    qw = (r21 - r12) / s;
+    qx = 0.25 * s;
+    qy = (r01 + r10) / s;
+    qz = (r02 + r20) / s;
+  } else if (r11 > r22) {
+    const s = Math.sqrt(1 + r11 - r00 - r22) * 2;
+    qw = (r02 - r20) / s;
+    qx = (r01 + r10) / s;
+    qy = 0.25 * s;
+    qz = (r12 + r21) / s;
+  } else {
+    const s = Math.sqrt(1 + r22 - r00 - r11) * 2;
+    qw = (r10 - r01) / s;
+    qx = (r02 + r20) / s;
+    qy = (r12 + r21) / s;
+    qz = 0.25 * s;
+  }
+
+  if (![x, y, z, qw, qx, qy, qz].every(isFiniteNumber)) {
+    return null;
+  }
+  return [x, y, z, qw, qx, qy, qz];
+}
+
 function readInitialPose(demoGroup: H5WasmGroup): number[] | null {
   // Legacy: a single dataset at `initial_state/garment_initial_pose`.
   const garmentInitialPose = maybeChildDataset(demoGroup, 'initial_state/garment_initial_pose');
@@ -1451,9 +1485,13 @@ function readInitialPose(demoGroup: H5WasmGroup): number[] | null {
     return asNumberVector(readDatasetArray(garmentInitialPose));
   }
 
-  // New standard schema: `initial_state/objects/<name>/initial_pose`.
-  // Legacy variant: `initial_state/garment/<name>/initial_pose`.
-  const objectsRoot = maybeChildGroup(demoGroup, 'initial_state/objects')
+  // Current schema: `initial_state/rigid_objects/<name>/initial_pose`.
+  // The dataset is either a (1, 7) xyz+quat vector or a (1, 4, 4) / (4, 4)
+  // homogeneous transform matrix depending on how the file was authored.
+  // Older variants live under `initial_state/objects/<name>/` and
+  // `initial_state/garment/<name>/`.
+  const objectsRoot = maybeChildGroup(demoGroup, 'initial_state/rigid_objects')
+    ?? maybeChildGroup(demoGroup, 'initial_state/objects')
     ?? maybeChildGroup(demoGroup, 'initial_state/garment');
   if (!objectsRoot) {
     return null;
@@ -1470,9 +1508,19 @@ function readInitialPose(demoGroup: H5WasmGroup): number[] | null {
       continue;
     }
 
-    const pose = asNumberVector(readDatasetArray(initialPose));
-    if (pose) {
-      return pose;
+    const raw = readDatasetArray(initialPose);
+
+    const vector = asNumberVector(raw);
+    if (vector && vector.length >= 2) {
+      return vector;
+    }
+
+    const matrix = asPoseMatrix(raw);
+    if (matrix) {
+      const pose = homogeneousMatrixToPoseVector(matrix);
+      if (pose) {
+        return pose;
+      }
     }
   }
 
@@ -1545,45 +1593,16 @@ function readObjectPosePosition(
 
 function readAnchorXY(
   demoGroup: H5WasmGroup,
-  anchor: ClothDistributionAnchor,
+  _anchor: ClothDistributionAnchor,
 ): [number, number] | null {
-  if (anchor === 'initial_pose') {
-    const pose = readInitialPose(demoGroup);
-    const x = pose?.[0];
-    const y = pose?.[1];
-    if (!isFiniteNumber(x) || !isFiniteNumber(y)) {
-      return null;
-    }
-
-    return [roundFloat(x), roundFloat(y)];
-  }
-
-  if ((CLOTH_DISTRIBUTION_DIRECT_ANCHORS as readonly string[]).includes(anchor)) {
-    const directPosition = readObjectPositionAtName(demoGroup, anchor);
-    if (!directPosition) {
-      return null;
-    }
-
-    return [directPosition[0], directPosition[1]];
-  }
-
-  const derivedKeypoints = CLOTH_DISTRIBUTION_DERIVED_ANCHOR_GROUPS[
-    anchor as keyof typeof CLOTH_DISTRIBUTION_DERIVED_ANCHOR_GROUPS
-  ];
-  if (!derivedKeypoints) {
+  const pose = readInitialPose(demoGroup);
+  const x = pose?.[0];
+  const y = pose?.[1];
+  if (!isFiniteNumber(x) || !isFiniteNumber(y)) {
     return null;
   }
 
-  const points = derivedKeypoints
-    .map((keypointName) => readObjectPositionAtName(demoGroup, keypointName))
-    .filter((position): position is [number, number, number] => Boolean(position));
-  if (points.length === 0) {
-    return null;
-  }
-
-  const meanX = points.reduce((sum, position) => sum + position[0], 0) / points.length;
-  const meanY = points.reduce((sum, position) => sum + position[1], 0) / points.length;
-  return [roundFloat(meanX), roundFloat(meanY)];
+  return [roundFloat(x), roundFloat(y)];
 }
 
 function readObjectPositions(
@@ -1674,23 +1693,26 @@ function collectTeleopSources(
       continue;
     }
 
+    // Garment keypoint positions are optional now that the page only plots the
+    // initial_pose anchor. Demos without them are still plotted; they just
+    // can't participate in source-demo linking.
     const objectPositions = readObjectPositions(demoGroup, COMMON_CLOTH_KEYPOINTS);
     if (!objectPositions) {
       missingObjectPositionsCount += 1;
-      continue;
     }
 
     const initialPose = readInitialPose(demoGroup);
-    const teleopSource: TeleopSource = {
-      teleopId: makeTeleopId(entry, demo.name),
-      datasetName: entry.datasetName,
-      demoName: demo.name,
-      x: xy[0],
-      y: xy[1],
-      objectPositions,
-    };
-
-    byDemoName[demo.name] = [...(byDemoName[demo.name] ?? []), teleopSource];
+    if (objectPositions) {
+      const teleopSource: TeleopSource = {
+        teleopId: makeTeleopId(entry, demo.name),
+        datasetName: entry.datasetName,
+        demoName: demo.name,
+        x: xy[0],
+        y: xy[1],
+        objectPositions,
+      };
+      byDemoName[demo.name] = [...(byDemoName[demo.name] ?? []), teleopSource];
+    }
     points.push({
       category: 'teleop',
       datasetName: entry.datasetName,

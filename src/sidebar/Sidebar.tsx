@@ -3,9 +3,9 @@ import { NavLink, useMatch, useSearchParams } from 'react-router-dom';
 
 import { useStore } from '../stores';
 import {
-  getClothDistributionLink,
   getDatasetAttributesLink,
   getDatasetProcessingLink,
+  getObjectDistributionLink,
   getPoseTraceLink,
   getVideoConverterLink,
   getViewerLink,
@@ -161,23 +161,23 @@ function Sidebar() {
           {opened.length > 0 ? (
             <NavLink
               className={styles.mainNavItem}
-              to={getClothDistributionLink(activeFileUrl ?? opened[0].url)}
-              aria-label="Cloth Distribution"
-              title="Cloth Distribution"
+              to={getObjectDistributionLink(activeFileUrl ?? opened[0].url)}
+              aria-label="Object Distribution"
+              title="Object Distribution"
             >
               <FiAperture className={styles.icon} />
-              <span className={styles.label}>Cloth Distribution</span>
+              <span className={styles.label}>Object Distribution</span>
             </NavLink>
           ) : (
             <button
               type="button"
               className={styles.navBtn}
-              aria-label="Cloth Distribution"
-              title="Cloth Distribution"
+              aria-label="Object Distribution"
+              title="Object Distribution"
               disabled
             >
               <FiAperture className={styles.icon} />
-              <span className={styles.label}>Cloth Distribution</span>
+              <span className={styles.label}>Object Distribution</span>
             </button>
           )}
 

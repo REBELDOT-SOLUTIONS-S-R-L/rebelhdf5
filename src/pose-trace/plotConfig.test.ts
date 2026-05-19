@@ -202,7 +202,7 @@ describe('build3DLayout', () => {
 describe('buildClothDistribution helpers', () => {
   function emptyResult(): ClothDistributionResult {
     return {
-      anchor: 'garment_center',
+      anchor: 'initial_pose',
       successPoints: [],
       failedPoints: [],
       teleopPoints: [],
@@ -265,7 +265,7 @@ describe('buildClothDistribution helpers', () => {
   });
 
   it('returns a layout regardless of result presence', () => {
-    expect(buildClothDistributionLayout(null, 'garment_left_lower').height).toBe(820);
-    expect(buildClothDistributionLayout(emptyResult(), 'garment_right_lower').height).toBe(820);
+    expect(buildClothDistributionLayout(null, 'initial_pose').height).toBe(820);
+    expect(buildClothDistributionLayout(emptyResult(), 'initial_pose').height).toBe(820);
   });
 });
