@@ -38,7 +38,7 @@ we actually needed to iterate on dataset quality.
 
   ![Data Processing](screenshots/rebelhdf5-data-processing.png)
 
-  *Data Processing: Cut operation across an episode range (`demo_0`–`demo_99`) with key-level selection — pick exactly which dataset paths (e.g. `initial_state/articulation/left_arm/joint_position`) survive into the output file.*
+  *Data Processing: Cut operation across an episode range (`demo_0`–`demo_99`) with key-level selection — pick exactly which dataset paths (e.g. `initial_state/articulations/robot/joint_position`) survive into the output file.*
 
 - **Cloth Distribution Analysis.** Scatter of init poses (success vs failed
   overlaid on the teleop set) plus failure-rate heatmaps over the (pos_x,
@@ -132,25 +132,20 @@ corepack pnpm desktop:run
 ├── <span class="folder">attrs/</span>
 │   ├── <span class="file">schema_version</span><span class="comment"># version of the database schema</span>
 │   ├── <span class="file">fps</span><span class="comment"># camera fps</span>
-│   ├── <span class="file">env_args</span><span class="comment"># </span>
-│   ├── <span class="file">actions_frame</span><span class="comment"># world, robot, etc</span>
+│   ├── <span class="file">env_args</span><span class="comment"># JSON-encoded environment metadata</span>
 │   ├── <span class="file">num_episodes</span><span class="comment"># number of total episodes</span>
 │   ├── <span class="file">total_samples</span><span class="comment"># number of total samples</span>
 │   ├── <span class="file">description</span><span class="comment"># human format description</span>
-│   └── <span class="file">articulation</span><span class="comment"># articulation present in the dataset</span>
-│       ├── <span class="file">name</span><span class="comment"># Name of the robot</span>
-│       ├── <span class="file">joint_number</span><span class="comment"># Total number of joints</span>
-│       ├── <span class="file">segmentation</span><span class="comment"># List of human readable names for articulation segments, containing column indices from the corresponding segment</span>
-│       │   ├── <span class="file">segment_name</span><span class="comment"># The segment name</span>
-│       │   │   ├── <span class="file">target</span><span class="comment"># [x:y] index of column from actions/ which is mapped to the segment</span>
-│       │   │   └── <span class="file">obs</span><span class="comment"># [x:y] index of column from obs/ which is mapped to the segment</span>
-│       │   ├── <span class="file">segment_name</span>
-│       │   │   ├── <span class="file">target</span>
-│       │   │   └── <span class="file">obs</span>
-│       └── <span class="file">end_effectors</span><span class="comment"># List of human readable names for articulation segments, containing column indices from the corresponding segment</span>
-│           ├── <span class="file">eef_name</span><span class="comment"># The segment name</span>
-│           │   ├── <span class="file">pose</span><span class="comment"># [T, 7] index of column from actions/ which is mapped to the segment</span>
-│           │   └── <span class="file">gripper</span><span class="comment"># [x:y] index of column from obs/ which is mapped to the segment</span>
+│   ├── <span class="file">obs/sample_phase</span><span class="comment"># post_step for measured observations</span>
+│   └── <span class="file">articulations</span><span class="comment"># articulation-specific schema metadata</span>
+│       └── <span class="file">articulation_name</span><span class="comment"># replaced by the actual articulation name, e.g. robot</span>
+│           ├── <span class="file">joint_number</span><span class="comment"># total number of joints in this articulation</span>
+│           ├── <span class="file">joints/units</span><span class="comment"># units for actions/joints, e.g. radians</span>
+│           ├── <span class="file">joints/joint_indices</span><span class="comment"># [[joint_name, column_index], ...] for actions/joints and obs/articulations/&lt;name&gt;/joint_position</span>
+│           ├── <span class="file">pose/frame</span><span class="comment"># coordinate frame for actions/pose, e.g. env, world, robot</span>
+│           ├── <span class="file">pose/format</span><span class="comment"># semantic format, e.g. xyz_quat_gripper</span>
+│           ├── <span class="file">pose/pose_order</span><span class="comment"># full pose column order, e.g. ["x", "y", "z", "qw", "qx", "qy", "qz"]</span>
+│           └── <span class="file">pose/component_slices</span><span class="comment"># EEF pose/gripper column slices in actions/pose; ranges are half-open [start, stop)</span>
 │            
 ├── <span class="folder">demo_&lt;N&gt;/</span>
 │   ├── <span class="folder">attrs/</span>
@@ -158,33 +153,35 @@ corepack pnpm desktop:run
 │   │   ├── <span class="file">success</span><span class="comment"># True if episode success, False otherwise</span>
 │   │   └── <span class="file">seed</span><span class="comment"># random seed used for env</span>
 │   ├── <span class="folder">actions/</span>
-│   │   ├── <span class="file">pose</span><span class="comment"># (T, A_pose) EEF pose + gripper actions; attrs: frame, format, quat_order, entity_order</span>
-│   │   └── <span class="file">joints</span><span class="comment"># (T, total_joints) joint-space actions; attrs: units, joint_order, entity_order</span>
+│   │   ├── <span class="file">pose</span><span class="comment"># (T, A_pose) EEF pose + gripper actions; schema metadata lives in data.attrs/articulations/&lt;name&gt;/pose/*</span>
+│   │   └── <span class="file">joints</span><span class="comment"># (T, total_joints) joint-space actions; schema metadata lives in data.attrs/articulations/&lt;name&gt;/joints/*</span>
 │   │
 │   ├── <span class="folder">initial_state/</span>
-│   │   ├── <span class="folder">articulation/</span>
+│   │   ├── <span class="folder">articulations/</span>
 │   │   │   └── <span class="folder">articulation_name/</span>
 │   │   │       ├── <span class="file">joint_position</span><span class="comment"># (1, J)</span>
 │   │   │       ├── <span class="file">joint_velocity</span><span class="comment"># (1, J)</span>
 │   │   │       ├── <span class="file">root_pose</span><span class="comment"># (1, 7)</span>
 │   │   │       └── <span class="file">root_velocity</span><span class="comment"># (1, 6)</span>
 │   │   │
-│   │   └── <span class="folder">objects/</span>
+│   │   └── <span class="folder">rigid_objects/</span>
 │   │       └── <span class="folder">object_name/</span>
 │   │           ├── <span class="file">initial_pose</span>
 │   │           └── <span class="file">scale</span>
 │   │
 │   ├── <span class="folder">obs/</span><span class="comment"># measured observations; attrs: sample_phase</span>
-│   │   ├── <span class="folder">articulation/</span>
+│   │   ├── <span class="folder">articulations/</span>
 │   │   │   └── <span class="folder">articulation_name/</span>
 │   │   │       ├── <span class="file">joint_position</span><span class="comment"># (T, J)</span>
-│   │   │       └── <span class="file">joint_velocity</span><span class="comment"># (T, J)</span>
+│   │   │       ├── <span class="file">joint_velocity</span><span class="comment"># (T, J)</span>
+│   │   │       ├── <span class="file">root_pose</span><span class="comment"># (T, 7)</span>
+│   │   │       └── <span class="file">root_velocity</span><span class="comment"># (T, 6)</span>
 │   │   │
-│   │   ├── <span class="folder">end_effectors/</span>
+│   │   ├── <span class="folder">eef_pose/</span>
 │   │   │   └── <span class="folder">end_effector_name/</span>
 │   │   │       └── <span class="file">pose</span><span class="comment"># (T, 4, 4)</span>
 │   │   │
-│   │   ├── <span class="folder">objects/</span>
+│   │   ├── <span class="folder">object_pose/</span>
 │   │   │   └── <span class="folder">object_name/</span>
 │   │   │       └── <span class="file">pose</span><span class="comment"># (T, 4, 4)</span>
 │   │   │
@@ -195,7 +192,7 @@ corepack pnpm desktop:run
 │   │   │   └── <span class="folder">sensor_name/</span>
 │   │   │       └── <span class="file">field_name</span>
 │   │   │
-│   │   └── <span class="folder">datagen_info/</span><span class="comment"># MimicGen-compatible; attrs: sample_phase, aligned_to</span>
+│   │   └── <span class="folder">datagen_info/</span><span class="comment"># MimicGen-compatible; demo-specific attrs: sample_phase, aligned_to</span>
 │   │       ├── <span class="folder">eef_pose/</span>
 │   │       │   └── <span class="file">end_effector_name</span><span class="comment"># (T, 4, 4)</span>
 │   │       ├── <span class="folder">target_eef_pose/</span>
