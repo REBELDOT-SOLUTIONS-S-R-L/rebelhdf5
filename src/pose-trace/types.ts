@@ -182,8 +182,15 @@ export interface ArticulationEndEffector {
   name: string;
   poseStart: number;
   poseEnd: number;
+  poseOrder: string[];
   gripperStart: number | null;
   gripperEnd: number | null;
+}
+
+export interface ArticulationJoint {
+  articulationName: string;
+  name: string;
+  index: number;
 }
 
 export interface ParsedArticulation {
@@ -191,6 +198,7 @@ export interface ParsedArticulation {
   jointNumber: number | null;
   segmentation: ArticulationSegment[];
   endEffectors: ArticulationEndEffector[];
+  joints: ArticulationJoint[];
 }
 
 export interface PoseTraceSource {

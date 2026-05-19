@@ -6,6 +6,7 @@ import {
   build3DLayout,
   buildClothDistributionData,
   buildClothDistributionLayout,
+  buildCombinedJointChartData,
   buildEmptyLayout,
   buildJointChartData,
   buildJointChartLayout,
@@ -98,6 +99,18 @@ describe('getJointChartSpecs', () => {
     ]);
     expect(specs).toHaveLength(4);
   });
+
+  it('builds specs from articulation joint indices with name and index labels', () => {
+    const specs = getJointChartSpecs([], [
+      { articulationName: 'robot', name: 'shoulder_pan', index: 2 },
+      { articulationName: 'robot', name: 'elbow', index: 5 },
+    ]);
+    expect(specs).toHaveLength(2);
+    expect(specs.map((spec) => spec.label)).toEqual([
+      'robot / shoulder_pan [2]',
+      'robot / elbow [5]',
+    ]);
+  });
 });
 
 describe('buildJointChartData', () => {
@@ -120,6 +133,28 @@ describe('buildJointChartData', () => {
     }) as Array<{ name?: string }>;
     expect(traces).toHaveLength(2);
     expect(traces.map((trace) => trace.name)).toEqual(['target', 'obs']);
+  });
+
+  it('combines selected joint target and obs series into one chart', () => {
+    const specs = getJointChartSpecs([], [
+      { articulationName: 'robot', name: 'shoulder_pan', index: 0 },
+      { articulationName: 'robot', name: 'elbow', index: 1 },
+    ]);
+    const rows = Array.from({ length: 3 }, (_, i) =>
+      makeRow(i, {
+        'joint_target_robot::shoulder_pan::0': i,
+        'joint_obs_robot::shoulder_pan::0': i + 0.1,
+        'joint_target_robot::elbow::1': i + 1,
+        'joint_obs_robot::elbow::1': i + 1.1,
+      }),
+    );
+    const traces = buildCombinedJointChartData(rows, specs) as Array<{ name?: string }>;
+    expect(traces.map((trace) => trace.name)).toEqual([
+      'robot / shoulder_pan [0] target',
+      'robot / shoulder_pan [0] obs',
+      'robot / elbow [1] target',
+      'robot / elbow [1] obs',
+    ]);
   });
 });
 
@@ -167,7 +202,7 @@ describe('build3DLayout', () => {
 describe('buildClothDistribution helpers', () => {
   function emptyResult(): ClothDistributionResult {
     return {
-      anchor: 'left',
+      anchor: 'garment_center',
       successPoints: [],
       failedPoints: [],
       teleopPoints: [],
@@ -230,7 +265,7 @@ describe('buildClothDistribution helpers', () => {
   });
 
   it('returns a layout regardless of result presence', () => {
-    expect(buildClothDistributionLayout(null, 'left').height).toBe(820);
-    expect(buildClothDistributionLayout(emptyResult(), 'right').height).toBe(820);
+    expect(buildClothDistributionLayout(null, 'garment_left_lower').height).toBe(820);
+    expect(buildClothDistributionLayout(emptyResult(), 'garment_right_lower').height).toBe(820);
   });
 });

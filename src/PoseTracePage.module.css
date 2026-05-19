@@ -164,6 +164,14 @@
   gap: 0.75rem;
 }
 
+.jointHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
 .segmentTitle {
   margin: 0;
   color: var(--color-gray);
@@ -171,6 +179,79 @@
   font-size: 1.5em;
   font-weight: normal;
   letter-spacing: 0.02em;
+}
+
+.jointToggles,
+.jointControls,
+.jointChips {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.checkboxLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: var(--color-gray);
+  font-size: 0.92em;
+  font-weight: 700;
+}
+
+.checkboxLabel input {
+  accent-color: #ffd000;
+}
+
+.jointControls {
+  max-width: 42rem;
+}
+
+.jointControls .select {
+  flex: 1 1 20rem;
+}
+
+.iconButton {
+  composes: btnClean from global;
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  border: 1px solid var(--color-border);
+  border-radius: 0.5rem;
+  color: var(--color-gray);
+  background: var(--color-input-bg);
+  cursor: pointer;
+}
+
+.iconButton:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.jointChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-height: 2rem;
+  padding: 0.25rem 0.35rem 0.25rem 0.65rem;
+  border: 1px solid var(--color-border);
+  border-radius: 0.5rem;
+  color: var(--color-gray);
+  background: var(--color-surface-alt);
+  font-size: 0.88em;
+}
+
+.chipRemoveButton {
+  composes: btnClean from global;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  color: var(--color-gray);
+  cursor: pointer;
 }
 
 .jointGrid {
