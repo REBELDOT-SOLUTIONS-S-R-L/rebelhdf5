@@ -14,6 +14,7 @@ import {
 } from './types';
 import type {
   ArticulationEndEffector,
+  ArticulationJoint,
   ArticulationSegment,
   ClothDistributionAnchor,
   ClothDistributionSourceDiagnostics,
@@ -701,7 +702,199 @@ function coerceArticulationValue(value: unknown): unknown {
   return value;
 }
 
+function parseIndexRange(value: unknown): { start: number; end: number } | null {
+  const coerced = coerceArticulationValue(value);
+  if (Array.isArray(coerced) && coerced.length === 2) {
+    const start = optionalInt(coerced[0]);
+    const end = optionalInt(coerced[1]);
+    if (start != null && end != null && start <= end) {
+      return { start, end };
+    }
+  }
+
+  if (typeof coerced !== 'string') {
+    return null;
+  }
+
+  const match = coerced.match(/^\s*\[\s*(-?\d+)\s*(?::|,)\s*(-?\d+)\s*\]\s*$/u);
+  if (!match) {
+    return null;
+  }
+
+  const start = Number.parseInt(match[1], 10);
+  const end = Number.parseInt(match[2], 10);
+  if (!Number.isInteger(start) || !Number.isInteger(end) || start > end) {
+    return null;
+  }
+
+  return { start, end };
+}
+
+function parseJointIndices(
+  articulationName: string,
+  value: unknown,
+): ArticulationJoint[] {
+  const coerced = coerceArticulationValue(value);
+  if (!Array.isArray(coerced)) {
+    return [];
+  }
+
+  const joints: ArticulationJoint[] = [];
+  for (const entry of coerced) {
+    if (Array.isArray(entry) && entry.length >= 2) {
+      const index = optionalInt(entry[1]);
+      if (index == null) {
+        continue;
+      }
+      joints.push({
+        articulationName,
+        name: String(entry[0] ?? `joint_${index}`),
+        index,
+      });
+      continue;
+    }
+
+    if (!entry || typeof entry !== 'object') {
+      continue;
+    }
+
+    const record = entry as Record<string, unknown>;
+    const index = optionalInt(record.column_index ?? record.index ?? record.joint_index);
+    if (index == null) {
+      continue;
+    }
+
+    const rawName = record.joint_name ?? record.name;
+    joints.push({
+      articulationName,
+      name: typeof rawName === 'string' || typeof rawName === 'number'
+        ? String(rawName)
+        : `joint_${index}`,
+      index,
+    });
+  }
+
+  return joints.sort((left, right) =>
+    left.articulationName.localeCompare(right.articulationName)
+    || left.index - right.index
+    || left.name.localeCompare(right.name),
+  );
+}
+
+function parsePoseOrder(value: unknown): string[] {
+  const coerced = coerceArticulationValue(value);
+  if (!Array.isArray(coerced)) {
+    return [];
+  }
+
+  return coerced
+    .filter((entry): entry is string => typeof entry === 'string')
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+}
+
+function parseComponentSlices(
+  articulationName: string,
+  value: unknown,
+  poseOrder: readonly string[] = [],
+): ArticulationEndEffector[] {
+  const coerced = coerceArticulationValue(value);
+  if (!coerced || typeof coerced !== 'object' || Array.isArray(coerced)) {
+    return [];
+  }
+
+  const record = coerced as Record<string, unknown>;
+  const directPoseRange = parseIndexRange(record.pose);
+  if (directPoseRange) {
+    const gripperRange = parseIndexRange(record.gripper);
+    return [{
+      name: articulationName,
+      poseStart: directPoseRange.start,
+      poseEnd: directPoseRange.end,
+      poseOrder: [...poseOrder],
+      gripperStart: gripperRange?.start ?? null,
+      gripperEnd: gripperRange?.end ?? null,
+    }];
+  }
+
+  const endEffectors: ArticulationEndEffector[] = [];
+  for (const [eefName, eefValue] of Object.entries(record)) {
+    if (!eefValue || typeof eefValue !== 'object' || Array.isArray(eefValue)) {
+      continue;
+    }
+
+    const eefRecord = eefValue as Record<string, unknown>;
+    const poseRange = parseIndexRange(eefRecord.pose);
+    if (!poseRange) {
+      continue;
+    }
+
+    const gripperRange = parseIndexRange(eefRecord.gripper);
+    endEffectors.push({
+      name: eefName,
+      poseStart: poseRange.start,
+      poseEnd: poseRange.end,
+      poseOrder: [...poseOrder],
+      gripperStart: gripperRange?.start ?? null,
+      gripperEnd: gripperRange?.end ?? null,
+    });
+  }
+
+  return endEffectors.sort((left, right) => left.name.localeCompare(right.name));
+}
+
+function readStandardArticulationsFromAttrs(dataGroup: H5WasmGroup): unknown {
+  const articulationNames = [...new Set(
+    Object.keys(dataGroup.attrs)
+      .map((key) => key.match(/^articulations\/([^/]+)\//u)?.[1])
+      .filter((name): name is string => Boolean(name)),
+  )].sort((left, right) => left.localeCompare(right));
+
+  if (articulationNames.length === 0) {
+    return null;
+  }
+
+  const joints: ArticulationJoint[] = [];
+  const endEffectors: ArticulationEndEffector[] = [];
+  let jointNumber = 0;
+  let hasJointNumber = false;
+
+  for (const articulationName of articulationNames) {
+    const prefix = `articulations/${articulationName}`;
+    const articulationJointNumber = optionalInt(
+      getAttributeValue(dataGroup, `${prefix}/joint_number`),
+    );
+    if (articulationJointNumber != null) {
+      jointNumber += articulationJointNumber;
+      hasJointNumber = true;
+    }
+
+    joints.push(...parseJointIndices(
+      articulationName,
+      getAttributeValue(dataGroup, `${prefix}/joints/joint_indices`),
+    ));
+    const poseOrder = parsePoseOrder(getAttributeValue(dataGroup, `${prefix}/pose/pose_order`));
+    endEffectors.push(...parseComponentSlices(
+      articulationName,
+      getAttributeValue(dataGroup, `${prefix}/pose/component_slices`),
+      poseOrder,
+    ));
+  }
+
+  return {
+    name: articulationNames.join(', '),
+    joint_number: hasJointNumber ? jointNumber : null,
+    joints,
+    end_effectors: endEffectors,
+  };
+}
+
 function readArticulationFromAttrs(dataGroup: H5WasmGroup): unknown {
+  const standard = readStandardArticulationsFromAttrs(dataGroup);
+  if (standard) {
+    return standard;
+  }
+
   const direct = getAttributeValue(dataGroup, 'articulation');
   if (direct != null) {
     return coerceArticulationValue(direct);
@@ -772,22 +965,7 @@ function readArticulationFromGroup(dataGroup: H5WasmGroup): unknown {
 }
 
 function parseInclusiveRange(value: unknown): { start: number; end: number } | null {
-  if (typeof value !== 'string') {
-    return null;
-  }
-
-  const match = value.match(/^\s*\[\s*(-?\d+)\s*:\s*(-?\d+)\s*\]\s*$/u);
-  if (!match) {
-    return null;
-  }
-
-  const start = Number.parseInt(match[1], 10);
-  const end = Number.parseInt(match[2], 10);
-  if (!Number.isInteger(start) || !Number.isInteger(end) || start > end) {
-    return null;
-  }
-
-  return { start, end };
+  return parseIndexRange(value);
 }
 
 function parseArticulation(raw: unknown): ParsedArticulation | null {
@@ -841,6 +1019,7 @@ function parseArticulation(raw: unknown): ParsedArticulation | null {
         name: eefName,
         poseStart: poseRange.start,
         poseEnd: poseRange.end,
+        poseOrder: [],
         gripperStart: gripperRange?.start ?? null,
         gripperEnd: gripperRange?.end ?? null,
       });
@@ -848,7 +1027,15 @@ function parseArticulation(raw: unknown): ParsedArticulation | null {
     endEffectors.sort((left, right) => left.name.localeCompare(right.name));
   }
 
-  if (!name && segmentation.length === 0 && endEffectors.length === 0) {
+  const joints = Array.isArray(rawRecord.joints)
+    ? (rawRecord.joints as ArticulationJoint[]).filter((joint) =>
+      typeof joint.articulationName === 'string'
+      && typeof joint.name === 'string'
+      && Number.isInteger(joint.index),
+    )
+    : [];
+
+  if (!name && segmentation.length === 0 && endEffectors.length === 0 && joints.length === 0) {
     return null;
   }
 
@@ -857,6 +1044,7 @@ function parseArticulation(raw: unknown): ParsedArticulation | null {
     jointNumber,
     segmentation,
     endEffectors,
+    joints,
   };
 }
 
@@ -972,6 +1160,25 @@ function extractColumnAtStep(
   return roundFloat(value);
 }
 
+function poseComponentColumn(
+  eef: ArticulationEndEffector,
+  component: 'x' | 'y' | 'z',
+): number {
+  const fallbackOffset = component === 'x' ? 0 : component === 'y' ? 1 : 2;
+  const poseOrderOffset = eef.poseOrder.indexOf(component);
+  const offset = poseOrderOffset >= 0 ? poseOrderOffset : fallbackOffset;
+  const column = eef.poseStart + offset;
+  return column < eef.poseEnd ? column : -1;
+}
+
+function makeJointRowKey(
+  articulationName: string,
+  jointName: string,
+  jointIndex: number,
+): string {
+  return `${articulationName}::${jointName}::${jointIndex}`;
+}
+
 function loadEndEffectorPoses(
   demoGroup: H5WasmGroup,
 ): Record<string, PoseSeries> {
@@ -1025,7 +1232,8 @@ function buildDemoRows(entry: OpenSourceEntry, demoName: string): DemoRow[] {
 
   const articulationName = articulation?.name?.trim() ?? '';
   const segments = articulation?.segmentation ?? [];
-  const actionsJoints = segments.length > 0
+  const joints = articulation?.joints ?? [];
+  const actionsJoints = segments.length > 0 || joints.length > 0
     ? read2DDataset(demoGroup, 'actions/joints')
     : null;
   const obsJointPositionPath = segments.length > 0
@@ -1034,6 +1242,15 @@ function buildDemoRows(entry: OpenSourceEntry, demoName: string): DemoRow[] {
   const obsJointPosition = obsJointPositionPath
     ? read2DDataset(demoGroup, obsJointPositionPath)
     : null;
+  const obsJointPositionByArticulation: Record<string, number[][] | null> = {};
+  for (const jointArticulationName of [...new Set(joints.map((joint) => joint.articulationName))]) {
+    const path = findObsJointPositionPath(demoGroup, jointArticulationName);
+    obsJointPositionByArticulation[jointArticulationName] = path
+      ? read2DDataset(demoGroup, path)
+      : null;
+  }
+  const hasMappedObsJointPosition = Object.values(obsJointPositionByArticulation)
+    .some((data) => data != null);
 
   if (
     Object.keys(eefPose).length === 0
@@ -1043,6 +1260,7 @@ function buildDemoRows(entry: OpenSourceEntry, demoName: string): DemoRow[] {
     && !actionsPose
     && !actionsJoints
     && !obsJointPosition
+    && !hasMappedObsJointPosition
   ) {
     throw new Error(`Demo '${demoName}' does not contain usable pose datasets.`);
   }
@@ -1061,6 +1279,9 @@ function buildDemoRows(entry: OpenSourceEntry, demoName: string): DemoRow[] {
   if (actionsPose) arrayLengths.push(actionsPose.length);
   if (actionsJoints) arrayLengths.push(actionsJoints.length);
   if (obsJointPosition) arrayLengths.push(obsJointPosition.length);
+  for (const mappedObsJointPosition of Object.values(obsJointPositionByArticulation)) {
+    if (mappedObsJointPosition) arrayLengths.push(mappedObsJointPosition.length);
+  }
 
   if (arrayLengths.length === 0) {
     throw new Error(`Demo '${demoName}' does not contain valid pose or joint data.`);
@@ -1099,9 +1320,9 @@ function buildDemoRows(entry: OpenSourceEntry, demoName: string): DemoRow[] {
 
     if (usesActionsPoseTarget && articulation) {
       for (const eef of articulation.endEffectors) {
-        const targetX = extractColumnAtStep(actionsPose, stepIdx, eef.poseStart);
-        const targetY = extractColumnAtStep(actionsPose, stepIdx, eef.poseStart + 1);
-        const targetZ = extractColumnAtStep(actionsPose, stepIdx, eef.poseStart + 2);
+        const targetX = extractColumnAtStep(actionsPose, stepIdx, poseComponentColumn(eef, 'x'));
+        const targetY = extractColumnAtStep(actionsPose, stepIdx, poseComponentColumn(eef, 'y'));
+        const targetZ = extractColumnAtStep(actionsPose, stepIdx, poseComponentColumn(eef, 'z'));
         row[`target_eef_${eef.name}_x`] = targetX;
         row[`target_eef_${eef.name}_y`] = targetY;
         row[`target_eef_${eef.name}_z`] = targetZ;
@@ -1154,6 +1375,20 @@ function buildDemoRows(entry: OpenSourceEntry, demoName: string): DemoRow[] {
           obsCol,
         );
       }
+    }
+
+    for (const joint of joints) {
+      const rowKey = makeJointRowKey(joint.articulationName, joint.name, joint.index);
+      row[`joint_target_${rowKey}`] = extractColumnAtStep(
+        actionsJoints,
+        stepIdx,
+        joint.index,
+      );
+      row[`joint_obs_${rowKey}`] = extractColumnAtStep(
+        obsJointPositionByArticulation[joint.articulationName] ?? null,
+        stepIdx,
+        joint.index,
+      );
     }
 
     rows.push(row);

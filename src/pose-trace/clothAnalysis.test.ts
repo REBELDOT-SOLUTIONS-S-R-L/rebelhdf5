@@ -38,7 +38,7 @@ function makeResult(
   teleopPoints: ClothDistributionPoint[] = [],
 ): ClothDistributionResult {
   return {
-    anchor: 'left',
+    anchor: 'garment_left_lower',
     successPoints,
     failedPoints,
     teleopPoints,

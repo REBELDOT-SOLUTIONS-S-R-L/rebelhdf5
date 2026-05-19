@@ -4,6 +4,7 @@ import type { Data, Layout } from 'plotly.js';
 import type { FailurePlane, FailureSlice } from './clothAnalysis';
 import { humanizeColumnName, type Trace3DSpec } from './schema';
 import type {
+  ArticulationJoint,
   ArticulationSegment,
   ClothDistributionAnchor,
   ClothDistributionPoint,
@@ -875,22 +876,60 @@ export function buildFailureSliceLayout(
 }
 
 export interface JointChartSpec {
+  id?: string;
+  label?: string;
+  articulationName?: string;
+  jointName?: string;
   segmentName: string;
   jointIndex: number;
 }
 
+function makeJointRowKey(
+  articulationName: string,
+  jointName: string,
+  jointIndex: number,
+): string {
+  return `${articulationName}::${jointName}::${jointIndex}`;
+}
+
+function jointSpecId(spec: JointChartSpec): string {
+  return spec.id ?? `${spec.segmentName}_${spec.jointIndex}`;
+}
+
+function jointSpecLabel(spec: JointChartSpec): string {
+  return spec.label ?? `${spec.segmentName}: ${spec.jointIndex}`;
+}
+
+function isJointChartSpecArray(
+  spec: JointChartSpec | readonly JointChartSpec[],
+): spec is readonly JointChartSpec[] {
+  return Array.isArray(spec);
+}
+
 function jointTargetKey(spec: JointChartSpec): string {
-  return `joint_target_${spec.segmentName}_${spec.jointIndex}`;
+  return `joint_target_${jointSpecId(spec)}`;
 }
 
 function jointObsKey(spec: JointChartSpec): string {
-  return `joint_obs_${spec.segmentName}_${spec.jointIndex}`;
+  return `joint_obs_${jointSpecId(spec)}`;
 }
 
 export function getJointChartSpecs(
   segments: readonly ArticulationSegment[],
+  joints: readonly ArticulationJoint[] = [],
 ): JointChartSpec[] {
   const specs: JointChartSpec[] = [];
+  for (const joint of joints) {
+    specs.push({
+      id: makeJointRowKey(joint.articulationName, joint.name, joint.index),
+      label: `${joint.articulationName} / ${joint.name} [${joint.index}]`,
+      articulationName: joint.articulationName,
+      jointName: joint.name,
+      segmentName: joint.articulationName,
+      jointIndex: joint.index,
+    });
+  }
+
   for (const segment of segments) {
     const jointCount = Math.min(
       segment.targetEnd - segment.targetStart + 1,
@@ -900,6 +939,7 @@ export function getJointChartSpecs(
       specs.push({
         segmentName: segment.name,
         jointIndex: segment.targetStart + offset,
+        label: `${segment.name}: ${segment.targetStart + offset}`,
       });
     }
   }
@@ -944,8 +984,55 @@ export function buildJointChartData(
   return traces;
 }
 
-export function buildJointChartLayout(spec: JointChartSpec): Partial<Layout> {
+export function buildCombinedJointChartData(
+  rows: DemoRow[],
+  specs: readonly JointChartSpec[],
+): Data[] {
+  if (rows.length === 0) {
+    return [];
+  }
+
+  const x = xAxis(rows);
+  const traces: Data[] = [];
+  specs.forEach((spec, index) => {
+    const targetValues = series(rows, jointTargetKey(spec));
+    const obsValues = series(rows, jointObsKey(spec));
+    const color = colorAt(index);
+    const label = jointSpecLabel(spec);
+
+    if (hasValues(targetValues)) {
+      traces.push({
+        type: 'scatter',
+        x,
+        y: targetValues,
+        mode: 'lines',
+        name: `${label} target`,
+        line: { color, width: 2.2 },
+      });
+    }
+
+    if (hasValues(obsValues)) {
+      traces.push({
+        type: 'scatter',
+        x,
+        y: obsValues,
+        mode: 'lines',
+        name: `${label} obs`,
+        line: { color, dash: 'dot', width: 2.2 },
+      });
+    }
+  });
+
+  return traces;
+}
+
+export function buildJointChartLayout(
+  spec: JointChartSpec | readonly JointChartSpec[],
+): Partial<Layout> {
   const theme = getPlotTheme();
+  const title = isJointChartSpecArray(spec)
+    ? (spec.length === 1 ? jointSpecLabel(spec[0]) : 'Selected joints')
+    : jointSpecLabel(spec);
   const axisBase = {
     showgrid: true,
     gridcolor: theme.gridColor,
@@ -961,7 +1048,7 @@ export function buildJointChartLayout(spec: JointChartSpec): Partial<Layout> {
     font: { color: theme.textColor, family: FONT_FAMILY, size: 11 },
     margin: { l: 50, r: 16, t: 36, b: 36 },
     title: {
-      text: `${spec.segmentName}: ${spec.jointIndex}`,
+      text: title,
       x: 0.02,
       xanchor: 'left',
       font: { color: theme.textColor, family: FONT_FAMILY, size: 13 },

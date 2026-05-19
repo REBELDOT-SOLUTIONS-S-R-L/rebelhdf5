@@ -10,6 +10,7 @@ import {
   runLeRobotConvert,
   runProcess,
   scanFiles,
+  type PythonLeRobotConvertRequest,
 } from './python-backend';
 
 type FetchMock = ReturnType<typeof vi.fn<typeof fetch>>;
@@ -390,17 +391,13 @@ describe('runProcess (SSE streaming)', () => {
 });
 
 describe('runLeRobotConvert (SSE streaming)', () => {
-  function basicRequest() {
+  function basicRequest(): PythonLeRobotConvertRequest {
     return {
       paths: ['/a.h5'],
       outputName: 'out',
       skipFailed: false,
-      modalityJson: null,
-      conversionConfigJson: null,
-      modalityPython: null,
       defaultTask: 'task',
       taskRules: [],
-      maxEpisodes: null,
     };
   }
 
