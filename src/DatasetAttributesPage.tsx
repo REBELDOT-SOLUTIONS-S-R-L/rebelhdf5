@@ -1,4 +1,12 @@
-import { startTransition, useEffect, useMemo, useState } from 'react';
+import {
+  createContext,
+  startTransition,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react';
 import { FiFile, FiFolder } from 'react-icons/fi';
 import { Link, useSearchParams } from 'react-router-dom';
 
@@ -7,6 +15,7 @@ import {
   getDatasetAttributes,
   updateDatasetArticulation,
   type DatasetArticulation,
+  type DatasetAttributeGroup,
   type DatasetAttributesResult,
   type PythonBackendStatus,
 } from './python-backend';
@@ -61,86 +70,104 @@ function createLeaf(path: string, name: string, value: unknown): AttributeTreeNo
   };
 }
 
-function buildAttributeTree(attributes: DatasetAttributesResult): AttributeTreeNode[] {
-  const orderedAttrNames = [
-    'schema_version',
-    'fps',
-    'env_args',
-    'actions_frame',
-    'num_episodes',
-    'total_samples',
-    'description',
-  ];
-  const usedNames = new Set([...orderedAttrNames, 'articulation']);
-  const articulation = attributes.articulation ?? EMPTY_ARTICULATION;
-  const segmentationChildren = Object.entries(articulation.segmentation ?? {})
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([segmentName, segment]) => ({
-      name: segmentName,
-      path: `articulation/segmentation/${segmentName}`,
-      children: [
-        createLeaf(
-          `articulation/segmentation/${segmentName}/target`,
-          'target',
-          segment.target,
-        ),
-        createLeaf(
-          `articulation/segmentation/${segmentName}/obs`,
-          'obs',
-          segment.obs,
-        ),
-      ],
-    }));
-  const endEffectorChildren = Object.entries(articulation.end_effectors ?? {})
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([eefName, endEffector]) => ({
-      name: eefName,
-      path: `articulation/end_effectors/${eefName}`,
-      children: [
-        createLeaf(
-          `articulation/end_effectors/${eefName}/pose`,
-          'pose',
-          endEffector.pose,
-        ),
-        createLeaf(
-          `articulation/end_effectors/${eefName}/gripper`,
-          'gripper',
-          endEffector.gripper,
-        ),
-      ],
-    }));
-  const knownNodes = orderedAttrNames.map((name) =>
-    createLeaf(name, name, attributes.attrs[name]),
-  );
-  const otherNodes = Object.entries(attributes.attrs)
-    .filter(([name]) => !usedNames.has(name))
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([name, value]) => createLeaf(name, name, value));
+function buildSlashTree(
+  groupPath: string,
+  attrs: Record<string, unknown>,
+): AttributeTreeNode[] {
+  interface MutableNode {
+    name: string;
+    path: string;
+    value?: unknown;
+    isLeaf: boolean;
+    children: Map<string, MutableNode>;
+  }
 
-  return [
-    ...knownNodes,
-    {
-      name: 'articulation',
-      path: 'articulation',
-      children: [
-        createLeaf('articulation/name', 'name', articulation.name),
-        createLeaf('articulation/joint_number', 'joint_number', articulation.joint_number),
-        {
-          name: 'segmentation',
-          path: 'articulation/segmentation',
-          value: segmentationChildren.length === 0 ? 'empty' : undefined,
-          children: segmentationChildren,
-        },
-        {
-          name: 'end_effectors',
-          path: 'articulation/end_effectors',
-          value: endEffectorChildren.length === 0 ? 'empty' : undefined,
-          children: endEffectorChildren,
-        },
-      ],
-    },
-    ...otherNodes,
-  ];
+  const root: MutableNode = {
+    name: '',
+    path: groupPath,
+    isLeaf: false,
+    children: new Map(),
+  };
+
+  for (const [fullName, value] of Object.entries(attrs)) {
+    const parts = fullName.split('/').filter((segment) => segment.length > 0);
+    if (parts.length === 0) {
+      continue;
+    }
+
+    let cursor = root;
+    parts.forEach((segment, index) => {
+      const isLeaf = index === parts.length - 1;
+      let next = cursor.children.get(segment);
+      if (!next) {
+        next = {
+          name: segment,
+          path: `${cursor.path}#${parts.slice(0, index + 1).join('/')}`,
+          isLeaf,
+          children: new Map(),
+        };
+        cursor.children.set(segment, next);
+      }
+      if (isLeaf) {
+        next.value = value;
+        next.isLeaf = true;
+      }
+      cursor = next;
+    });
+  }
+
+  const toNode = (node: MutableNode): AttributeTreeNode => {
+    const sortedChildren = [...node.children.values()].sort((left, right) =>
+      left.name.localeCompare(right.name),
+    );
+
+    if (sortedChildren.length === 0) {
+      return createLeaf(node.path, node.name, node.value);
+    }
+
+    return {
+      name: node.name,
+      path: node.path,
+      value: node.isLeaf ? formatAttrValue(node.value) : undefined,
+      children: sortedChildren.map(toNode),
+    };
+  };
+
+  return [...root.children.values()]
+    .sort((left, right) => left.name.localeCompare(right.name))
+    .map(toNode);
+}
+
+function formatGroupTitle(path: string): string {
+  if (path === '/' || path === '') {
+    return '/.attrs';
+  }
+  return `${path.replace(/^\//, '')}.attrs`;
+}
+
+interface ExpandedLeafContextValue {
+  isExpanded: (path: string) => boolean;
+  toggle: (path: string) => void;
+}
+
+const ExpandedLeafContext = createContext<ExpandedLeafContextValue>({
+  isExpanded: () => false,
+  toggle: () => {},
+});
+
+function prettifyLeafValue(formatted: string | undefined): string {
+  if (formatted == null || formatted === '') {
+    return '-';
+  }
+  try {
+    const parsed: unknown = JSON.parse(formatted);
+    if (parsed !== null && typeof parsed === 'object') {
+      return JSON.stringify(parsed, null, 2);
+    }
+  } catch {
+    // Not JSON — fall through and return as-is.
+  }
+  return formatted;
 }
 
 function AttributeTreeItem({
@@ -150,6 +177,8 @@ function AttributeTreeItem({
   node: AttributeTreeNode;
   depth: number;
 }) {
+  const { isExpanded, toggle } = useContext(ExpandedLeafContext);
+
   if (node.children) {
     return (
       <div className={styles.treeBranch}>
@@ -177,15 +206,33 @@ function AttributeTreeItem({
     );
   }
 
+  const expanded = isExpanded(node.path);
+  const fullValue = expanded ? prettifyLeafValue(node.value) : null;
+
   return (
-    <div
-      className={styles.treeLeaf}
-      style={{ paddingLeft: `${depth * 1.1}rem` }}
-      title={node.path}
-    >
-      <FiFile aria-hidden className={styles.treeLeafIcon} />
-      <span className={styles.treeLeafLabel}>{node.name}</span>
-      <small className={styles.treeMeta}>{node.value}</small>
+    <div className={styles.treeLeafWrapper}>
+      <button
+        type="button"
+        className={`${styles.treeLeaf} ${expanded ? styles.treeLeafExpanded : ''}`}
+        style={{ paddingLeft: `${depth * 1.1}rem` }}
+        title={node.path}
+        aria-expanded={expanded}
+        onClick={() => {
+          toggle(node.path);
+        }}
+      >
+        <FiFile aria-hidden className={styles.treeLeafIcon} />
+        <span className={styles.treeLeafLabel}>{node.name}</span>
+        <small className={styles.treeMeta}>{node.value}</small>
+      </button>
+      {expanded && fullValue !== null && (
+        <pre
+          className={styles.treeLeafFull}
+          style={{ paddingLeft: `${depth * 1.1 + 1.6}rem` }}
+        >
+          {fullValue}
+        </pre>
+      )}
     </div>
   );
 }
@@ -363,9 +410,34 @@ function DatasetAttributesPage() {
     };
   }, [backend.available, datasetPath]);
 
-  const attributeTree = useMemo(
-    () => (attributes ? buildAttributeTree(attributes) : []),
-    [attributes],
+  const attributeGroups = useMemo<DatasetAttributeGroup[]>(() => {
+    if (!attributes?.groups) {
+      return [];
+    }
+
+    return attributes.groups
+      .filter((group) => Object.keys(group.attrs).length > 0)
+      .sort((left, right) => left.path.localeCompare(right.path));
+  }, [attributes]);
+
+  const [expandedLeaves, setExpandedLeaves] = useState<Set<string>>(new Set());
+  const toggleExpandedLeaf = useCallback((path: string) => {
+    setExpandedLeaves((current) => {
+      const next = new Set(current);
+      if (next.has(path)) {
+        next.delete(path);
+      } else {
+        next.add(path);
+      }
+      return next;
+    });
+  }, []);
+  const expandedContextValue = useMemo<ExpandedLeafContextValue>(
+    () => ({
+      isExpanded: (path) => expandedLeaves.has(path),
+      toggle: toggleExpandedLeaf,
+    }),
+    [expandedLeaves, toggleExpandedLeaf],
   );
 
   function updateSegment(id: string, patch: Partial<SegmentRow>) {
@@ -514,23 +586,28 @@ function DatasetAttributesPage() {
       )}
 
       {attributes && (
-        <>
-          <section className={styles.panel}>
-            <div className={styles.panelHeader}>
-              <h2 className={styles.panelTitle}>/data Attributes</h2>
-              <p className={styles.statusText}>{file?.name}</p>
-            </div>
-            <div className={styles.keyTree}>
-              {attributeTree.map((node) => (
-                <AttributeTreeItem key={node.path} node={node} depth={0} />
-              ))}
-            </div>
-          </section>
+        <ExpandedLeafContext.Provider value={expandedContextValue}>
+          {attributeGroups.map((group) => {
+            const nodes = buildSlashTree(group.path, group.attrs);
+            return (
+              <section className={styles.panel} key={group.path}>
+                <div className={styles.panelHeader}>
+                  <h2 className={styles.panelTitle}>{formatGroupTitle(group.path)}</h2>
+                  <p className={styles.statusText} title={group.path}>{group.path}</p>
+                </div>
+                <div className={styles.keyTree}>
+                  {nodes.map((node) => (
+                    <AttributeTreeItem key={node.path} node={node} depth={0} />
+                  ))}
+                </div>
+              </section>
+            );
+          })}
 
           <section className={styles.panel}>
             <div className={styles.panelHeader}>
               <div>
-                <h2 className={styles.panelTitle}>Articulation Segmentation</h2>
+                <h2 className={styles.panelTitle}>Articulation</h2>
                 <p className={styles.statusText}>Source: {attributes.articulationSource}</p>
               </div>
               {saveMessage && <p className={styles.successText}>{saveMessage}</p>}
@@ -563,6 +640,7 @@ function DatasetAttributesPage() {
             </div>
           </section>
 
+          {segments.length > 0 && (
           <section className={styles.panel}>
             <div className={styles.panelHeader}>
               <h2 className={styles.panelTitle}>Segmentation Children</h2>
@@ -665,7 +743,9 @@ function DatasetAttributesPage() {
               </button>
             </div>
           </section>
+          )}
 
+          {endEffectors.length > 0 && (
           <section className={styles.panel}>
             <div className={styles.panelHeader}>
               <h2 className={styles.panelTitle}>End Effector Children</h2>
@@ -770,7 +850,8 @@ function DatasetAttributesPage() {
               </button>
             </div>
           </section>
-        </>
+          )}
+        </ExpandedLeafContext.Provider>
       )}
     </div>
   );
