@@ -49,7 +49,7 @@ describe('Sidebar', () => {
       screen.getByRole('button', { name: 'Dataset Processing' }),
     ).toBeDisabled();
     expect(
-      screen.getByRole('button', { name: 'Cloth Distribution' }),
+      screen.getByRole('button', { name: 'Object Distribution' }),
     ).toBeDisabled();
   });
 
