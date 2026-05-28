@@ -984,7 +984,32 @@ function parseArticulation(raw: unknown): ParsedArticulation | null {
 
   const endEffectors: ArticulationEndEffector[] = [];
   const eefRaw = rawRecord.end_effectors;
-  if (eefRaw && typeof eefRaw === 'object' && !Array.isArray(eefRaw)) {
+  if (Array.isArray(eefRaw)) {
+    for (const eefValue of eefRaw) {
+      if (!eefValue || typeof eefValue !== 'object' || Array.isArray(eefValue)) {
+        continue;
+      }
+      const eefRecord = eefValue as Record<string, unknown>;
+      const poseStart = optionalInt(eefRecord.poseStart);
+      const poseEnd = optionalInt(eefRecord.poseEnd);
+      if (typeof eefRecord.name !== 'string' || poseStart == null || poseEnd == null) {
+        continue;
+      }
+
+      const poseOrder = Array.isArray(eefRecord.poseOrder)
+        ? eefRecord.poseOrder.filter((entry): entry is string => typeof entry === 'string')
+        : [];
+      endEffectors.push({
+        name: eefRecord.name,
+        poseStart,
+        poseEnd,
+        poseOrder,
+        gripperStart: optionalInt(eefRecord.gripperStart),
+        gripperEnd: optionalInt(eefRecord.gripperEnd),
+      });
+    }
+    endEffectors.sort((left, right) => left.name.localeCompare(right.name));
+  } else if (eefRaw && typeof eefRaw === 'object') {
     for (const [eefName, eefValue] of Object.entries(eefRaw as Record<string, unknown>)) {
       if (!eefValue || typeof eefValue !== 'object') {
         continue;
@@ -1165,11 +1190,13 @@ function loadEndEffectorPoses(
   // New standard schema: `obs/end_effectors/<name>/pose` (T, 4, 4).
   const obsGroup = maybeChildGroup(demoGroup, 'obs');
   const endEffectorsGroup = obsGroup ? maybeChildGroup(obsGroup, 'end_effectors') : null;
+  const obsEefPoseGroup = obsGroup ? maybeChildGroup(obsGroup, 'eef_pose') : null;
 
   // Legacy schema: `obs/eef_pose/<name>` (T, 4, 4) or `datagen_info/eef_pose/<name>`.
   const legacyGroup = findPoseGroup(demoGroup, 'eef_pose');
   return mergePoseArrays(
     loadPoseArrays(legacyGroup),
+    loadPoseArrays(obsEefPoseGroup),
     loadNestedPoseArrays(endEffectorsGroup),
   );
 }

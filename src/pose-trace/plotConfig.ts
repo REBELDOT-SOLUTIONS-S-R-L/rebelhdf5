@@ -233,9 +233,7 @@ export function getDefaultHidden3DTraceGroups(rows: DemoRow[]): Set<string> {
   return new Set(
     build3DTraceSpecs(rows)
       .filter((spec) =>
-        spec.prefix.startsWith('target_eef_')
-        || spec.prefix.startsWith('ik_input_eef_')
-        || spec.prefix.startsWith('eef_post_step_'),
+        spec.prefix.startsWith('eef_post_step_'),
       )
       .map((spec) => spec.prefix),
   );
