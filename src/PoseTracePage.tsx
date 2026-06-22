@@ -640,7 +640,7 @@ function PoseTracePage() {
           <p className={styles.eyebrow}>Analysis</p>
           <h1 className={styles.title}>Pose Trace</h1>
           <p className={styles.subtitle}>
-            Plot end-effector and garment trajectories directly from the currently opened HDF5 file.
+            Plot end-effector and object trajectories directly from the currently opened HDF5 file.
           </p>
         </div>
       </header>

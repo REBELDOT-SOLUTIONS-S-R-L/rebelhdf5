@@ -1,4 +1,4 @@
-import type { ClothDistributionPoint, ClothDistributionResult } from './types';
+import type { ObjectDistributionPoint, ObjectDistributionResult } from './types';
 
 const POSITION_BIN_COUNT = 20;
 const ROTATION_BIN_COUNT = 20;
@@ -129,7 +129,7 @@ function isFiniteNumber(value: number | null): value is number {
   return typeof value === 'number' && Number.isFinite(value);
 }
 
-function toResetPoint(point: ClothDistributionPoint): ResetPoint | null {
+function toResetPoint(point: ObjectDistributionPoint): ResetPoint | null {
   if (
     !isFiniteNumber(point.initialX)
     || !isFiniteNumber(point.initialY)
@@ -488,7 +488,7 @@ function collectRecommendations(
 }
 
 export function buildFailureAnalysis(
-  result: ClothDistributionResult,
+  result: ObjectDistributionResult,
   options: BuildFailureAnalysisOptions,
 ): FailureAnalysisResult | null {
   const minGeneratedSupport = Math.max(1, Math.trunc(options.minGeneratedCount) || 1);

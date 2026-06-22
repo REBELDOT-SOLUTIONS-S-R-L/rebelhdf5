@@ -1,15 +1,15 @@
 import type Plotly from 'plotly.js';
 import type { Data, Layout } from 'plotly.js';
 
-import type { FailurePlane, FailureSlice } from './clothAnalysis';
+import type { FailurePlane, FailureSlice } from './failureAnalysis';
 import { humanizeColumnName, type Trace3DSpec } from './schema';
 import type {
   ArticulationJoint,
   ArticulationSegment,
-  ClothDistributionAnchor,
-  ClothDistributionPoint,
-  ClothDistributionResult,
-  ClothDistributionSourceDetail,
+  ObjectDistributionAnchor,
+  ObjectDistributionPoint,
+  ObjectDistributionResult,
+  ObjectDistributionSourceDetail,
   DemoRow,
 } from './types';
 
@@ -293,11 +293,11 @@ function buildTraceVisibility(
   return showInLegend ? 'legendonly' : false;
 }
 
-function formatClothScalar(value: number | null): string {
+function formatObjectScalar(value: number | null): string {
   return value == null ? '-' : value.toFixed(4);
 }
 
-function buildClothHoverTemplate(category: string): string {
+function buildObjectHoverTemplate(category: string): string {
   return [
     '<b>%{customdata[0]}</b>',
     'episode: %{customdata[1]}',
@@ -315,8 +315,8 @@ function buildClothHoverTemplate(category: string): string {
   ].join('<br>');
 }
 
-function buildClothScatterTrace(
-  points: ClothDistributionPoint[],
+function buildObjectScatterTrace(
+  points: ObjectDistributionPoint[],
   name: 'Success' | 'Failed' | 'Teleop',
   color: string,
   opacity: number,
@@ -341,37 +341,37 @@ function buildClothScatterTrace(
     customdata: points.map((point) => [
       point.datasetName,
       point.demoName,
-      formatClothScalar(point.initialX),
-      formatClothScalar(point.initialY),
-      formatClothScalar(point.initialRx),
-      formatClothScalar(point.initialRy),
+      formatObjectScalar(point.initialX),
+      formatObjectScalar(point.initialY),
+      formatObjectScalar(point.initialRx),
+      formatObjectScalar(point.initialRy),
       point.numSamples == null ? '-' : String(point.numSamples),
       point.sourceLeft,
       point.sourceRight,
     ]),
-    hovertemplate: hoverEnabled ? buildClothHoverTemplate(name.toLowerCase()) : '<extra></extra>',
+    hovertemplate: hoverEnabled ? buildObjectHoverTemplate(name.toLowerCase()) : '<extra></extra>',
     hoverinfo: hoverEnabled ? 'all' : 'skip',
   };
 }
 
-function buildClothSelectedEpisodeHover(point: ClothDistributionPoint): string {
+function buildObjectSelectedEpisodeHover(point: ObjectDistributionPoint): string {
   return [
     `<b>${point.datasetName}</b>`,
     `episode: ${point.demoName}`,
     `category: ${point.category}`,
     `anchor x: ${point.x.toFixed(4)} m`,
     `anchor y: ${point.y.toFixed(4)} m`,
-    `initial x: ${formatClothScalar(point.initialX)}`,
-    `initial y: ${formatClothScalar(point.initialY)}`,
-    `initial rx: ${formatClothScalar(point.initialRx)}`,
-    `initial ry: ${formatClothScalar(point.initialRy)}`,
+    `initial x: ${formatObjectScalar(point.initialX)}`,
+    `initial y: ${formatObjectScalar(point.initialY)}`,
+    `initial rx: ${formatObjectScalar(point.initialRx)}`,
+    `initial ry: ${formatObjectScalar(point.initialRy)}`,
     `num samples: ${point.numSamples == null ? '-' : String(point.numSamples)}`,
     `source left: ${point.sourceLeft}`,
     `source right: ${point.sourceRight}`,
   ].join('<br>');
 }
 
-function buildClothSourceHoverText(detail: ClothDistributionSourceDetail): string {
+function buildObjectSourceHoverText(detail: ObjectDistributionSourceDetail): string {
   return [
     `<b>${detail.datasetName}</b>`,
     `episode: ${detail.demoName}`,
@@ -381,9 +381,9 @@ function buildClothSourceHoverText(detail: ClothDistributionSourceDetail): strin
   ].join('<br>');
 }
 
-function buildClothSourceOverlay(
-  details: ClothDistributionSourceDetail[],
-  selectedPoint: ClothDistributionPoint,
+function buildObjectSourceOverlay(
+  details: ObjectDistributionSourceDetail[],
+  selectedPoint: ObjectDistributionPoint,
   markerColor: string,
   textColor: string,
   lineColor: string,
@@ -415,7 +415,7 @@ function buildClothSourceOverlay(
       text: details.map((detail) => detail.textLabel),
       textposition: 'top center',
       textfont: { color: textColor, size: 12, family: FONT_FAMILY },
-      hovertext: details.map(buildClothSourceHoverText),
+      hovertext: details.map(buildObjectSourceHoverText),
       hovertemplate: '%{hovertext}<extra></extra>',
       marker: {
         size: 16,
@@ -427,9 +427,9 @@ function buildClothSourceOverlay(
   ];
 }
 
-export function buildClothDistributionData(
-  result: ClothDistributionResult | null,
-  selectedPoint: ClothDistributionPoint | null,
+export function buildObjectDistributionData(
+  result: ObjectDistributionResult | null,
+  selectedPoint: ObjectDistributionPoint | null,
 ): Data[] {
   if (!result) {
     return [];
@@ -439,21 +439,21 @@ export function buildClothDistributionData(
   const baseHoverEnabled = !selectedPoint;
   const traces: Data[] = [];
 
-  const successTrace = buildClothScatterTrace(
+  const successTrace = buildObjectScatterTrace(
     result.successPoints,
     'Success',
     '#2ca02c',
     baseOpacity,
     baseHoverEnabled,
   );
-  const failedTrace = buildClothScatterTrace(
+  const failedTrace = buildObjectScatterTrace(
     result.failedPoints,
     'Failed',
     '#d62728',
     baseOpacity,
     baseHoverEnabled,
   );
-  const teleopTrace = buildClothScatterTrace(
+  const teleopTrace = buildObjectScatterTrace(
     result.teleopPoints,
     'Teleop',
     '#1f77b4',
@@ -479,7 +479,7 @@ export function buildClothDistributionData(
     text: [selectedPoint.demoName],
     textposition: 'top center',
     textfont: { color: 'rgba(0, 90, 130, 1)', size: 12, family: FONT_FAMILY },
-    hovertext: [buildClothSelectedEpisodeHover(selectedPoint)],
+    hovertext: [buildObjectSelectedEpisodeHover(selectedPoint)],
     hovertemplate: '%{hovertext}<extra></extra>',
     marker: {
       size: 16,
@@ -490,7 +490,7 @@ export function buildClothDistributionData(
   });
 
   traces.push(
-    ...buildClothSourceOverlay(
+    ...buildObjectSourceOverlay(
       selectedPoint.sourceLeftDetails,
       selectedPoint,
       'rgba(255, 215, 0, 0.98)',
@@ -499,7 +499,7 @@ export function buildClothDistributionData(
       'Selected Left Sources',
       'Selected Left Links',
     ),
-    ...buildClothSourceOverlay(
+    ...buildObjectSourceOverlay(
       selectedPoint.sourceRightDetails,
       selectedPoint,
       'rgba(255, 140, 0, 0.98)',
@@ -513,9 +513,9 @@ export function buildClothDistributionData(
   return traces;
 }
 
-export function buildClothDistributionLayout(
-  _result: ClothDistributionResult | null,
-  anchor: ClothDistributionAnchor,
+export function buildObjectDistributionLayout(
+  _result: ObjectDistributionResult | null,
+  anchor: ObjectDistributionAnchor,
 ): Partial<Layout> {
   const theme = getPlotTheme();
 
@@ -553,6 +553,11 @@ export function buildClothDistributionLayout(
       zerolinecolor: theme.gridColor,
       scaleanchor: 'x',
       scaleratio: 1,
+      // Maintain equal aspect by adjusting the plotted box (domain) rather than
+      // the data range. With the default `constrain: 'range'`, repeated relayouts
+      // (resize, remount) progressively expand the range, making points cluster
+      // toward the center so the chart appears to keep narrowing.
+      constrain: 'domain',
       color: theme.textColor,
     },
   };
@@ -724,6 +729,7 @@ export function buildFailureMapLayout(
       range: [plane.yBounds.min, plane.yBounds.max],
       scaleanchor: 'x',
       scaleratio: 1,
+      constrain: 'domain',
     },
   };
 
@@ -851,6 +857,7 @@ export function buildFailureSliceLayout(
       title: slice.colIndex === 0 ? { text: slice.plane.yLabel } : undefined,
       scaleanchor: xAxisName,
       scaleratio: 1,
+      constrain: 'domain',
     };
 
     layout.annotations = [

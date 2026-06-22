@@ -10,14 +10,14 @@ export interface DemoInfo {
 // (new standard schema) with legacy fallback to direct datasets under `obs/`.
 export type DemoVideoKey = string;
 
-export const CLOTH_DISTRIBUTION_ANCHORS = ['initial_pose'] as const;
+export const OBJECT_DISTRIBUTION_ANCHORS = ['initial_pose'] as const;
 
-export type ClothDistributionAnchor = (typeof CLOTH_DISTRIBUTION_ANCHORS)[number];
-export const DEFAULT_CLOTH_DISTRIBUTION_ANCHOR: ClothDistributionAnchor = 'initial_pose';
+export type ObjectDistributionAnchor = (typeof OBJECT_DISTRIBUTION_ANCHORS)[number];
+export const DEFAULT_OBJECT_DISTRIBUTION_ANCHOR: ObjectDistributionAnchor = 'initial_pose';
 
-export type ClothDistributionCategory = 'success' | 'failed' | 'teleop';
+export type ObjectDistributionCategory = 'success' | 'failed' | 'teleop';
 
-export interface ClothDistributionSourceDetail {
+export interface ObjectDistributionSourceDetail {
   teleopId: string;
   datasetName: string;
   demoName: string;
@@ -28,8 +28,8 @@ export interface ClothDistributionSourceDetail {
   hoverLabel: string;
 }
 
-export interface ClothDistributionPoint {
-  category: ClothDistributionCategory;
+export interface ObjectDistributionPoint {
+  category: ObjectDistributionCategory;
   datasetName: string;
   demoName: string;
   x: number;
@@ -41,31 +41,41 @@ export interface ClothDistributionPoint {
   numSamples: number | null;
   sourceLeft: string;
   sourceRight: string;
-  sourceLeftDetails: ClothDistributionSourceDetail[];
-  sourceRightDetails: ClothDistributionSourceDetail[];
+  sourceLeftDetails: ObjectDistributionSourceDetail[];
+  sourceRightDetails: ObjectDistributionSourceDetail[];
 }
 
-export interface ClothDistributionRequest {
+export interface ObjectDistributionRequest {
   successSourceId: string | null;
   failedSourceId: string | null;
   teleopSourceId: string | null;
-  anchor: ClothDistributionAnchor;
-  includeRandomSelections: boolean;
+  anchor: ObjectDistributionAnchor;
+  /**
+   * Name of the rigid object whose `initial_pose` drives the scatter. When
+   * `null`, the first object found under `initial_state/rigid_objects` is used
+   * (legacy behavior).
+   */
+  objectName: string | null;
 }
 
-export interface ClothDistributionSourceDiagnostics {
+export interface ObjectDistributionSourceDiagnostics {
   totalDemos: number;
   includedDemos: number;
   missingAnchorCount: number;
-  missingObjectPositionsCount: number;
 }
 
-export interface ClothDistributionResult {
-  anchor: ClothDistributionAnchor;
-  successPoints: ClothDistributionPoint[];
-  failedPoints: ClothDistributionPoint[];
-  teleopPoints: ClothDistributionPoint[];
-  teleopDiagnostics: ClothDistributionSourceDiagnostics | null;
+export interface ObjectDistributionResult {
+  anchor: ObjectDistributionAnchor;
+  successPoints: ObjectDistributionPoint[];
+  failedPoints: ObjectDistributionPoint[];
+  teleopPoints: ObjectDistributionPoint[];
+  teleopDiagnostics: ObjectDistributionSourceDiagnostics | null;
+  /**
+   * Union of rigid-object names discovered across the selected datasets, in
+   * the order they appear under `initial_state/rigid_objects`. Used to populate
+   * the object selector on the distribution page.
+   */
+  availableObjects: string[];
 }
 
 export interface DemoVideoInfo {

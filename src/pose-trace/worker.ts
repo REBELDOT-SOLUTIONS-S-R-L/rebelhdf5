@@ -7,18 +7,18 @@ import h5wasm, {
 import { Plugin } from '@h5web/h5wasm';
 
 import { getPlugin } from '../plugin-utils';
-import { CLOTH_DISTRIBUTION_ANCHORS } from './types';
+import { OBJECT_DISTRIBUTION_ANCHORS } from './types';
 import type {
   ArticulationEndEffector,
   ArticulationJoint,
   ArticulationSegment,
-  ClothDistributionAnchor,
-  ClothDistributionSourceDiagnostics,
-  ClothDistributionCategory,
-  ClothDistributionPoint,
-  ClothDistributionRequest,
-  ClothDistributionResult,
-  ClothDistributionSourceDetail,
+  ObjectDistributionAnchor,
+  ObjectDistributionSourceDiagnostics,
+  ObjectDistributionCategory,
+  ObjectDistributionPoint,
+  ObjectDistributionRequest,
+  ObjectDistributionResult,
+  ObjectDistributionSourceDetail,
   DemoInfo,
   DemoRow,
   DatasetProcessingProgress,
@@ -53,7 +53,7 @@ type GetDatasetProcessingInfoPayload = {
   sourceId: string;
 };
 
-type LoadClothDistributionPayload = ClothDistributionRequest;
+type LoadObjectDistributionPayload = ObjectDistributionRequest;
 type ProcessDatasetPayload = DatasetProcessingRequest;
 
 type ListDemoVideosPayload = {
@@ -76,7 +76,7 @@ type PoseTraceWorkerRequest =
   | { id: number; type: 'openRemoteSource'; payload: OpenRemoteSourcePayload }
   | { id: number; type: 'loadDemoRows'; payload: LoadDemoRowsPayload }
   | { id: number; type: 'getDatasetProcessingInfo'; payload: GetDatasetProcessingInfoPayload }
-  | { id: number; type: 'loadClothDistribution'; payload: LoadClothDistributionPayload }
+  | { id: number; type: 'loadObjectDistribution'; payload: LoadObjectDistributionPayload }
   | { id: number; type: 'processDataset'; payload: ProcessDatasetPayload }
   | { id: number; type: 'listDemoVideos'; payload: ListDemoVideosPayload }
   | { id: number; type: 'loadDemoVideo'; payload: LoadDemoVideoPayload }
@@ -103,7 +103,7 @@ type PoseTraceWorkerResponse =
         | OpenSourceResultPayload
         | DemoRow[]
         | DatasetProcessingSourceInfo
-        | ClothDistributionResult
+        | ObjectDistributionResult
         | ProcessDatasetResult
         | DemoVideoInfo[]
         | LoadDemoVideoResult
@@ -118,7 +118,7 @@ interface WorkerSuccessResult {
     | OpenSourceResultPayload
     | DemoRow[]
     | DatasetProcessingSourceInfo
-    | ClothDistributionResult
+    | ObjectDistributionResult
     | ProcessDatasetResult
     | DemoVideoInfo[]
     | LoadDemoVideoResult
@@ -149,36 +149,7 @@ interface TeleopSource {
   demoName: string;
   x: number;
   y: number;
-  objectPositions: Record<string, [number, number, number]>;
 }
-
-const COMMON_CLOTH_KEYPOINTS = [
-  'garment_left_middle',
-  'garment_right_middle',
-  'garment_left_lower',
-  'garment_right_lower',
-  'garment_left_upper',
-  'garment_right_upper',
-] as const;
-
-const CLOTH_SUBTASK_SELECTION_SPECS = {
-  left: [
-    { signal: 'grasp_left_middle', objectRef: 'garment_left_middle', strategy: 'nearest_neighbor_object' },
-    { signal: 'left_middle_to_lower', objectRef: 'garment_left_lower', strategy: 'nearest_neighbor_object' },
-    { signal: 'left_at_waiting_pos', objectRef: null, strategy: 'random' },
-    { signal: 'grasp_left_lower', objectRef: 'garment_left_lower', strategy: 'nearest_neighbor_object' },
-    { signal: 'left_lower_to_upper', objectRef: 'garment_left_upper', strategy: 'nearest_neighbor_object' },
-    { signal: 'left_return_home', objectRef: null, strategy: 'random' },
-  ],
-  right: [
-    { signal: 'grasp_right_middle', objectRef: 'garment_right_middle', strategy: 'nearest_neighbor_object' },
-    { signal: 'right_middle_to_lower', objectRef: 'garment_right_lower', strategy: 'nearest_neighbor_object' },
-    { signal: 'right_at_waiting_pos', objectRef: null, strategy: 'random' },
-    { signal: 'grasp_right_lower', objectRef: 'garment_right_lower', strategy: 'nearest_neighbor_object' },
-    { signal: 'right_lower_to_upper', objectRef: 'garment_right_upper', strategy: 'nearest_neighbor_object' },
-    { signal: 'right_return_home', objectRef: null, strategy: 'random' },
-  ],
-} as const;
 
 const PLUGIN_ROOT = '/plugins';
 const FILTER_PLUGIN_NAMES: Record<number, Plugin> = {
@@ -1505,124 +1476,90 @@ function homogeneousMatrixToPoseVector(matrix: number[][]): number[] | null {
   return [x, y, z, qw, qx, qy, qz];
 }
 
-function readInitialPose(demoGroup: H5WasmGroup): number[] | null {
-  // Legacy: a single dataset at `initial_state/garment_initial_pose`.
-  const garmentInitialPose = maybeChildDataset(demoGroup, 'initial_state/garment_initial_pose');
-  if (garmentInitialPose) {
-    return asNumberVector(readDatasetArray(garmentInitialPose));
+// Current schema: `initial_state/rigid_objects/<name>/initial_pose`. Older
+// variants live under `initial_state/objects/<name>/`.
+function maybeObjectsRoot(demoGroup: H5WasmGroup): H5WasmGroup | null {
+  return maybeChildGroup(demoGroup, 'initial_state/rigid_objects')
+    ?? maybeChildGroup(demoGroup, 'initial_state/objects');
+}
+
+// The `initial_pose` dataset is either a (1, 7) xyz+quat vector or a
+// (1, 4, 4) / (4, 4) homogeneous transform matrix depending on how the file
+// was authored. Returns an xyz+quat (wxyz) pose vector.
+function parseObjectInitialPose(objectGroup: H5WasmGroup): number[] | null {
+  const initialPose = maybeChildDataset(objectGroup, 'initial_pose');
+  if (!initialPose) {
+    return null;
   }
 
-  // Current schema: `initial_state/rigid_objects/<name>/initial_pose`.
-  // The dataset is either a (1, 7) xyz+quat vector or a (1, 4, 4) / (4, 4)
-  // homogeneous transform matrix depending on how the file was authored.
-  // Older variants live under `initial_state/objects/<name>/` and
-  // `initial_state/garment/<name>/`.
-  const objectsRoot = maybeChildGroup(demoGroup, 'initial_state/rigid_objects')
-    ?? maybeChildGroup(demoGroup, 'initial_state/objects')
-    ?? maybeChildGroup(demoGroup, 'initial_state/garment');
+  const raw = readDatasetArray(initialPose);
+
+  const vector = asNumberVector(raw);
+  if (vector && vector.length >= 2) {
+    return vector;
+  }
+
+  const matrix = asPoseMatrix(raw);
+  if (matrix) {
+    return homogeneousMatrixToPoseVector(matrix);
+  }
+
+  return null;
+}
+
+// Names of every rigid object that exposes a readable `initial_pose`, in the
+// order they appear in the file.
+function listRigidObjectNames(demoGroup: H5WasmGroup): string[] {
+  const objectsRoot = maybeObjectsRoot(demoGroup);
+  if (!objectsRoot) {
+    return [];
+  }
+
+  const names: string[] = [];
+  for (const objectName of objectsRoot.keys()) {
+    const objectGroup = maybeChildGroup(objectsRoot, objectName);
+    if (objectGroup && maybeChildDataset(objectGroup, 'initial_pose')) {
+      names.push(objectName);
+    }
+  }
+
+  return names;
+}
+
+function readInitialPose(demoGroup: H5WasmGroup, objectName: string | null = null): number[] | null {
+  const objectsRoot = maybeObjectsRoot(demoGroup);
   if (!objectsRoot) {
     return null;
   }
 
-  for (const objectName of objectsRoot.keys()) {
+  // Explicit object selection: read only the requested object.
+  if (objectName) {
     const objectGroup = maybeChildGroup(objectsRoot, objectName);
+    return objectGroup ? parseObjectInitialPose(objectGroup) : null;
+  }
+
+  // Default: first object with a parseable initial_pose.
+  for (const name of objectsRoot.keys()) {
+    const objectGroup = maybeChildGroup(objectsRoot, name);
     if (!objectGroup) {
       continue;
     }
 
-    const initialPose = maybeChildDataset(objectGroup, 'initial_pose');
-    if (!initialPose) {
-      continue;
-    }
-
-    const raw = readDatasetArray(initialPose);
-
-    const vector = asNumberVector(raw);
-    if (vector && vector.length >= 2) {
-      return vector;
-    }
-
-    const matrix = asPoseMatrix(raw);
-    if (matrix) {
-      const pose = homogeneousMatrixToPoseVector(matrix);
-      if (pose) {
-        return pose;
-      }
+    const pose = parseObjectInitialPose(objectGroup);
+    if (pose) {
+      return pose;
     }
   }
 
   return null;
-}
-
-function findObjectPoseGroup(demoGroup: H5WasmGroup): H5WasmGroup | null {
-  // For per-keypoint scalar object positions we look (in order) at:
-  //   1. New schema datagen: `obs/datagen_info/object_pose/<name>` (T, 4, 4)
-  //   2. Legacy: `obs/object_pose/<name>`
-  //   3. Any descendant group named `object_pose`
-  // Note: `obs/objects/<name>/pose` lives one level deeper, handled separately.
-  return (
-    maybeChildGroup(demoGroup, 'obs/datagen_info/object_pose')
-    ?? maybeChildGroup(demoGroup, 'obs/object_pose')
-    ?? findPoseGroup(demoGroup, 'object_pose')
-  );
-}
-
-function readObjectPositionAtName(
-  demoGroup: H5WasmGroup,
-  keypointName: string,
-): [number, number, number] | null {
-  // New schema: `obs/objects/<name>/pose` (T, 4, 4).
-  const obsGroup = maybeChildGroup(demoGroup, 'obs');
-  const objectsGroup = obsGroup ? maybeChildGroup(obsGroup, 'objects') : null;
-  if (objectsGroup) {
-    const sub = maybeChildGroup(objectsGroup, keypointName);
-    const dataset = sub ? maybeChildDataset(sub, 'pose') : null;
-    if (dataset) {
-      const matrix = asPoseMatrix(readDatasetArray(dataset));
-      const x = matrix?.[0]?.[3];
-      const y = matrix?.[1]?.[3];
-      const z = matrix?.[2]?.[3];
-      if (isFiniteNumber(x) && isFiniteNumber(y) && isFiniteNumber(z)) {
-        return [roundFloat(x), roundFloat(y), roundFloat(z)];
-      }
-    }
-  }
-
-  // Fallback: legacy / datagen layout where each keypoint is a sibling dataset.
-  const fallbackGroup = findObjectPoseGroup(demoGroup);
-  if (fallbackGroup) {
-    return readObjectPosePosition(fallbackGroup, keypointName);
-  }
-
-  return null;
-}
-
-function readObjectPosePosition(
-  objectPoseGroup: H5WasmGroup,
-  keypointName: string,
-): [number, number, number] | null {
-  const dataset = maybeChildDataset(objectPoseGroup, keypointName);
-  if (!dataset) {
-    return null;
-  }
-
-  const matrix = asPoseMatrix(readDatasetArray(dataset));
-  const x = matrix?.[0]?.[3];
-  const y = matrix?.[1]?.[3];
-  const z = matrix?.[2]?.[3];
-
-  if (!isFiniteNumber(x) || !isFiniteNumber(y) || !isFiniteNumber(z)) {
-    return null;
-  }
-
-  return [roundFloat(x), roundFloat(y), roundFloat(z)];
 }
 
 function readAnchorXY(
   demoGroup: H5WasmGroup,
-  _anchor: ClothDistributionAnchor,
+  _anchor: ObjectDistributionAnchor,
+  objectName: string | null = null,
 ): [number, number] | null {
-  const pose = readInitialPose(demoGroup);
+  const pose = readInitialPose(demoGroup, objectName);
   const x = pose?.[0];
   const y = pose?.[1];
   if (!isFiniteNumber(x) || !isFiniteNumber(y)) {
@@ -1630,23 +1567,6 @@ function readAnchorXY(
   }
 
   return [roundFloat(x), roundFloat(y)];
-}
-
-function readObjectPositions(
-  demoGroup: H5WasmGroup,
-  keypointNames: readonly string[],
-): Record<string, [number, number, number]> | null {
-  const positions: Record<string, [number, number, number]> = {};
-  for (const keypointName of keypointNames) {
-    const position = readObjectPositionAtName(demoGroup, keypointName);
-    if (!position) {
-      return null;
-    }
-
-    positions[keypointName] = position;
-  }
-
-  return positions;
 }
 
 function readSourceDemoIndices(
@@ -1701,45 +1621,37 @@ function makeTeleopId(entry: OpenSourceEntry, demoName: string): string {
 
 function collectTeleopSources(
   entry: OpenSourceEntry,
-  anchor: ClothDistributionAnchor,
+  anchor: ObjectDistributionAnchor,
+  objectName: string | null,
 ): {
-  points: ClothDistributionPoint[];
+  points: ObjectDistributionPoint[];
   byDemoName: Record<string, TeleopSource[]>;
-  diagnostics: ClothDistributionSourceDiagnostics;
+  diagnostics: ObjectDistributionSourceDiagnostics;
 } {
-  const points: ClothDistributionPoint[] = [];
+  const points: ObjectDistributionPoint[] = [];
   const byDemoName: Record<string, TeleopSource[]> = {};
   let missingAnchorCount = 0;
-  let missingObjectPositionsCount = 0;
 
   for (const demo of entry.demos) {
     const demoGroup = getDemoGroup(entry, demo.name);
-    const xy = readAnchorXY(demoGroup, anchor);
+    const xy = readAnchorXY(demoGroup, anchor, objectName);
     if (!xy) {
       missingAnchorCount += 1;
       continue;
     }
 
-    // Garment keypoint positions are optional now that the page only plots the
-    // initial_pose anchor. Demos without them are still plotted; they just
-    // can't participate in source-demo linking.
-    const objectPositions = readObjectPositions(demoGroup, COMMON_CLOTH_KEYPOINTS);
-    if (!objectPositions) {
-      missingObjectPositionsCount += 1;
-    }
-
-    const initialPose = readInitialPose(demoGroup);
-    if (objectPositions) {
-      const teleopSource: TeleopSource = {
-        teleopId: makeTeleopId(entry, demo.name),
-        datasetName: entry.datasetName,
-        demoName: demo.name,
-        x: xy[0],
-        y: xy[1],
-        objectPositions,
-      };
-      byDemoName[demo.name] = [...(byDemoName[demo.name] ?? []), teleopSource];
-    }
+    // Every teleop demo is registered as a candidate source, anchored by its
+    // initial-pose XY. Generated demos link back to these by the explicit
+    // `reference_demo_indices`, so the source-arrow target is this position.
+    const initialPose = readInitialPose(demoGroup, objectName);
+    const teleopSource: TeleopSource = {
+      teleopId: makeTeleopId(entry, demo.name),
+      datasetName: entry.datasetName,
+      demoName: demo.name,
+      x: xy[0],
+      y: xy[1],
+    };
+    byDemoName[demo.name] = [...(byDemoName[demo.name] ?? []), teleopSource];
     points.push({
       category: 'teleop',
       datasetName: entry.datasetName,
@@ -1765,20 +1677,21 @@ function collectTeleopSources(
       totalDemos: entry.demos.length,
       includedDemos: points.length,
       missingAnchorCount,
-      missingObjectPositionsCount,
     },
   };
 }
 
-function resolveClothSideSourceDetails(
+// Resolve the source-demo arrows for one arm. The current schema gives the
+// source demo index explicitly per subtask slot in `reference_demo_indices`, so
+// each referenced index simply links to that teleop demo's anchor position. We
+// group repeated references to the same demo into a single arrow.
+function resolveSideSourceDetails(
   selectedIndices: readonly number[],
   side: 'left' | 'right',
-  generatedObjectPositions: Record<string, [number, number, number]>,
   teleopSourcesByDemo: Record<string, TeleopSource[]>,
-  includeRandomSelections: boolean,
 ): {
   rawSource: string;
-  details: ClothDistributionSourceDetail[];
+  details: ObjectDistributionSourceDetail[];
 } {
   const values = [...selectedIndices].map((value) => Math.trunc(value)).filter(Number.isFinite);
   const rawSource = values.length > 0 ? values.join(',') : '-';
@@ -1788,132 +1701,57 @@ function resolveClothSideSourceDetails(
     demoName: string;
     x: number;
     y: number;
-    entries: Array<{
-      slot: number;
-      signal: string;
-      objectRef: string | null;
-      strategy: string;
-      distanceM: number | null;
-    }>;
+    slots: number[];
   }>();
-  const sideSpecs = CLOTH_SUBTASK_SELECTION_SPECS[side];
 
   values.forEach((indexValue, slot) => {
     const demoName = `demo_${indexValue}`;
-    const candidates = teleopSourcesByDemo[demoName] ?? [];
-    if (candidates.length === 0) {
+    const source = teleopSourcesByDemo[demoName]?.[0];
+    if (!source) {
       return;
     }
 
-    const spec = sideSpecs[slot] ?? {
-      signal: `${side}_slot_${slot}`,
-      objectRef: null,
-      strategy: 'random',
+    const existing = grouped.get(source.teleopId) ?? {
+      teleopId: source.teleopId,
+      datasetName: source.datasetName,
+      demoName: source.demoName,
+      x: source.x,
+      y: source.y,
+      slots: [],
     };
-
-    let best = candidates[0];
-    let distanceM: number | null = null;
-
-    if (spec.objectRef && generatedObjectPositions[spec.objectRef]) {
-      const generatedPosition = generatedObjectPositions[spec.objectRef];
-      let bestDistance = Number.POSITIVE_INFINITY;
-
-      for (const candidate of candidates) {
-        const sourcePosition = candidate.objectPositions[spec.objectRef];
-        if (!sourcePosition) {
-          continue;
-        }
-
-        const nextDistance = Math.hypot(
-          generatedPosition[0] - sourcePosition[0],
-          generatedPosition[1] - sourcePosition[1],
-          generatedPosition[2] - sourcePosition[2],
-        );
-
-        if (nextDistance < bestDistance) {
-          bestDistance = nextDistance;
-          best = candidate;
-          distanceM = roundFloat(nextDistance);
-        }
-      }
-    }
-
-    const existing = grouped.get(best.teleopId) ?? {
-      teleopId: best.teleopId,
-      datasetName: best.datasetName,
-      demoName: best.demoName,
-      x: best.x,
-      y: best.y,
-      entries: [],
-    };
-    existing.entries.push({
-      slot,
-      signal: spec.signal,
-      objectRef: spec.objectRef,
-      strategy: spec.strategy,
-      distanceM,
-    });
-    grouped.set(best.teleopId, existing);
+    existing.slots.push(slot);
+    grouped.set(source.teleopId, existing);
   });
 
   const details = [...grouped.values()]
     .sort((left, right) => left.demoName.localeCompare(right.demoName))
-    .map((record) => {
-      const entries = [...record.entries]
-        .filter((entry) => includeRandomSelections || entry.objectRef != null)
-        .sort((left, right) => left.slot - right.slot);
-      if (entries.length === 0) {
-        return null;
-      }
-      const textParts: string[] = [];
-      const hoverParts: string[] = [];
-      const slots: number[] = [];
-
-      for (const entry of entries) {
-        slots.push(entry.slot);
-        if (!entry.objectRef) {
-          textParts.push(`${side.toUpperCase()}${entry.slot}:rand`);
-          hoverParts.push(`${side.toUpperCase()}[${entry.slot}] ${entry.signal}: random`);
-          continue;
-        }
-
-        const safeDistance = entry.distanceM ?? 0;
-        textParts.push(`${side.toUpperCase()}${entry.slot}:${safeDistance.toFixed(3)}m`);
-        hoverParts.push(
-          `${side.toUpperCase()}[${entry.slot}] ${entry.signal}: `
-          + `${entry.objectRef} dist=${safeDistance.toFixed(3)}m (${entry.strategy})`,
-        );
-      }
-
-      return {
-        teleopId: record.teleopId,
-        datasetName: record.datasetName,
-        demoName: record.demoName,
-        x: record.x,
-        y: record.y,
-        slots,
-        textLabel: `${record.demoName} ${textParts.join(' | ')}`.trim(),
-        hoverLabel: hoverParts.join('<br>'),
-      } satisfies ClothDistributionSourceDetail;
-    })
-    .filter((detail): detail is ClothDistributionSourceDetail => Boolean(detail));
+    .map((record) => ({
+      teleopId: record.teleopId,
+      datasetName: record.datasetName,
+      demoName: record.demoName,
+      x: record.x,
+      y: record.y,
+      slots: [...record.slots].sort((left, right) => left - right),
+      textLabel: record.demoName,
+      hoverLabel: `${side.toUpperCase()} arm → ${record.demoName}`,
+    } satisfies ObjectDistributionSourceDetail));
 
   return { rawSource, details };
 }
 
-function collectGeneratedClothPoints(
+function collectGeneratedObjectPoints(
   entry: OpenSourceEntry,
-  category: Exclude<ClothDistributionCategory, 'teleop'>,
-  anchor: ClothDistributionAnchor,
+  category: Exclude<ObjectDistributionCategory, 'teleop'>,
+  anchor: ObjectDistributionAnchor,
   teleopSourcesByDemo: Record<string, TeleopSource[]>,
-  includeRandomSelections: boolean,
-): ClothDistributionPoint[] {
-  const points: ClothDistributionPoint[] = [];
+  objectName: string | null,
+): ObjectDistributionPoint[] {
+  const points: ObjectDistributionPoint[] = [];
 
   for (const demo of entry.demos) {
     const demoGroup = getDemoGroup(entry, demo.name);
-    const initialPose = readInitialPose(demoGroup);
-    const anchorXY = readAnchorXY(demoGroup, anchor);
+    const initialPose = readInitialPose(demoGroup, objectName);
+    const anchorXY = readAnchorXY(demoGroup, anchor, objectName);
     let xy: [number, number] | null = anchorXY;
     if (!xy && initialPose && isFiniteNumber(initialPose[0]) && isFiniteNumber(initialPose[1])) {
       xy = [roundFloat(initialPose[0]), roundFloat(initialPose[1])];
@@ -1922,30 +1760,22 @@ function collectGeneratedClothPoints(
       continue;
     }
 
-    const objectPositions = readObjectPositions(demoGroup, COMMON_CLOTH_KEYPOINTS) ?? {};
     // New schema uses `reference_demo_indices/<articulation_name>`; legacy used `source_demo_indices`.
+    // The articulation name varies across tasks (`left`/`right` or `left_arm`/`right_arm`).
     const leftIndices = [
       ...readSourceDemoIndices(demoGroup, 'reference_demo_indices/left_arm'),
+      ...readSourceDemoIndices(demoGroup, 'reference_demo_indices/left'),
       ...readSourceDemoIndices(demoGroup, 'source_demo_indices/left_arm'),
+      ...readSourceDemoIndices(demoGroup, 'source_demo_indices/left'),
     ];
     const rightIndices = [
       ...readSourceDemoIndices(demoGroup, 'reference_demo_indices/right_arm'),
+      ...readSourceDemoIndices(demoGroup, 'reference_demo_indices/right'),
       ...readSourceDemoIndices(demoGroup, 'source_demo_indices/right_arm'),
+      ...readSourceDemoIndices(demoGroup, 'source_demo_indices/right'),
     ];
-    const leftSource = resolveClothSideSourceDetails(
-      leftIndices,
-      'left',
-      objectPositions,
-      teleopSourcesByDemo,
-      includeRandomSelections,
-    );
-    const rightSource = resolveClothSideSourceDetails(
-      rightIndices,
-      'right',
-      objectPositions,
-      teleopSourcesByDemo,
-      includeRandomSelections,
-    );
+    const leftSource = resolveSideSourceDetails(leftIndices, 'left', teleopSourcesByDemo);
+    const rightSource = resolveSideSourceDetails(rightIndices, 'right', teleopSourcesByDemo);
 
     points.push({
       category,
@@ -1968,11 +1798,11 @@ function collectGeneratedClothPoints(
   return points;
 }
 
-function loadClothDistribution(
-  request: ClothDistributionRequest,
-): ClothDistributionResult {
-  if (!(CLOTH_DISTRIBUTION_ANCHORS as readonly string[]).includes(request.anchor)) {
-    throw new Error(`Unsupported cloth distribution anchor: ${request.anchor}`);
+function loadObjectDistribution(
+  request: ObjectDistributionRequest,
+): ObjectDistributionResult {
+  if (!(OBJECT_DISTRIBUTION_ANCHORS as readonly string[]).includes(request.anchor)) {
+    throw new Error(`Unsupported object distribution anchor: ${request.anchor}`);
   }
 
   const successEntry = request.successSourceId ? openSources.get(request.successSourceId) ?? null : null;
@@ -1989,33 +1819,61 @@ function loadClothDistribution(
     throw new Error('Selected teleop source is no longer available.');
   }
 
+  const objectName = request.objectName ?? null;
+  const availableObjects = collectAvailableObjects([successEntry, failedEntry, teleopEntry]);
+
   const teleopCollection = teleopEntry
-    ? collectTeleopSources(teleopEntry, request.anchor)
+    ? collectTeleopSources(teleopEntry, request.anchor, objectName)
     : { points: [], byDemoName: {}, diagnostics: null };
 
   return {
     anchor: request.anchor,
     successPoints: successEntry
-      ? collectGeneratedClothPoints(
+      ? collectGeneratedObjectPoints(
           successEntry,
           'success',
           request.anchor,
           teleopCollection.byDemoName,
-          request.includeRandomSelections,
+          objectName,
         )
       : [],
     failedPoints: failedEntry
-      ? collectGeneratedClothPoints(
+      ? collectGeneratedObjectPoints(
           failedEntry,
           'failed',
           request.anchor,
           teleopCollection.byDemoName,
-          request.includeRandomSelections,
+          objectName,
         )
       : [],
     teleopPoints: teleopCollection.points,
     teleopDiagnostics: teleopCollection.diagnostics,
+    availableObjects,
   };
+}
+
+// Union of rigid-object names across the selected datasets, preserving the
+// in-file order of the first dataset that exposes them. Object sets are fixed
+// per scene, so inspecting the first demo of each entry is sufficient.
+function collectAvailableObjects(entries: (OpenSourceEntry | null)[]): string[] {
+  const names: string[] = [];
+  const seen = new Set<string>();
+
+  for (const entry of entries) {
+    if (!entry || entry.demos.length === 0) {
+      continue;
+    }
+
+    const demoGroup = getDemoGroup(entry, entry.demos[0].name);
+    for (const name of listRigidObjectNames(demoGroup)) {
+      if (!seen.has(name)) {
+        seen.add(name);
+        names.push(name);
+      }
+    }
+  }
+
+  return names;
 }
 
 interface H5AttributeOwner {
@@ -2746,8 +2604,8 @@ async function handleRequest(message: PoseTraceWorkerRequest): Promise<WorkerSuc
       }
       return { result: listDatasetProcessingInfo(entry) };
     }
-    case 'loadClothDistribution':
-      return { result: loadClothDistribution(message.payload) };
+    case 'loadObjectDistribution':
+      return { result: loadObjectDistribution(message.payload) };
     case 'processDataset': {
       const result = await processDataset(message.payload, message.id);
       return { result };

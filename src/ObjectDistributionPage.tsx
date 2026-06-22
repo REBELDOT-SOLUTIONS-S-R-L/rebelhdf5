@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 
-import { buildFailureAnalysis } from './pose-trace/clothAnalysis';
-import { loadClothDistribution, openPoseTraceSource } from './pose-trace/hdf5';
+import { buildFailureAnalysis } from './pose-trace/failureAnalysis';
+import { loadObjectDistribution, openPoseTraceSource } from './pose-trace/hdf5';
 import Plot from './pose-trace/PlotlyChart';
 import {
-  buildClothDistributionData,
-  buildClothDistributionLayout,
+  buildObjectDistributionData,
+  buildObjectDistributionLayout,
   buildEmptyLayout,
   buildFailureMapData,
   buildFailureMapLayout,
@@ -14,15 +14,15 @@ import {
   buildFailureSliceLayout,
 } from './pose-trace/plotConfig';
 import {
-  DEFAULT_CLOTH_DISTRIBUTION_ANCHOR,
-  type ClothDistributionPoint,
-  type ClothDistributionResult,
+  DEFAULT_OBJECT_DISTRIBUTION_ANCHOR,
+  type ObjectDistributionPoint,
+  type ObjectDistributionResult,
   type PoseTraceSource,
 } from './pose-trace/types';
 import { type H5File, useStore } from './stores';
 import styles from './ObjectDistributionPage.module.css';
 
-type ClothViewTab = 'scatter' | 'position' | 'rotation' | 'slices';
+type ObjectViewTab = 'scatter' | 'position' | 'rotation' | 'slices';
 
 interface SourceState {
   source: PoseTraceSource | null;
@@ -37,7 +37,7 @@ interface PlotClickEvent {
   }>;
 }
 
-const VIEW_TABS: Array<{ id: ClothViewTab; label: string }> = [
+const VIEW_TABS: Array<{ id: ObjectViewTab; label: string }> = [
   { id: 'scatter', label: 'Scatter' },
   { id: 'position', label: 'Position Map' },
   { id: 'rotation', label: 'Rotation Map' },
@@ -97,33 +97,81 @@ function usePoseSource(file: H5File | null): SourceState {
   return state;
 }
 
-function looksLikeFailed(file: H5File): boolean {
-  return /failed/i.test(file.name);
+type DatasetRole = 'success' | 'failed' | 'teleop';
+
+interface DatasetGroupSelection {
+  successUrl: string | null;
+  failedUrl: string | null;
+  teleopUrl: string | null;
 }
 
-function matchesTeleopHint(value: string): boolean {
-  return /(teleop|annotated)/i.test(value);
+// File-name convention for a dataset pack (all three share the same base name):
+//   <name>_annotated_<string>          → teleop
+//   <name>_generated_<string>          → successful generated
+//   <name>_generated_<string>_failed   → failed generated
+// `failed` is checked before `success` because a failed file is also generated.
+function classifyDataset(file: H5File): DatasetRole | null {
+  const name = file.name.toLowerCase();
+  const isGenerated = name.includes('generated');
+  if (isGenerated && name.includes('failed')) {
+    return 'failed';
+  }
+  if (isGenerated) {
+    return 'success';
+  }
+  if (name.includes('annotated') || name.includes('teleop')) {
+    return 'teleop';
+  }
+
+  return null;
 }
 
-function looksLikeTeleop(file: H5File): boolean {
-  return matchesTeleopHint(file.name)
-    || matchesTeleopHint(file.url)
-    || matchesTeleopHint(file.resolvedUrl);
+// The shared prefix that ties a pack together: everything before the
+// `_generated` / `_annotated` role marker (extension stripped).
+function datasetBaseName(file: H5File): string {
+  const stem = file.name.toLowerCase().replace(/\.[^./\\]+$/u, '');
+  return /^(.*?)_(?:annotated|generated)/u.exec(stem)?.[1] ?? stem;
 }
 
-function guessSuccessDataset(files: H5File[]): string | null {
-  return files.find((file) => !looksLikeFailed(file) && !looksLikeTeleop(file))?.url ?? files[0]?.url ?? null;
+// Pick a coherent pack of (success, failed, teleop) datasets. Files are grouped
+// by their shared base name so opening several packs never mixes roles across
+// packs; within the chosen pack each role is assigned from the name convention.
+function selectDatasetGroup(files: H5File[], preferredUrl: string | null): DatasetGroupSelection {
+  const groups = new Map<string, H5File[]>();
+  for (const file of files) {
+    const base = datasetBaseName(file);
+    groups.set(base, [...(groups.get(base) ?? []), file]);
+  }
+
+  let targetBase: string | null = null;
+  const preferred = preferredUrl ? files.find((file) => file.url === preferredUrl) : null;
+  if (preferred) {
+    targetBase = datasetBaseName(preferred);
+  } else {
+    // Prefer the pack with the most distinct roles present (a complete 3-file
+    // pack wins), keeping the first such pack on ties.
+    let bestScore = -1;
+    for (const [base, packFiles] of groups) {
+      const score = new Set(packFiles.map(classifyDataset).filter(Boolean)).size;
+      if (score > bestScore) {
+        bestScore = score;
+        targetBase = base;
+      }
+    }
+  }
+
+  const packFiles = targetBase === null ? files : groups.get(targetBase) ?? [];
+  const pick = (role: DatasetRole): string | null =>
+    packFiles.find((file) => classifyDataset(file) === role)?.url ?? null;
+
+  return {
+    successUrl: pick('success'),
+    failedUrl: pick('failed'),
+    teleopUrl: pick('teleop'),
+  };
 }
 
-function guessFailedDataset(files: H5File[]): string | null {
-  return files.find(looksLikeFailed)?.url ?? null;
-}
-
-function guessTeleopDataset(files: H5File[]): string | null {
-  return files.find(looksLikeTeleop)?.url ?? null;
-}
-
-function analysisTitle(tab: ClothViewTab): string {
+function analysisTitle(tab: ObjectViewTab): string {
   if (tab === 'position') {
     return 'Position Failure Map';
   }
@@ -159,8 +207,8 @@ function hashRevisionKey(parts: Array<string | number | boolean>): number {
 
 function resolveClickedPoint(
   event: PlotClickEvent,
-  result: ClothDistributionResult | null,
-): ClothDistributionPoint | null {
+  result: ObjectDistributionResult | null,
+): ObjectDistributionPoint | null {
   const point = event.points?.[0];
   const pointIndex = point?.pointIndex ?? -1;
   if (!point || pointIndex < 0 || !result) {
@@ -206,47 +254,23 @@ function ObjectDistributionPage() {
   const [successUrl, setSuccessUrl] = useState<string | null>(null);
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
   const [teleopUrl, setTeleopUrl] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<ClothViewTab>('scatter');
-  const anchor = DEFAULT_CLOTH_DISTRIBUTION_ANCHOR;
-  const [includeRandomSelections, setIncludeRandomSelections] = useState(false);
+  const [activeTab, setActiveTab] = useState<ObjectViewTab>('scatter');
+  const anchor = DEFAULT_OBJECT_DISTRIBUTION_ANCHOR;
+  const [objectName, setObjectName] = useState<string | null>(null);
   const [showTeleopOverlay, setShowTeleopOverlay] = useState(true);
   const [minGeneratedCount, setMinGeneratedCount] = useState(3);
-  const [result, setResult] = useState<ClothDistributionResult | null>(null);
+  const [result, setResult] = useState<ObjectDistributionResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [selectedPoint, setSelectedPoint] = useState<ClothDistributionPoint | null>(null);
+  const [selectedPoint, setSelectedPoint] = useState<ObjectDistributionPoint | null>(null);
 
   useEffect(() => {
     const availableUrls = new Set(opened.map((file) => file.url));
+    const selection = selectDatasetGroup(opened, activeUrl);
 
-    setSuccessUrl((current) => {
-      if (current && availableUrls.has(current)) {
-        return current;
-      }
-
-      if (
-        activeUrl
-        && availableUrls.has(activeUrl)
-        && !looksLikeTeleop(opened.find((file) => file.url === activeUrl)!)
-        && !looksLikeFailed(opened.find((file) => file.url === activeUrl)!)
-      ) {
-        return activeUrl;
-      }
-
-      return guessSuccessDataset(opened);
-    });
-
-    setFailedUrl((current) => (
-      current && availableUrls.has(current)
-        ? current
-        : guessFailedDataset(opened)
-    ));
-
-    setTeleopUrl((current) => (
-      current && availableUrls.has(current)
-        ? current
-        : guessTeleopDataset(opened)
-    ));
+    setSuccessUrl((current) => (current && availableUrls.has(current) ? current : selection.successUrl));
+    setFailedUrl((current) => (current && availableUrls.has(current) ? current : selection.failedUrl));
+    setTeleopUrl((current) => (current && availableUrls.has(current) ? current : selection.teleopUrl));
   }, [activeUrl, opened]);
 
   const successFile = useMemo(
@@ -309,12 +333,12 @@ function ObjectDistributionPage() {
     setResult(null);
     setSelectedPoint(null);
 
-    void loadClothDistribution({
+    void loadObjectDistribution({
       successSourceId: successState.source?.sourceId ?? null,
       failedSourceId: failedState.source?.sourceId ?? null,
       teleopSourceId: teleopState.source?.sourceId ?? null,
       anchor,
-      includeRandomSelections,
+      objectName,
     })
       .then((nextResult) => {
         if (cancelled) {
@@ -346,7 +370,7 @@ function ObjectDistributionPage() {
     failedState.error,
     failedState.loading,
     failedState.source,
-    includeRandomSelections,
+    objectName,
     selectedStates,
     successState.error,
     successState.loading,
@@ -355,6 +379,16 @@ function ObjectDistributionPage() {
     teleopState.loading,
     teleopState.source,
   ]);
+
+  const availableObjects = useMemo(() => result?.availableObjects ?? [], [result]);
+
+  // Drop a stale selection when the chosen object is no longer present in the
+  // selected datasets (falls back to the default first-object behavior).
+  useEffect(() => {
+    if (objectName && availableObjects.length > 0 && !availableObjects.includes(objectName)) {
+      setObjectName(null);
+    }
+  }, [availableObjects, objectName]);
 
   const totalPointCount = (result?.successPoints.length ?? 0)
     + (result?.failedPoints.length ?? 0)
@@ -410,10 +444,10 @@ function ObjectDistributionPage() {
     () => hashRevisionKey([
       activeTab,
       anchor,
+      objectName ?? 'default',
       successState.source?.sourceId ?? 'none',
       failedState.source?.sourceId ?? 'none',
       teleopState.source?.sourceId ?? 'none',
-      includeRandomSelections,
       showTeleopOverlay,
       minGeneratedCount,
     ]),
@@ -421,8 +455,8 @@ function ObjectDistributionPage() {
       activeTab,
       anchor,
       failedState.source,
-      includeRandomSelections,
       minGeneratedCount,
+      objectName,
       showTeleopOverlay,
       successState.source,
       teleopState.source,
@@ -431,7 +465,7 @@ function ObjectDistributionPage() {
 
   const plotData = useMemo(() => {
     if (activeTab === 'scatter') {
-      return buildClothDistributionData(result, selectedPoint);
+      return buildObjectDistributionData(result, selectedPoint);
     }
 
     if (!analysisResult) {
@@ -452,11 +486,11 @@ function ObjectDistributionPage() {
   const plotLayout = useMemo(() => {
     if (activeTab === 'scatter') {
       if (hasScatterData) {
-        return buildClothDistributionLayout(result, anchor);
+        return buildObjectDistributionLayout(result, anchor);
       }
 
       return buildEmptyLayout(
-        'Cloth Distribution',
+        'Object Distribution',
         loading
           ? 'Loading object-distribution data…'
           : 'Select dataset files to render the initial-pose scatter plot.',
@@ -515,11 +549,11 @@ function ObjectDistributionPage() {
 
             <div className={styles.controlGrid}>
               <div className={styles.field}>
-                <label className={styles.fieldLabel} htmlFor="cloth-success-source">
+                <label className={styles.fieldLabel} htmlFor="object-success-source">
                   Successful Generated Dataset
                 </label>
                 <select
-                  id="cloth-success-source"
+                  id="object-success-source"
                   className={styles.select}
                   value={successUrl ?? ''}
                   onChange={(event) => {
@@ -536,11 +570,11 @@ function ObjectDistributionPage() {
               </div>
 
               <div className={styles.field}>
-                <label className={styles.fieldLabel} htmlFor="cloth-failed-source">
+                <label className={styles.fieldLabel} htmlFor="object-failed-source">
                   Failed Generated Dataset
                 </label>
                 <select
-                  id="cloth-failed-source"
+                  id="object-failed-source"
                   className={styles.select}
                   value={failedUrl ?? ''}
                   onChange={(event) => {
@@ -557,11 +591,11 @@ function ObjectDistributionPage() {
               </div>
 
               <div className={styles.field}>
-                <label className={styles.fieldLabel} htmlFor="cloth-teleop-source">
+                <label className={styles.fieldLabel} htmlFor="object-teleop-source">
                   Teleop Dataset
                 </label>
                 <select
-                  id="cloth-teleop-source"
+                  id="object-teleop-source"
                   className={styles.select}
                   value={teleopUrl ?? ''}
                   onChange={(event) => {
@@ -578,25 +612,37 @@ function ObjectDistributionPage() {
               </div>
 
               {activeTab === 'scatter' ? (
-                <label className={styles.checkboxField} htmlFor="cloth-include-random">
-                  <input
-                    id="cloth-include-random"
-                    type="checkbox"
-                    checked={includeRandomSelections}
+                <div className={styles.field}>
+                  <label className={styles.fieldLabel} htmlFor="object-object">
+                    Reference Object
+                  </label>
+                  <select
+                    id="object-object"
+                    className={styles.select}
+                    value={objectName ?? (availableObjects.length > 0 ? availableObjects[0] : '')}
+                    disabled={availableObjects.length === 0}
                     onChange={(event) => {
-                      setIncludeRandomSelections(event.target.checked);
+                      setObjectName(event.target.value || null);
                     }}
-                  />
-                  <span>Include random source selections in highlighted demos</span>
-                </label>
+                  >
+                    {availableObjects.length === 0 && (
+                      <option value="">No rigid objects found</option>
+                    )}
+                    {availableObjects.map((name) => (
+                      <option key={name} value={name}>
+                        {name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               ) : (
                 <>
                   <div className={styles.field}>
-                    <label className={styles.fieldLabel} htmlFor="cloth-min-support">
+                    <label className={styles.fieldLabel} htmlFor="object-min-support">
                       Min Neighborhood Support
                     </label>
                     <select
-                      id="cloth-min-support"
+                      id="object-min-support"
                       className={styles.select}
                       value={String(minGeneratedCount)}
                       onChange={(event) => {
@@ -611,9 +657,9 @@ function ObjectDistributionPage() {
                     </select>
                   </div>
 
-                  <label className={styles.checkboxField} htmlFor="cloth-show-teleop">
+                  <label className={styles.checkboxField} htmlFor="object-show-teleop">
                     <input
-                      id="cloth-show-teleop"
+                      id="object-show-teleop"
                       type="checkbox"
                       checked={showTeleopOverlay}
                       onChange={(event) => {

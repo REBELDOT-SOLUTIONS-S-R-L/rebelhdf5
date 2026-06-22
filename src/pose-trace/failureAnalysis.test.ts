@@ -1,19 +1,19 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildFailureAnalysis } from './clothAnalysis';
+import { buildFailureAnalysis } from './failureAnalysis';
 import type {
-  ClothDistributionCategory,
-  ClothDistributionPoint,
-  ClothDistributionResult,
+  ObjectDistributionCategory,
+  ObjectDistributionPoint,
+  ObjectDistributionResult,
 } from './types';
 
 function makePoint(
-  category: ClothDistributionCategory,
+  category: ObjectDistributionCategory,
   x: number,
   y: number,
   rx: number,
   ry: number,
-): ClothDistributionPoint {
+): ObjectDistributionPoint {
   return {
     category,
     datasetName: 'ds',
@@ -33,22 +33,23 @@ function makePoint(
 }
 
 function makeResult(
-  successPoints: ClothDistributionPoint[],
-  failedPoints: ClothDistributionPoint[],
-  teleopPoints: ClothDistributionPoint[] = [],
-): ClothDistributionResult {
+  successPoints: ObjectDistributionPoint[],
+  failedPoints: ObjectDistributionPoint[],
+  teleopPoints: ObjectDistributionPoint[] = [],
+): ObjectDistributionResult {
   return {
     anchor: 'initial_pose',
     successPoints,
     failedPoints,
     teleopPoints,
     teleopDiagnostics: null,
+    availableObjects: [],
   };
 }
 
 describe('buildFailureAnalysis', () => {
   it('returns null when no generated points have valid reset coordinates', () => {
-    const broken: ClothDistributionPoint = {
+    const broken: ObjectDistributionPoint = {
       ...makePoint('success', 0, 0, 0, 0),
       initialX: null,
       initialY: null,
@@ -101,8 +102,8 @@ describe('buildFailureAnalysis', () => {
 
   it('caps recommendations at the documented MAX_RECOMMENDATIONS', () => {
     // Spread points across a wide grid so every cell has enough support.
-    const success: ClothDistributionPoint[] = [];
-    const failed: ClothDistributionPoint[] = [];
+    const success: ObjectDistributionPoint[] = [];
+    const failed: ObjectDistributionPoint[] = [];
     for (let xi = 0; xi < 10; xi += 1) {
       for (let yi = 0; yi < 10; yi += 1) {
         success.push(makePoint('success', xi * 0.1, yi * 0.1, xi * 3, yi * 3));
@@ -126,7 +127,7 @@ describe('buildFailureAnalysis', () => {
     const skippedFailed = {
       ...makePoint('failed', 0, 0, 0, 0),
       initialX: null,
-    } as ClothDistributionPoint;
+    } as ObjectDistributionPoint;
 
     const result = buildFailureAnalysis(
       makeResult([goodSuccess], [skippedFailed]),
