@@ -89,7 +89,7 @@ const OPERATION_LABELS: Record<DatasetProcessingOperation, string> = {
 const DATASET_PROCESSING_OPERATIONS: DatasetProcessingOperation[] = ['cut', 'merge', 'append', 'lerobot'];
 const BACKEND_SOURCE_PREFIX = 'backend:';
 const DEFAULT_LEROBOT_MODALITY_JSON = '/workspace/IsaacTools/ROBOTICS-lehome-challenge/configs/gr00t/modality.json';
-const DEFAULT_LEROBOT_TASK = 'Fold the garment on the table';
+const DEFAULT_LEROBOT_TASK = 'Complete the task';
 
 function getBackendSourceId(path: string): string {
   return `${BACKEND_SOURCE_PREFIX}${path}`;

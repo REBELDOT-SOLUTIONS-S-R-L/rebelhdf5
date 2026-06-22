@@ -4,8 +4,8 @@ import {
   build3DData,
   build3DDataForStep,
   build3DLayout,
-  buildClothDistributionData,
-  buildClothDistributionLayout,
+  buildObjectDistributionData,
+  buildObjectDistributionLayout,
   buildCombinedJointChartData,
   buildEmptyLayout,
   buildJointChartData,
@@ -14,8 +14,8 @@ import {
 } from './plotConfig';
 import type {
   ArticulationSegment,
-  ClothDistributionPoint,
-  ClothDistributionResult,
+  ObjectDistributionPoint,
+  ObjectDistributionResult,
   DemoRow,
 } from './types';
 
@@ -34,18 +34,18 @@ function makeRow(step: number, overrides: Partial<DemoRow> = {}): DemoRow {
     completed_successes: null,
     eef_left_arm_z: 0.5 + step * 0.01,
     eef_right_arm_z: 0.5 + step * 0.01,
-    keypoint_garment_left_lower_z: 0.4,
-    keypoint_garment_left_middle_z: 0.4,
-    keypoint_garment_left_upper_z: 0.4,
-    keypoint_garment_right_lower_z: 0.4,
-    keypoint_garment_right_middle_z: 0.4,
-    keypoint_garment_right_upper_z: 0.4,
-    dist_left_arm_to_garment_left_middle_m: 0.1,
-    dist_left_arm_to_garment_left_lower_m: 0.1,
-    dist_left_arm_to_garment_left_upper_m: 0.1,
-    dist_right_arm_to_garment_right_middle_m: 0.1,
-    dist_right_arm_to_garment_right_lower_m: 0.1,
-    dist_right_arm_to_garment_right_upper_m: 0.1,
+    keypoint_object_left_lower_z: 0.4,
+    keypoint_object_left_middle_z: 0.4,
+    keypoint_object_left_upper_z: 0.4,
+    keypoint_object_right_lower_z: 0.4,
+    keypoint_object_right_middle_z: 0.4,
+    keypoint_object_right_upper_z: 0.4,
+    dist_left_arm_to_object_left_middle_m: 0.1,
+    dist_left_arm_to_object_left_lower_m: 0.1,
+    dist_left_arm_to_object_left_upper_m: 0.1,
+    dist_right_arm_to_object_right_middle_m: 0.1,
+    dist_right_arm_to_object_right_lower_m: 0.1,
+    dist_right_arm_to_object_right_upper_m: 0.1,
     eef_left_arm_x: 0.1,
     eef_left_arm_y: 0.1,
     eef_right_arm_x: -0.1,
@@ -199,14 +199,15 @@ describe('build3DLayout', () => {
   });
 });
 
-describe('buildClothDistribution helpers', () => {
-  function emptyResult(): ClothDistributionResult {
+describe('buildObjectDistribution helpers', () => {
+  function emptyResult(): ObjectDistributionResult {
     return {
       anchor: 'initial_pose',
       successPoints: [],
       failedPoints: [],
       teleopPoints: [],
       teleopDiagnostics: null,
+      availableObjects: [],
     };
   }
 
@@ -214,7 +215,7 @@ describe('buildClothDistribution helpers', () => {
     category: 'success' | 'failed' | 'teleop',
     x = 0,
     y = 0,
-  ): ClothDistributionPoint {
+  ): ObjectDistributionPoint {
     return {
       category,
       datasetName: 'ds',
@@ -234,14 +235,14 @@ describe('buildClothDistribution helpers', () => {
   }
 
   it('returns no traces for a null result', () => {
-    expect(buildClothDistributionData(null, null)).toEqual([]);
+    expect(buildObjectDistributionData(null, null)).toEqual([]);
   });
 
   it('returns category traces when points are present, no selection', () => {
     const result = emptyResult();
     result.successPoints.push(makePoint('success', 0.1, 0.1));
     result.failedPoints.push(makePoint('failed', 0.2, 0.2));
-    const traces = buildClothDistributionData(result, null);
+    const traces = buildObjectDistributionData(result, null);
     expect(traces.length).toBeGreaterThanOrEqual(2);
   });
 
@@ -249,8 +250,8 @@ describe('buildClothDistribution helpers', () => {
     const result = emptyResult();
     const selected = makePoint('success', 0.1, 0.1);
     result.successPoints.push(selected);
-    const tracesWithoutSelection = buildClothDistributionData(result, null);
-    const tracesWithSelection = buildClothDistributionData(result, selected);
+    const tracesWithoutSelection = buildObjectDistributionData(result, null);
+    const tracesWithSelection = buildObjectDistributionData(result, selected);
     expect(tracesWithSelection.length).toBeGreaterThan(
       tracesWithoutSelection.length,
     );
@@ -260,12 +261,12 @@ describe('buildClothDistribution helpers', () => {
     const result = emptyResult();
     const teleop = makePoint('teleop', 0.1, 0.1);
     result.teleopPoints.push(teleop);
-    const traces = buildClothDistributionData(result, teleop);
+    const traces = buildObjectDistributionData(result, teleop);
     expect(traces).toHaveLength(1);
   });
 
   it('returns a layout regardless of result presence', () => {
-    expect(buildClothDistributionLayout(null, 'initial_pose').height).toBe(820);
-    expect(buildClothDistributionLayout(emptyResult(), 'initial_pose').height).toBe(820);
+    expect(buildObjectDistributionLayout(null, 'initial_pose').height).toBe(820);
+    expect(buildObjectDistributionLayout(emptyResult(), 'initial_pose').height).toBe(820);
   });
 });

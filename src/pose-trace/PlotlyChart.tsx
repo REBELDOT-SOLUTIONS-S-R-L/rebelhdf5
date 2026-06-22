@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Figure, PlotParams } from 'react-plotly.js';
 import Plotly from 'plotly.js/lib/core';
 import contour from 'plotly.js/lib/contour';
@@ -15,6 +15,14 @@ const factory = typeof factoryModule === 'function'
 
 const ReactPlot = factory(Plotly as object);
 
+// Sizing strategy (fixes both the progressive-narrowing and scroll-jump bugs):
+// - A relative wrapper (width:100%, fixed height) is sized purely by CSS.
+// - The plot is rendered ABSOLUTELY positioned inside it, so it is out of layout
+//   flow and can never feed its own width back into the flex layout — which is
+//   what made the chart's <section> card shrink a little on every remount.
+// - The plot width is driven explicitly from the wrapper's measured width via a
+//   ResizeObserver, with autosize / responsive / useResizeHandler all off, so
+//   Plotly never measures itself and never redraws (and scrolls) on every click.
 function Plot(props: PlotParams) {
   const {
     config,
@@ -23,99 +31,82 @@ function Plot(props: PlotParams) {
     onPurge,
     onUpdate,
     style,
-    useResizeHandler,
     ...plotProps
   } = props;
-  const [graphDiv, setGraphDiv] = useState<HTMLElement | null>(null);
-  const resizeFrameRef = useRef<number | null>(null);
-
-  const mergedConfig = useMemo(
-    () => ({ responsive: true, ...config }),
-    [config],
-  );
-  const mergedStyle = useMemo(
-    () => ({
-      width: '100%',
-      minWidth: 0,
-      height: layout?.height,
-      ...style,
-    }),
-    [layout?.height, style],
-  );
-
-  const scheduleResize = useCallback(() => {
-    if (typeof window === 'undefined') {
-      return;
-    }
-
-    if (resizeFrameRef.current !== null) {
-      window.cancelAnimationFrame(resizeFrameRef.current);
-    }
-
-    resizeFrameRef.current = window.requestAnimationFrame(() => {
-      resizeFrameRef.current = null;
-      if (graphDiv?.isConnected) {
-        Plotly.Plots.resize(graphDiv);
-      }
-    });
-  }, [graphDiv]);
-
-  const rememberGraphDiv = useCallback((nextGraphDiv: Readonly<HTMLElement>) => {
-    setGraphDiv((current) => (
-      current === nextGraphDiv ? current : nextGraphDiv as HTMLElement
-    ));
-  }, []);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [width, setWidth] = useState<number | null>(null);
 
   useEffect(() => {
-    scheduleResize();
-  });
-
-  useEffect(() => {
-    if (!graphDiv || typeof ResizeObserver === 'undefined') {
+    const el = containerRef.current;
+    if (!el) {
       return undefined;
     }
 
-    const resizeTarget = graphDiv.parentElement ?? graphDiv;
-    const observer = new ResizeObserver(() => {
-      scheduleResize();
-    });
+    const measure = () => {
+      const next = el.clientWidth;
+      if (next > 0) {
+        setWidth((current) => (current === next ? current : next));
+      }
+    };
 
-    observer.observe(resizeTarget);
-    scheduleResize();
+    measure();
+
+    if (typeof ResizeObserver === 'undefined') {
+      return undefined;
+    }
+
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
 
     return () => {
       observer.disconnect();
     };
-  }, [graphDiv, scheduleResize]);
-
-  useEffect(() => {
-    return () => {
-      if (resizeFrameRef.current !== null) {
-        window.cancelAnimationFrame(resizeFrameRef.current);
-      }
-    };
   }, []);
 
+  const mergedConfig = useMemo(
+    () => ({ responsive: false, ...config }),
+    [config],
+  );
+  const mergedLayout = useMemo(
+    () => ({ ...layout, autosize: false, ...(width != null ? { width } : {}) }),
+    [layout, width],
+  );
+  const mergedStyle = useMemo(
+    () => ({
+      // Absolutely positioned inside the relative wrapper so the plot is removed
+      // from layout flow and can never feed its own width back into the flex
+      // layout (which made the chart's card progressively shrink on remount).
+      position: 'absolute' as const,
+      top: 0,
+      left: 0,
+      width: width ?? '100%',
+      height: layout?.height,
+      ...style,
+    }),
+    [layout?.height, style, width],
+  );
+
   return (
-    <ReactPlot
-      {...plotProps}
-      config={mergedConfig}
-      layout={layout}
-      onInitialized={(figure: Readonly<Figure>, nextGraphDiv: Readonly<HTMLElement>) => {
-        rememberGraphDiv(nextGraphDiv);
-        onInitialized?.(figure, nextGraphDiv);
-      }}
-      onPurge={(figure: Readonly<Figure>, nextGraphDiv: Readonly<HTMLElement>) => {
-        onPurge?.(figure, nextGraphDiv);
-        setGraphDiv(null);
-      }}
-      onUpdate={(figure: Readonly<Figure>, nextGraphDiv: Readonly<HTMLElement>) => {
-        rememberGraphDiv(nextGraphDiv);
-        onUpdate?.(figure, nextGraphDiv);
-      }}
-      style={mergedStyle}
-      useResizeHandler={useResizeHandler ?? true}
-    />
+    <div ref={containerRef} style={{ position: 'relative', width: '100%', minWidth: 0, height: layout?.height }}>
+      {width != null && (
+        <ReactPlot
+          {...plotProps}
+          config={mergedConfig}
+          layout={mergedLayout}
+          onInitialized={(figure: Readonly<Figure>, graphDiv: Readonly<HTMLElement>) => {
+            onInitialized?.(figure, graphDiv);
+          }}
+          onPurge={(figure: Readonly<Figure>, graphDiv: Readonly<HTMLElement>) => {
+            onPurge?.(figure, graphDiv);
+          }}
+          onUpdate={(figure: Readonly<Figure>, graphDiv: Readonly<HTMLElement>) => {
+            onUpdate?.(figure, graphDiv);
+          }}
+          style={mergedStyle}
+          useResizeHandler={false}
+        />
+      )}
+    </div>
   );
 }
 

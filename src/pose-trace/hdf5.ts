@@ -1,8 +1,8 @@
 import { fetchBuffer } from '../fetch-utils';
 import { FileService, type H5File } from '../stores';
 import type {
-  ClothDistributionRequest,
-  ClothDistributionResult,
+  ObjectDistributionRequest,
+  ObjectDistributionResult,
   DemoInfo,
   DemoRow,
   DatasetProcessingProgress,
@@ -34,7 +34,7 @@ type GetDatasetProcessingInfoPayload = {
   sourceId: string;
 };
 
-type LoadClothDistributionPayload = ClothDistributionRequest;
+type LoadObjectDistributionPayload = ObjectDistributionRequest;
 type ProcessDatasetPayload = DatasetProcessingRequest;
 
 type ListDemoVideosPayload = {
@@ -68,7 +68,7 @@ type PoseTraceWorkerRequest =
   | { id: number; type: 'openRemoteSource'; payload: OpenRemoteSourcePayload }
   | { id: number; type: 'loadDemoRows'; payload: LoadDemoRowsPayload }
   | { id: number; type: 'getDatasetProcessingInfo'; payload: GetDatasetProcessingInfoPayload }
-  | { id: number; type: 'loadClothDistribution'; payload: LoadClothDistributionPayload }
+  | { id: number; type: 'loadObjectDistribution'; payload: LoadObjectDistributionPayload }
   | { id: number; type: 'processDataset'; payload: ProcessDatasetPayload }
   | { id: number; type: 'listDemoVideos'; payload: ListDemoVideosPayload }
   | { id: number; type: 'loadDemoVideo'; payload: LoadDemoVideoPayload }
@@ -82,7 +82,7 @@ type PoseTraceWorkerResponse =
         | OpenSourceResult
         | DemoRow[]
         | DatasetProcessingSourceInfo
-        | ClothDistributionResult
+        | ObjectDistributionResult
         | DatasetProcessingResultMeta
         | DemoVideoInfo[]
         | LoadDemoVideoResult
@@ -239,10 +239,10 @@ export function getDatasetProcessingInfo(
   });
 }
 
-export function loadClothDistribution(
-  request: ClothDistributionRequest,
-): Promise<ClothDistributionResult> {
-  return callWorker<ClothDistributionResult>('loadClothDistribution', request);
+export function loadObjectDistribution(
+  request: ObjectDistributionRequest,
+): Promise<ObjectDistributionResult> {
+  return callWorker<ObjectDistributionResult>('loadObjectDistribution', request);
 }
 
 export function processDataset(
