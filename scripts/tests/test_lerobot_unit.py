@@ -52,12 +52,18 @@ class TestMergeConfig:
         assert merged["robot_type"] == "custom"
 
     def test_dict_keys_are_merged_not_replaced(self) -> None:
-        # Defaults already contain state_sources["observation.state"].
+        # The default config keeps state_sources/action_sources empty (the
+        # discovery fallbacks cover standard schema paths), so merging a user
+        # state_sources entry must add it without clobbering sibling default
+        # keys such as action_sources or robot_type.
         merged = lr.merge_config({
             "state_sources": {"extra.feature": [{"path": "obs/x"}]},
         })
-        assert "observation.state" in merged["state_sources"]
         assert "extra.feature" in merged["state_sources"]
+        # Sibling tracked key is preserved, not dropped by the per-key merge.
+        assert merged["action_sources"] == {}
+        # Scalar defaults survive the merge too.
+        assert merged["robot_type"] == lr.DEFAULT_CONVERSION_CONFIG["robot_type"]
 
     def test_passthrough_for_unknown_keys(self) -> None:
         merged = lr.merge_config({"my_custom_flag": True})
@@ -162,7 +168,11 @@ class TestGenerateFeatureNames:
 
 class TestSourcePathCandidates:
     def test_action_returns_known_action_paths(self) -> None:
+        # New standard schema puts action vectors under actions/joints and
+        # actions/pose first, with the legacy locations kept for compatibility.
         assert lr.source_path_candidates("action", "action") == [
+            "actions/joints",
+            "actions/pose",
             "obs/actions",
             "processed_actions",
             "actions",
