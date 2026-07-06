@@ -1,0 +1,18 @@
+# Python backend dependencies for the rebelHDF5 desktop app.
+# The Electron app (electron/main.cjs) spawns scripts/backend_server.py
+# with the system `python`/`python3`.
+#
+# Install:  python -m pip install -r scripts/requirements.txt
+# Python:   3.9+ recommended
+
+# --- Core backend (scripts/backend_server.py, backend/) ---
+h5py>=3.10          # HDF5 file reading/writing
+numpy>=1.24         # array handling
+
+# --- Databricks integration (scripts/databricks_fast_download.py, backend/databricks.py) ---
+databricks-sdk>=0.20    # WorkspaceClient + files mixin
+tqdm>=4.66              # download progress bars
+pyarrow>=14.0           # parquet read/write (backend/lerobot.py)
+
+# --- Tests only (scripts/tests/) ---
+# pytest>=8.0

@@ -33,6 +33,7 @@ const backendDir =
   process.env.PYTHON_BACKEND_DIR ??
   process.env.MERGE_SERVER_DIR ??
   path.resolve(projectRoot, '..');
+const localVenvPython = path.resolve(projectRoot, '.venv', 'bin', 'python');
 const lehomePython = path.resolve(
   projectRoot,
   '..',
@@ -43,7 +44,11 @@ const lehomePython = path.resolve(
 );
 const backendPython =
   process.env.PYTHON_BACKEND_PYTHON ??
-  (fs.existsSync(lehomePython) ? lehomePython : 'python3');
+  (fs.existsSync(localVenvPython)
+    ? localVenvPython
+    : fs.existsSync(lehomePython)
+      ? lehomePython
+      : 'python3');
 const smokeTest = process.argv.includes('--smoke-test');
 
 app.setName('rebelHDF5');
