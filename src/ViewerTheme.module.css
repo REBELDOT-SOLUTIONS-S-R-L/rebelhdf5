@@ -15,10 +15,24 @@
   --secondary-darker: var(--primary-dark);
   --secondary-bg: var(--primary-bg);
   --secondary-light-bg: var(--primary-light-bg);
-  --h5w-matrix-cell--bgColorAlt: color-mix(in srgb, var(--primary-light) 40%, transparent);
-  --h5w-matrix-indexCell--bgColor: color-mix(in srgb, var(--primary) 45%, transparent);
-  --h5w-matrix-indexCell--bgColorAlt: color-mix(in srgb, var(--primary-light) 35%, transparent);
-  --h5w-matrix-anchorCell--bgColor: color-mix(in srgb, var(--primary-dark) 55%, transparent);
+  --h5w-matrix-cell--bgColorAlt: color-mix(
+    in srgb,
+    var(--primary-light) 40%,
+    transparent
+  );
+  --h5w-matrix-indexCell--bgColor: color-mix(
+    in srgb,
+    var(--primary) 45%,
+    transparent
+  );
+  --h5w-matrix-indexCell--bgColorAlt: color-mix(
+    in srgb,
+    var(--primary-light) 35%,
+    transparent
+  );
+  --h5w-matrix-anchorCell--bgColor: color-mix(
+    in srgb,
+    var(--primary-dark) 55%,
+    transparent
+  );
 }
-
-

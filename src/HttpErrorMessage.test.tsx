@@ -27,9 +27,7 @@ describe('HttpErrorMessage', () => {
 
   it('explains 401 as an auth-required file', () => {
     renderMsg(401);
-    expect(
-      screen.getByText(/Authentication is required/i),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/Authentication is required/i)).toBeInTheDocument();
   });
 
   it('suggests permalinks for 404 on an unstable ref', () => {
@@ -48,8 +46,6 @@ describe('HttpErrorMessage', () => {
 
   it('offers the teabag fallback for 418', () => {
     renderMsg(418);
-    expect(
-      screen.getByRole('link', { name: 'this file' }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'this file' })).toBeInTheDocument();
   });
 });

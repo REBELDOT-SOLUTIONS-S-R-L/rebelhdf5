@@ -70,7 +70,10 @@ function cssColor(name: string, fallback: string): string {
     return fallback;
   }
 
-  const value = window.getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  const value = window
+    .getComputedStyle(document.documentElement)
+    .getPropertyValue(name)
+    .trim();
   return value || fallback;
 }
 
@@ -82,7 +85,10 @@ function getPlotTheme(): PlotTheme {
     textColor: cssColor('--color-text', '#5a5a66'),
     mutedText: cssColor('--color-text-muted', '#7b7b87'),
     legendBg: cssColor('--color-plot-legend-bg', 'rgba(255, 255, 255, 0.92)'),
-    legendBorder: cssColor('--color-plot-legend-border', 'rgba(90, 90, 102, 0.14)'),
+    legendBorder: cssColor(
+      '--color-plot-legend-border',
+      'rgba(90, 90, 102, 0.14)',
+    ),
   };
 }
 
@@ -106,8 +112,8 @@ function hasValues(values: (number | null)[]): boolean {
 }
 
 function collectRowKeys(rows: DemoRow[]): string[] {
-  return [...new Set(rows.flatMap((row) => Object.keys(row)))].sort((left, right) =>
-    left.localeCompare(right),
+  return [...new Set(rows.flatMap((row) => Object.keys(row)))].sort(
+    (left, right) => left.localeCompare(right),
   );
 }
 
@@ -216,29 +222,33 @@ function build3DTraceSpecs(rows: DemoRow[]): Trace3DSpec[] {
     .filter((spec): spec is Trace3DSpec => Boolean(spec))
     .sort((left, right) => {
       const priority = (prefix: string) => {
-        if (prefix.startsWith('eef_') && !prefix.startsWith('eef_post_step_')) return 0;
-        if (prefix.startsWith('target_eef_') || prefix.startsWith('ik_input_eef_')) return 1;
+        if (prefix.startsWith('eef_') && !prefix.startsWith('eef_post_step_'))
+          return 0;
+        if (
+          prefix.startsWith('target_eef_') ||
+          prefix.startsWith('ik_input_eef_')
+        )
+          return 1;
         if (prefix.startsWith('eef_post_step_')) return 2;
         if (prefix.startsWith('object_')) return 3;
         if (prefix.startsWith('keypoint_')) return 4;
         return 5;
       };
 
-      return priority(left.prefix) - priority(right.prefix)
-        || left.label.localeCompare(right.label);
+      return (
+        priority(left.prefix) - priority(right.prefix) ||
+        left.label.localeCompare(right.label)
+      );
     });
 }
 
 export function getDefaultHidden3DTraceGroups(rows: DemoRow[]): Set<string> {
   return new Set(
     build3DTraceSpecs(rows)
-      .filter((spec) =>
-        spec.prefix.startsWith('eef_post_step_'),
-      )
+      .filter((spec) => spec.prefix.startsWith('eef_post_step_'))
       .map((spec) => spec.prefix),
   );
 }
-
 
 function build3DPoints(rows: DemoRow[], prefix: string): TracePoint3D[] {
   const points: TracePoint3D[] = [];
@@ -248,7 +258,11 @@ function build3DPoints(rows: DemoRow[], prefix: string): TracePoint3D[] {
     const y = row[`${prefix}_y`];
     const z = row[`${prefix}_z`];
 
-    if (typeof x !== 'number' || typeof y !== 'number' || typeof z !== 'number') {
+    if (
+      typeof x !== 'number' ||
+      typeof y !== 'number' ||
+      typeof z !== 'number'
+    ) {
       return;
     }
 
@@ -258,22 +272,32 @@ function build3DPoints(rows: DemoRow[], prefix: string): TracePoint3D[] {
   return points;
 }
 
-function split3DPoints(points: TracePoint3D[], stepIndex: number): {
+function split3DPoints(
+  points: TracePoint3D[],
+  stepIndex: number,
+): {
   past: TracePoint3D[];
   future: TracePoint3D[];
   current: TracePoint3D | undefined;
 } {
   const past = points.filter((point) => point.rowIndex <= stepIndex);
-  const current = [...points].reverse().find((point) => point.rowIndex <= stepIndex);
+  const current = [...points]
+    .reverse()
+    .find((point) => point.rowIndex <= stepIndex);
   const futureBase = points.filter((point) => point.rowIndex >= stepIndex);
-  const future = current && futureBase[0]?.rowIndex !== current.rowIndex
-    ? [current, ...futureBase]
-    : futureBase;
+  const future =
+    current && futureBase[0]?.rowIndex !== current.rowIndex
+      ? [current, ...futureBase]
+      : futureBase;
 
   return { past, future, current };
 }
 
-function coordinates(points: TracePoint3D[]): { x: number[]; y: number[]; z: number[] } {
+function coordinates(points: TracePoint3D[]): {
+  x: number[];
+  y: number[];
+  z: number[];
+} {
   return {
     x: points.map((point) => point.x),
     y: points.map((point) => point.y),
@@ -349,12 +373,16 @@ function buildObjectScatterTrace(
       point.sourceLeft,
       point.sourceRight,
     ]),
-    hovertemplate: hoverEnabled ? buildObjectHoverTemplate(name.toLowerCase()) : '<extra></extra>',
+    hovertemplate: hoverEnabled
+      ? buildObjectHoverTemplate(name.toLowerCase())
+      : '<extra></extra>',
     hoverinfo: hoverEnabled ? 'all' : 'skip',
   };
 }
 
-function buildObjectSelectedEpisodeHover(point: ObjectDistributionPoint): string {
+function buildObjectSelectedEpisodeHover(
+  point: ObjectDistributionPoint,
+): string {
   return [
     `<b>${point.datasetName}</b>`,
     `episode: ${point.demoName}`,
@@ -371,7 +399,9 @@ function buildObjectSelectedEpisodeHover(point: ObjectDistributionPoint): string
   ].join('<br>');
 }
 
-function buildObjectSourceHoverText(detail: ObjectDistributionSourceDetail): string {
+function buildObjectSourceHoverText(
+  detail: ObjectDistributionSourceDetail,
+): string {
   return [
     `<b>${detail.datasetName}</b>`,
     `episode: ${detail.demoName}`,
@@ -572,22 +602,26 @@ function buildFailureHeatmapTrace(
     type: 'heatmap',
     x: plane.bins[0]?.map((bin) => bin.xCenter) ?? [],
     y: plane.bins.map((row) => row[0]?.yCenter ?? 0),
-    z: plane.bins.map((row) => row.map((bin) => (bin.masked ? null : bin.displayFailureRate))),
-    customdata: plane.bins.map((row) => row.map((bin) => [
-      bin.xStart,
-      bin.xEnd,
-      bin.yStart,
-      bin.yEnd,
-      bin.failureRate,
-      bin.confidenceLower,
-      bin.confidenceUpper,
-      bin.confidenceScore,
-      bin.smoothedGeneratedSupport,
-      bin.smoothedFailedSupport,
-      bin.teleopDensity,
-      bin.rawGeneratedCount,
-      bin.rawTeleopCount,
-    ])),
+    z: plane.bins.map((row) =>
+      row.map((bin) => (bin.masked ? null : bin.displayFailureRate)),
+    ),
+    customdata: plane.bins.map((row) =>
+      row.map((bin) => [
+        bin.xStart,
+        bin.xEnd,
+        bin.yStart,
+        bin.yEnd,
+        bin.failureRate,
+        bin.confidenceLower,
+        bin.confidenceUpper,
+        bin.confidenceScore,
+        bin.smoothedGeneratedSupport,
+        bin.smoothedFailedSupport,
+        bin.teleopDensity,
+        bin.rawGeneratedCount,
+        bin.rawTeleopCount,
+      ]),
+    ),
     hoverongaps: false,
     hovertemplate: [
       `${plane.xLabel} range: %{customdata[0]:.4f} to %{customdata[1]:.4f}`,
@@ -611,14 +645,14 @@ function buildFailureHeatmapTrace(
   return trace as unknown as Data;
 }
 
-function buildFailureSupportContourTrace(
-  plane: FailurePlane,
-): Data {
+function buildFailureSupportContourTrace(plane: FailurePlane): Data {
   const trace: Record<string, unknown> = {
     type: 'contour',
     x: plane.bins[0]?.map((bin) => bin.xCenter) ?? [],
     y: plane.bins.map((row) => row[0]?.yCenter ?? 0),
-    z: plane.bins.map((row) => row.map((bin) => (bin.masked ? 0 : bin.smoothedGeneratedSupport))),
+    z: plane.bins.map((row) =>
+      row.map((bin) => (bin.masked ? 0 : bin.smoothedGeneratedSupport)),
+    ),
     contours: {
       coloring: 'none',
       showlabels: false,
@@ -686,7 +720,9 @@ export function buildFailureMapData(
     buildFailureHeatmapTrace(plane),
     buildFailureSupportContourTrace(plane),
   ];
-  const overlayTrace = showTeleopOverlay ? buildFailureOverlayTrace(plane) : null;
+  const overlayTrace = showTeleopOverlay
+    ? buildFailureOverlayTrace(plane)
+    : null;
   if (overlayTrace) {
     traces.push(overlayTrace);
   }
@@ -694,9 +730,7 @@ export function buildFailureMapData(
   return traces;
 }
 
-export function buildFailureMapLayout(
-  plane: FailurePlane,
-): Partial<Layout> {
+export function buildFailureMapLayout(plane: FailurePlane): Partial<Layout> {
   const theme = getPlotTheme();
   const axisBase = buildFailureAxisBase(theme);
 
@@ -750,9 +784,15 @@ function sliceAxisName(prefix: 'x' | 'y', index: number): string {
   return `${prefix}${index === 0 ? '' : index + 1}`;
 }
 
-function sliceDomain(index: number, total: number, start: number, end: number, gap: number): [number, number] {
-  const width = (end - start - (gap * (total - 1))) / total;
-  const domainStart = start + (index * (width + gap));
+function sliceDomain(
+  index: number,
+  total: number,
+  start: number,
+  end: number,
+  gap: number,
+): [number, number] {
+  const width = (end - start - gap * (total - 1)) / total;
+  const domainStart = start + index * (width + gap);
   return [domainStart, domainStart + width];
 }
 
@@ -771,14 +811,18 @@ export function buildFailureSliceData(
 
   for (const slice of slices) {
     const axisRefs = {
-      x: sliceAxisName('x', (slice.rowIndex * 3) + slice.colIndex),
-      y: sliceAxisName('y', (slice.rowIndex * 3) + slice.colIndex),
+      x: sliceAxisName('x', slice.rowIndex * 3 + slice.colIndex),
+      y: sliceAxisName('y', slice.rowIndex * 3 + slice.colIndex),
     };
 
     traces.push(buildFailureHeatmapTrace(slice.plane, axisRefs, false));
 
     const overlayTrace = showTeleopOverlay
-      ? buildFailureOverlayTrace(slice.plane, axisRefs, slice.rowIndex === 0 && slice.colIndex === 0)
+      ? buildFailureOverlayTrace(
+          slice.plane,
+          axisRefs,
+          slice.rowIndex === 0 && slice.colIndex === 0,
+        )
       : null;
     if (overlayTrace) {
       traces.push(overlayTrace);
@@ -836,7 +880,7 @@ export function buildFailureSliceLayout(
   ].reverse() as [number, number][];
 
   for (const slice of slices) {
-    const axisIndex = (slice.rowIndex * 3) + slice.colIndex;
+    const axisIndex = slice.rowIndex * 3 + slice.colIndex;
     const xAxisName = sliceAxisName('x', axisIndex);
     const yAxisName = sliceAxisName('y', axisIndex);
     const xDomain = xDomains[slice.colIndex];
@@ -1036,7 +1080,9 @@ export function buildJointChartLayout(
 ): Partial<Layout> {
   const theme = getPlotTheme();
   const title = isJointChartSpecArray(spec)
-    ? (spec.length === 1 ? jointSpecLabel(spec[0]) : 'Selected joints')
+    ? spec.length === 1
+      ? jointSpecLabel(spec[0])
+      : 'Selected joints'
     : jointSpecLabel(spec);
   const axisBase = {
     showgrid: true,
@@ -1101,8 +1147,16 @@ export function build3DDataForStep(
     }
 
     const legendGroup = spec.prefix;
-    const legendVisible = buildTraceVisibility(hiddenLegendGroups, legendGroup, true);
-    const groupVisible = buildTraceVisibility(hiddenLegendGroups, legendGroup, false);
+    const legendVisible = buildTraceVisibility(
+      hiddenLegendGroups,
+      legendGroup,
+      true,
+    );
+    const groupVisible = buildTraceVisibility(
+      hiddenLegendGroups,
+      legendGroup,
+      false,
+    );
     const { past, future, current } = split3DPoints(points, clampedStepIndex);
     const lastPoint = points[points.length - 1];
     const startPoint = points[0];
@@ -1153,7 +1207,8 @@ export function build3DDataForStep(
       legendgroup: legendGroup,
       visible: groupVisible,
       showlegend: false,
-      opacity: startPoint.rowIndex <= clampedStepIndex ? 1 : FUTURE_MARKER_OPACITY,
+      opacity:
+        startPoint.rowIndex <= clampedStepIndex ? 1 : FUTURE_MARKER_OPACITY,
     });
 
     if (current) {
@@ -1163,7 +1218,11 @@ export function build3DDataForStep(
         y: [current.y],
         z: [current.z],
         mode: 'markers',
-        marker: { color: spec.color, size: spec.markerSize + 2, symbol: 'diamond' },
+        marker: {
+          color: spec.color,
+          size: spec.markerSize + 2,
+          symbol: 'diamond',
+        },
         name: `${spec.label} current`,
         uid: `${legendGroup}-current`,
         legendgroup: legendGroup,
@@ -1184,14 +1243,18 @@ export function build3DDataForStep(
       legendgroup: legendGroup,
       visible: groupVisible,
       showlegend: false,
-      opacity: lastPoint.rowIndex <= clampedStepIndex ? 1 : FUTURE_MARKER_OPACITY,
+      opacity:
+        lastPoint.rowIndex <= clampedStepIndex ? 1 : FUTURE_MARKER_OPACITY,
     });
   }
 
   return traces;
 }
 
-export function build3DLayout(rows: DemoRow[], camera?: PlotSceneCamera | null): Partial<Layout> {
+export function build3DLayout(
+  rows: DemoRow[],
+  camera?: PlotSceneCamera | null,
+): Partial<Layout> {
   const theme = getPlotTheme();
   const uirevision = `${rows[0]?.dataset_name ?? 'dataset'}-${rows[0]?.demo_name ?? 'demo'}-3d`;
 

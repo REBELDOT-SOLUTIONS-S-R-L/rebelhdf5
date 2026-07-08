@@ -9,9 +9,10 @@ import factoryModule from 'react-plotly.js/factory';
 
 Plotly.register([scatter, scatter3d, heatmap, contour]);
 
-const factory = typeof factoryModule === 'function'
-  ? factoryModule
-  : (factoryModule as { default: typeof factoryModule }).default;
+const factory =
+  typeof factoryModule === 'function'
+    ? factoryModule
+    : (factoryModule as { default: typeof factoryModule }).default;
 
 const ReactPlot = factory(Plotly as object);
 
@@ -87,19 +88,36 @@ function Plot(props: PlotParams) {
   );
 
   return (
-    <div ref={containerRef} style={{ position: 'relative', width: '100%', minWidth: 0, height: layout?.height }}>
+    <div
+      ref={containerRef}
+      style={{
+        position: 'relative',
+        width: '100%',
+        minWidth: 0,
+        height: layout?.height,
+      }}
+    >
       {width != null && (
         <ReactPlot
           {...plotProps}
           config={mergedConfig}
           layout={mergedLayout}
-          onInitialized={(figure: Readonly<Figure>, graphDiv: Readonly<HTMLElement>) => {
+          onInitialized={(
+            figure: Readonly<Figure>,
+            graphDiv: Readonly<HTMLElement>,
+          ) => {
             onInitialized?.(figure, graphDiv);
           }}
-          onPurge={(figure: Readonly<Figure>, graphDiv: Readonly<HTMLElement>) => {
+          onPurge={(
+            figure: Readonly<Figure>,
+            graphDiv: Readonly<HTMLElement>,
+          ) => {
             onPurge?.(figure, graphDiv);
           }}
-          onUpdate={(figure: Readonly<Figure>, graphDiv: Readonly<HTMLElement>) => {
+          onUpdate={(
+            figure: Readonly<Figure>,
+            graphDiv: Readonly<HTMLElement>,
+          ) => {
             onUpdate?.(figure, graphDiv);
           }}
           style={mergedStyle}

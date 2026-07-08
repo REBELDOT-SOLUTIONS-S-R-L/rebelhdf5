@@ -18,7 +18,8 @@ function LocalService() {
       </button>
       <p className={styles.hint}>
         ... or drop files anywhere at any time. Your files won't be uploaded to
-        a remote server; everything happens locally in this desktop app thanks to{' '}
+        a remote server; everything happens locally in this desktop app thanks
+        to{' '}
         <a
           href="https://github.com/usnistgov/h5wasm"
           target="_blank"

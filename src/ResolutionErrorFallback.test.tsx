@@ -4,7 +4,10 @@ import { describe, expect, it } from 'vitest';
 import { NetworkError } from './fetch-utils';
 import ResolutionErrorFallback from './ResolutionErrorFallback';
 
-function renderFallback(error: unknown, fileUrl = 'https://example.com/file.h5') {
+function renderFallback(
+  error: unknown,
+  fileUrl = 'https://example.com/file.h5',
+) {
   return render(
     <ResolutionErrorFallback
       error={error}
@@ -27,9 +30,7 @@ describe('ResolutionErrorFallback', () => {
 
   it('adds the network-error hint when error is a NetworkError', () => {
     renderFallback(new NetworkError());
-    expect(
-      screen.getByText(/cross-origin request/i),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/cross-origin request/i)).toBeInTheDocument();
   });
 
   it('exposes the offending URL inside the debug details', () => {

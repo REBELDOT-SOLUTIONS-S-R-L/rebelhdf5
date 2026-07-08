@@ -102,7 +102,8 @@ function Dropzone(props: PropsWithChildren<Props>) {
 
     if (globalThis.showOpenFilePicker) {
       try {
-        const handles = await globalThis.showOpenFilePicker(OPEN_PICKER_OPTIONS);
+        const handles =
+          await globalThis.showOpenFilePicker(OPEN_PICKER_OPTIONS);
         const files = await Promise.all(
           handles.map(async (handle) => {
             const file = await handle.getFile();

@@ -6,14 +6,15 @@
  * WASM path for large (multi-GB) files — especially those with video data.
  */
 
-import  {
+import {
   type DatasetProcessingCutRange,
   type DatasetProcessingOperation,
   type DatasetProcessingProgress,
   type DatasetProcessingResultMeta,
 } from './pose-trace/types';
 
-const DEFAULT_PORT = globalThis.rebelHdf5Desktop?.backendPort ?? __PYTHON_BACKEND_PORT__;
+const DEFAULT_PORT =
+  globalThis.rebelHdf5Desktop?.backendPort ?? __PYTHON_BACKEND_PORT__;
 const BASE_URL = `http://127.0.0.1:${DEFAULT_PORT}`;
 const HEALTH_TIMEOUT_MS = 2000;
 
@@ -148,7 +149,9 @@ async function parseErrorResponse(response: Response): Promise<string> {
 }
 
 /** Check whether the Python server is running. */
-export async function checkBackend(timeoutMs = HEALTH_TIMEOUT_MS): Promise<PythonBackendStatus> {
+export async function checkBackend(
+  timeoutMs = HEALTH_TIMEOUT_MS,
+): Promise<PythonBackendStatus> {
   const controller = new AbortController();
   const timeout = globalThis.setTimeout(() => {
     controller.abort();
@@ -179,7 +182,7 @@ export async function checkBackend(timeoutMs = HEALTH_TIMEOUT_MS): Promise<Pytho
       rootDir: data.rootDir,
       rootDirs: data.rootDirs,
       outputDir: data.outputDir,
-      version: Number.isFinite(data.version) ? data.version ?? null : null,
+      version: Number.isFinite(data.version) ? (data.version ?? null) : null,
       indexing: data.indexing,
       indexReady: data.indexReady,
       indexedFileCount: data.indexedFileCount,
@@ -261,7 +264,9 @@ export async function resolveFiles(
 ): Promise<PythonResolvedFilesResult> {
   const cleanPaths: Record<string, string> = {};
   for (const [name, p] of Object.entries(paths)) {
-    if (p) {cleanPaths[name] = p;}
+    if (p) {
+      cleanPaths[name] = p;
+    }
   }
 
   const response = await fetch(`${BASE_URL}/api/resolve-files`, {
@@ -279,7 +284,9 @@ export async function resolveFiles(
 }
 
 /** Add a directory to the backend's explicit file-listing roots. */
-export async function addBackendRoot(path: string): Promise<PythonAddRootResult> {
+export async function addBackendRoot(
+  path: string,
+): Promise<PythonAddRootResult> {
   const response = await fetch(`${BASE_URL}/api/index/add`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -290,7 +297,7 @@ export async function addBackendRoot(path: string): Promise<PythonAddRootResult>
     throw new Error(await parseErrorResponse(response));
   }
 
-  return await response.json() as PythonAddRootResult;
+  return (await response.json()) as PythonAddRootResult;
 }
 
 /** Scan files for their keys and demo counts. */
@@ -310,7 +317,9 @@ export async function scanFiles(paths: string[]): Promise<PythonScanResult> {
   return data;
 }
 
-export async function getDatasetAttributes(path: string): Promise<DatasetAttributesResult> {
+export async function getDatasetAttributes(
+  path: string,
+): Promise<DatasetAttributesResult> {
   const response = await fetch(`${BASE_URL}/api/dataset-attributes`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -321,24 +330,27 @@ export async function getDatasetAttributes(path: string): Promise<DatasetAttribu
     throw new Error(await parseErrorResponse(response));
   }
 
-  return await response.json() as DatasetAttributesResult;
+  return (await response.json()) as DatasetAttributesResult;
 }
 
 export async function updateDatasetArticulation(
   path: string,
   articulation: DatasetArticulation,
 ): Promise<DatasetAttributesResult> {
-  const response = await fetch(`${BASE_URL}/api/dataset-attributes/articulation`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ path, articulation }),
-  });
+  const response = await fetch(
+    `${BASE_URL}/api/dataset-attributes/articulation`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path, articulation }),
+    },
+  );
 
   if (!response.ok) {
     throw new Error(await parseErrorResponse(response));
   }
 
-  return await response.json() as DatasetAttributesResult;
+  return (await response.json()) as DatasetAttributesResult;
 }
 
 /** Run a dataset processing operation with SSE progress streaming. */
@@ -354,9 +366,10 @@ export async function runProcess(
     cutRange: request.cutRange,
   });
 
-  const endpoints = request.operation === 'merge'
-    ? ['/api/process', '/api/merge']
-    : ['/api/process'];
+  const endpoints =
+    request.operation === 'merge'
+      ? ['/api/process', '/api/merge']
+      : ['/api/process'];
 
   let response: Response | null = null;
   let lastError: string | null = null;
@@ -374,7 +387,11 @@ export async function runProcess(
 
     lastError = await parseErrorResponse(response);
 
-    if (response.status === 404 && endpoint === '/api/process' && request.operation === 'merge') {
+    if (
+      response.status === 404 &&
+      endpoint === '/api/process' &&
+      request.operation === 'merge'
+    ) {
       continue;
     }
 
@@ -425,33 +442,33 @@ export async function runProcess(
       }
 
       switch (event.type) {
-      case 'progress':
-        callbacks.onProgress?.({
-          phase: event.phase as DatasetProcessingProgress['phase'],
-          overallDemoIndex: event.overallDemoIndex as number,
-          overallDemoCount: event.overallDemoCount as number,
-          currentSourceName: event.currentSourceName as string,
-          currentDemoName: event.currentDemoName as string,
-        });
-      
-      break;
-      
-      case 'done': {
-        const fileName = event.fileName as string;
-        finalResult = {
-          fileName,
-          demoCount: event.demoCount as number,
-          selectedKeyCount: event.selectedKeyCount as number,
-          fileSize: event.fileSize as number,
-          downloadUrl: `${BASE_URL}/api/download/${encodeURIComponent(fileName)}`,
-        };
-      
-      break;
-      }
-      case 'error':
-        throw new Error(event.message as string);
-      
-      // No default
+        case 'progress':
+          callbacks.onProgress?.({
+            phase: event.phase as DatasetProcessingProgress['phase'],
+            overallDemoIndex: event.overallDemoIndex as number,
+            overallDemoCount: event.overallDemoCount as number,
+            currentSourceName: event.currentSourceName as string,
+            currentDemoName: event.currentDemoName as string,
+          });
+
+          break;
+
+        case 'done': {
+          const fileName = event.fileName as string;
+          finalResult = {
+            fileName,
+            demoCount: event.demoCount as number,
+            selectedKeyCount: event.selectedKeyCount as number,
+            fileSize: event.fileSize as number,
+            downloadUrl: `${BASE_URL}/api/download/${encodeURIComponent(fileName)}`,
+          };
+
+          break;
+        }
+        case 'error':
+          throw new Error(event.message as string);
+
+        // No default
       }
     }
   }
@@ -522,36 +539,36 @@ export async function runLeRobotConvert(
       }
 
       switch (event.type) {
-      case 'progress':
-        callbacks.onProgress?.({
-          phase: event.phase as DatasetProcessingProgress['phase'],
-          overallDemoIndex: event.overallDemoIndex as number,
-          overallDemoCount: event.overallDemoCount as number,
-          currentSourceName: event.currentSourceName as string,
-          currentDemoName: event.currentDemoName as string,
-        });
+        case 'progress':
+          callbacks.onProgress?.({
+            phase: event.phase as DatasetProcessingProgress['phase'],
+            overallDemoIndex: event.overallDemoIndex as number,
+            overallDemoCount: event.overallDemoCount as number,
+            currentSourceName: event.currentSourceName as string,
+            currentDemoName: event.currentDemoName as string,
+          });
 
-      break;
+          break;
 
-      case 'done':
-        finalResult = {
-          fileName: event.fileName as string,
-          demoCount: event.demoCount as number,
-          selectedKeyCount: event.selectedKeyCount as number,
-          fileSize: event.fileSize as number,
-          outputPath: event.outputPath as string | undefined,
-          outputType: event.outputType as 'file' | 'directory' | undefined,
-          skippedDemoCount: event.skippedDemoCount as number | undefined,
-          totalFrames: event.totalFrames as number | undefined,
-          taskCount: event.taskCount as number | undefined,
-        };
+        case 'done':
+          finalResult = {
+            fileName: event.fileName as string,
+            demoCount: event.demoCount as number,
+            selectedKeyCount: event.selectedKeyCount as number,
+            fileSize: event.fileSize as number,
+            outputPath: event.outputPath as string | undefined,
+            outputType: event.outputType as 'file' | 'directory' | undefined,
+            skippedDemoCount: event.skippedDemoCount as number | undefined,
+            totalFrames: event.totalFrames as number | undefined,
+            taskCount: event.taskCount as number | undefined,
+          };
 
-      break;
+          break;
 
-      case 'error':
-        throw new Error(event.message as string);
+        case 'error':
+          throw new Error(event.message as string);
 
-      // No default
+        // No default
       }
     }
   }

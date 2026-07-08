@@ -90,7 +90,8 @@ function useResolvedFile(fileUrl: string | null): ResolvedFileState {
           setState({
             file: null,
             loading: false,
-            error: 'This file cannot be reopened automatically. Open it again from the home page.',
+            error:
+              'This file cannot be reopened automatically. Open it again from the home page.',
           });
           return;
         }
@@ -182,7 +183,12 @@ async function encodeVideoToBlob(
     throw new Error('Could not create a canvas context for video encoding.');
   }
 
-  const renderFrame = createFrameRenderer(context, video.width, video.height, video.channels);
+  const renderFrame = createFrameRenderer(
+    context,
+    video.width,
+    video.height,
+    video.channels,
+  );
   const stream = canvas.captureStream(PREVIEW_FPS);
   const recorder = new MediaRecorder(stream, { mimeType });
   const chunks: BlobPart[] = [];
@@ -204,9 +210,10 @@ async function encodeVideoToBlob(
   recorder.start();
 
   const [track] = stream.getVideoTracks();
-  const requestFrame = typeof (track as CanvasCaptureMediaStreamTrack).requestFrame === 'function'
-    ? () => (track as CanvasCaptureMediaStreamTrack).requestFrame()
-    : null;
+  const requestFrame =
+    typeof (track as CanvasCaptureMediaStreamTrack).requestFrame === 'function'
+      ? () => (track as CanvasCaptureMediaStreamTrack).requestFrame()
+      : null;
   const frameDuration = 1000 / PREVIEW_FPS;
 
   for (let frameIndex = 0; frameIndex < video.frameCount; frameIndex += 1) {
@@ -223,23 +230,23 @@ async function encodeVideoToBlob(
   return blob;
 }
 
-function EmptyState({
-  openedFileCount,
-}: {
-  openedFileCount: number;
-}) {
+function EmptyState({ openedFileCount }: { openedFileCount: number }) {
   return (
     <div className={styles.emptyState}>
       <h2 className={styles.emptyTitle}>Video Converter</h2>
       <p className={styles.emptyText}>
-        Open an HDF5 file in rebelHDF5, then switch to this page to preview and save demo videos.
+        Open an HDF5 file in rebelHDF5, then switch to this page to preview and
+        save demo videos.
       </p>
       <div className={styles.emptyActions}>
         <Link className={styles.openBtn} to="/">
           Open HDF5
         </Link>
         {openedFileCount > 0 && (
-          <span>{openedFileCount} opened file{openedFileCount === 1 ? '' : 's'} available in the sidebar.</span>
+          <span>
+            {openedFileCount} opened file{openedFileCount === 1 ? '' : 's'}{' '}
+            available in the sidebar.
+          </span>
         )}
       </div>
     </div>
@@ -251,7 +258,11 @@ function VideoConverterPage() {
   const fileUrl = searchParams.get('url');
   const opened = useStore((state) => state.opened);
 
-  const { file, loading: fileLoading, error: fileError } = useResolvedFile(fileUrl);
+  const {
+    file,
+    loading: fileLoading,
+    error: fileError,
+  } = useResolvedFile(fileUrl);
   const {
     source,
     loading: sourceLoading,
@@ -261,8 +272,12 @@ function VideoConverterPage() {
   const [selectedDemo, setSelectedDemo] = useState<string | null>(null);
   const [videoOptions, setVideoOptions] = useState<DemoVideoInfo[]>([]);
   const [videoOptionsLoading, setVideoOptionsLoading] = useState(false);
-  const [videoOptionsError, setVideoOptionsError] = useState<string | null>(null);
-  const [selectedVideoKey, setSelectedVideoKey] = useState<DemoVideoKey | null>(null);
+  const [videoOptionsError, setVideoOptionsError] = useState<string | null>(
+    null,
+  );
+  const [selectedVideoKey, setSelectedVideoKey] = useState<DemoVideoKey | null>(
+    null,
+  );
   const [videoData, setVideoData] = useState<DemoVideoFrames | null>(null);
   const [videoLoading, setVideoLoading] = useState(false);
   const [videoError, setVideoError] = useState<string | null>(null);
@@ -284,7 +299,9 @@ function VideoConverterPage() {
     }
 
     setSelectedDemo((current) =>
-      current && demos.some((demo) => demo.name === current) ? current : demos[0].name,
+      current && demos.some((demo) => demo.name === current)
+        ? current
+        : demos[0].name,
     );
   }, [demos]);
 
@@ -320,7 +337,9 @@ function VideoConverterPage() {
           }
           // Prefer a third-person/overview camera when available, otherwise the first one.
           const preferred = nextVideos.find((video) =>
-            /(?:^|_)(?:top|overview|third_person|external|front|scene)(?:_|$)/iu.test(video.key),
+            /(?:^|_)(?:top|overview|third_person|external|front|scene)(?:_|$)/iu.test(
+              video.key,
+            ),
           );
           return preferred?.key ?? nextVideos[0]?.key ?? null;
         });
@@ -334,7 +353,9 @@ function VideoConverterPage() {
         setVideoOptions([]);
         setSelectedVideoKey(null);
         setVideoOptionsLoading(false);
-        setVideoOptionsError(error instanceof Error ? error.message : String(error));
+        setVideoOptionsError(
+          error instanceof Error ? error.message : String(error),
+        );
       });
 
     return () => {
@@ -407,7 +428,10 @@ function VideoConverterPage() {
   const totalTimeSeconds = videoData ? videoData.frameCount / PREVIEW_FPS : 0;
 
   useEffect(() => {
-    if (!cachedDownloadRef.current || cachedDownloadRef.current.selectionKey === selectionKey) {
+    if (
+      !cachedDownloadRef.current ||
+      cachedDownloadRef.current.selectionKey === selectionKey
+    ) {
       return;
     }
 
@@ -415,12 +439,15 @@ function VideoConverterPage() {
     cachedDownloadRef.current = null;
   }, [selectionKey]);
 
-  useEffect(() => () => {
-    if (cachedDownloadRef.current) {
-      URL.revokeObjectURL(cachedDownloadRef.current.url);
-      cachedDownloadRef.current = null;
-    }
-  }, []);
+  useEffect(
+    () => () => {
+      if (cachedDownloadRef.current) {
+        URL.revokeObjectURL(cachedDownloadRef.current.url);
+        cachedDownloadRef.current = null;
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     setCurrentFrameIndex(0);
@@ -465,7 +492,9 @@ function VideoConverterPage() {
       if (elapsed >= frameDuration) {
         const advance = Math.floor(elapsed / frameDuration);
         lastTimestamp += advance * frameDuration;
-        setCurrentFrameIndex((current) => (current + advance) % videoData.frameCount);
+        setCurrentFrameIndex(
+          (current) => (current + advance) % videoData.frameCount,
+        );
       }
 
       animationFrameId = window.requestAnimationFrame(tick);
@@ -490,7 +519,11 @@ function VideoConverterPage() {
 
     setSaveError(null);
 
-    const filename = buildDownloadFilename(source.datasetName, selectedDemo, videoData.key);
+    const filename = buildDownloadFilename(
+      source.datasetName,
+      selectedDemo,
+      videoData.key,
+    );
     if (cachedDownloadRef.current?.selectionKey === selectionKey) {
       triggerDownload(cachedDownloadRef.current.url, filename);
       return;
@@ -524,12 +557,15 @@ function VideoConverterPage() {
           <p className={styles.eyebrow}>Analysis</p>
           <h1 className={styles.title}>Video Converter</h1>
           <p className={styles.subtitle}>
-            Preview RGB demo videos stored in the current HDF5 file and save them to disk only when needed.
+            Preview RGB demo videos stored in the current HDF5 file and save
+            them to disk only when needed.
           </p>
         </div>
       </header>
 
-      {!fileUrl && !file && !fileLoading && <EmptyState openedFileCount={opened.length} />}
+      {!fileUrl && !file && !fileLoading && (
+        <EmptyState openedFileCount={opened.length} />
+      )}
 
       {fileError && (
         <section className={styles.messageCard}>
@@ -554,7 +590,10 @@ function VideoConverterPage() {
           <section className={styles.controlsCard}>
             <div className={styles.controlGrid}>
               <div className={styles.field}>
-                <label className={styles.fieldLabel} htmlFor="video-demo-select">
+                <label
+                  className={styles.fieldLabel}
+                  htmlFor="video-demo-select"
+                >
                   Demo
                 </label>
                 <select
@@ -569,7 +608,9 @@ function VideoConverterPage() {
                   }}
                   disabled={demos.length === 0}
                 >
-                  {demos.length === 0 && <option value="">No demos available</option>}
+                  {demos.length === 0 && (
+                    <option value="">No demos available</option>
+                  )}
                   {demos.map((demo) => (
                     <option key={demo.name} value={demo.name}>
                       {formatDemoOption(demo)}
@@ -579,7 +620,10 @@ function VideoConverterPage() {
               </div>
 
               <div className={styles.field}>
-                <label className={styles.fieldLabel} htmlFor="video-stream-select">
+                <label
+                  className={styles.fieldLabel}
+                  htmlFor="video-stream-select"
+                >
                   Video
                 </label>
                 <select
@@ -596,7 +640,9 @@ function VideoConverterPage() {
                 >
                   {videoOptions.length === 0 && (
                     <option value="">
-                      {videoOptionsLoading ? 'Loading videos…' : 'No supported videos found'}
+                      {videoOptionsLoading
+                        ? 'Loading videos…'
+                        : 'No supported videos found'}
                     </option>
                   )}
                   {videoOptions.map((video) => (
@@ -615,31 +661,36 @@ function VideoConverterPage() {
               {selectionText && (
                 <>
                   <div className={styles.statusItem}>
-                    <span className={styles.statusKey}>Selected:</span> {selectionText.demo}
+                    <span className={styles.statusKey}>Selected:</span>{' '}
+                    {selectionText.demo}
                   </div>
                   <div className={styles.statusItem}>
-                    <span className={styles.statusKey}>Samples:</span> {selectionText.samples}
+                    <span className={styles.statusKey}>Samples:</span>{' '}
+                    {selectionText.samples}
                   </div>
                   <div className={styles.statusItem}>
-                    <span className={styles.statusKey}>Source:</span> {selectionText.source}
+                    <span className={styles.statusKey}>Source:</span>{' '}
+                    {selectionText.source}
                   </div>
                   <div className={styles.statusItem}>
-                    <span className={styles.statusKey}>Success:</span> {selectionText.success}
+                    <span className={styles.statusKey}>Success:</span>{' '}
+                    {selectionText.success}
                   </div>
                 </>
               )}
               {selectedVideoInfo && (
                 <>
                   <div className={styles.statusItem}>
-                    <span className={styles.statusKey}>Frames:</span> {selectedVideoInfo.frameCount}
+                    <span className={styles.statusKey}>Frames:</span>{' '}
+                    {selectedVideoInfo.frameCount}
                   </div>
                   <div className={styles.statusItem}>
-                    <span className={styles.statusKey}>Resolution:</span> {selectedVideoInfo.width}×{selectedVideoInfo.height}
+                    <span className={styles.statusKey}>Resolution:</span>{' '}
+                    {selectedVideoInfo.width}×{selectedVideoInfo.height}
                   </div>
                 </>
               )}
             </div>
-
           </section>
 
           {videoOptionsError && (
@@ -652,7 +703,9 @@ function VideoConverterPage() {
             <div className={styles.previewHeader}>
               <div>
                 <h2 className={styles.previewTitle}>
-                  {selectedVideoInfo ? `${selectedVideoInfo.label} Preview` : 'Video Preview'}
+                  {selectedVideoInfo
+                    ? `${selectedVideoInfo.label} Preview`
+                    : 'Video Preview'}
                 </h2>
                 <p className={styles.previewMeta}>
                   {selectedVideoInfo
@@ -675,15 +728,19 @@ function VideoConverterPage() {
 
             {!supportedMimeType && (
               <p className={styles.hintText}>
-                Saving is unavailable in this browser because WebM recording is not supported.
+                Saving is unavailable in this browser because WebM recording is
+                not supported.
               </p>
             )}
 
             {saveError && <p className={styles.errorText}>{saveError}</p>}
 
-            {videoOptions.length === 0 && !videoOptionsLoading && !videoOptionsError ? (
+            {videoOptions.length === 0 &&
+            !videoOptionsLoading &&
+            !videoOptionsError ? (
               <p className={styles.infoText}>
-                No supported video datasets were found. Expected one or more (T, H, W, C) datasets under `obs/cameras/` or directly under `obs/`.
+                No supported video datasets were found. Expected one or more (T,
+                H, W, C) datasets under `obs/cameras/` or directly under `obs/`.
               </p>
             ) : videoLoading ? (
               <p className={styles.infoText}>Loading video frames…</p>
@@ -712,8 +769,13 @@ function VideoConverterPage() {
                       disabled={videoData.frameCount <= 1}
                     />
                     <div className={styles.sliderMeta}>
-                      <span>Frame {currentFrameLabel}/{videoData.frameCount}</span>
-                      <span>{currentTimeSeconds.toFixed(2)}s / {totalTimeSeconds.toFixed(2)}s</span>
+                      <span>
+                        Frame {currentFrameLabel}/{videoData.frameCount}
+                      </span>
+                      <span>
+                        {currentTimeSeconds.toFixed(2)}s /{' '}
+                        {totalTimeSeconds.toFixed(2)}s
+                      </span>
                     </div>
                   </div>
                   <button
@@ -735,24 +797,30 @@ function VideoConverterPage() {
         </>
       )}
 
-      {!source && !fileLoading && !sourceLoading && !fileError && !sourceError && fileUrl && (
-        <section className={styles.messageCard}>
-          <p>
-            Select an opened file from the sidebar to inspect demo videos, or go back to the viewer.
-          </p>
-          <div className={styles.emptyActions}>
-            <Link
-              className={styles.openBtn}
-              to={`/video-converter?${createSearchParams({ url: fileUrl }).toString()}`}
-            >
-              Retry
-            </Link>
-            <Link className={styles.openBtn} to="/">
-              Open HDF5
-            </Link>
-          </div>
-        </section>
-      )}
+      {!source &&
+        !fileLoading &&
+        !sourceLoading &&
+        !fileError &&
+        !sourceError &&
+        fileUrl && (
+          <section className={styles.messageCard}>
+            <p>
+              Select an opened file from the sidebar to inspect demo videos, or
+              go back to the viewer.
+            </p>
+            <div className={styles.emptyActions}>
+              <Link
+                className={styles.openBtn}
+                to={`/video-converter?${createSearchParams({ url: fileUrl }).toString()}`}
+              >
+                Retry
+              </Link>
+              <Link className={styles.openBtn} to="/">
+                Open HDF5
+              </Link>
+            </div>
+          </section>
+        )}
     </div>
   );
 }
