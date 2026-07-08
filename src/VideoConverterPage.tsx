@@ -8,7 +8,6 @@ import {
   openPoseTraceSource,
 } from './pose-trace/hdf5';
 import type {
-  DemoInfo,
   DemoVideoFrames,
   DemoVideoInfo,
   DemoVideoKey,
@@ -17,6 +16,12 @@ import type {
 import { type H5File, useStore } from './stores';
 import styles from './VideoConverterPage.module.css';
 import { resolveFileUrl } from './utils';
+import {
+  buildDownloadFilename,
+  createFrameRenderer,
+  formatDemoOption,
+  getSupportedMimeType,
+} from './VideoConverterPage.utils';
 
 const PREVIEW_FPS = 30;
 
@@ -43,49 +48,11 @@ function wait(milliseconds: number): Promise<void> {
   });
 }
 
-function formatDemoOption(demo: DemoInfo): string {
-  const parts = [demo.name];
-  if (demo.num_samples != null) parts.push(`samples=${demo.num_samples}`);
-  if (demo.success != null) parts.push(`success=${demo.success ? 1 : 0}`);
-  if (demo.source_episode_index != null) parts.push(`source=${demo.source_episode_index}`);
-  return parts.join(' | ');
-}
-
-function sanitizeFilenamePart(value: string): string {
-  return value.replaceAll(/[^a-zA-Z0-9._-]/g, '_');
-}
-
-function buildDownloadFilename(
-  datasetName: string,
-  demoName: string,
-  videoKey: DemoVideoKey,
-): string {
-  return `${sanitizeFilenamePart(datasetName)}-${sanitizeFilenamePart(demoName)}-${videoKey}.webm`;
-}
-
 function triggerDownload(url: string, filename: string) {
   const link = document.createElement('a');
   link.href = url;
   link.download = filename;
   link.click();
-}
-
-function getSupportedMimeType(): string | null {
-  if (typeof MediaRecorder === 'undefined') {
-    return null;
-  }
-
-  const candidates = [
-    'video/webm;codecs=vp9',
-    'video/webm;codecs=vp8',
-    'video/webm',
-  ];
-
-  if (typeof MediaRecorder.isTypeSupported !== 'function') {
-    return candidates[candidates.length - 1];
-  }
-
-  return candidates.find((candidate) => MediaRecorder.isTypeSupported(candidate)) ?? null;
 }
 
 function useResolvedFile(fileUrl: string | null): ResolvedFileState {
@@ -200,43 +167,6 @@ function usePoseTraceSource(file: H5File | null): SourceState {
   }, [file]);
 
   return state;
-}
-
-function createFrameRenderer(
-  context: CanvasRenderingContext2D,
-  width: number,
-  height: number,
-  channels: number,
-): (frames: Uint8Array, frameIndex: number) => void {
-  const pixelCount = width * height;
-  const bytesPerFrame = pixelCount * channels;
-  const rgbaBuffer = new Uint8ClampedArray(pixelCount * 4);
-  const imageData = new ImageData(rgbaBuffer, width, height);
-
-  return (frames, frameIndex) => {
-    const frameOffset = frameIndex * bytesPerFrame;
-
-    if (channels === 4) {
-      rgbaBuffer.set(frames.subarray(frameOffset, frameOffset + pixelCount * 4));
-    } else if (channels === 3) {
-      for (let sourceIndex = frameOffset, targetIndex = 0; targetIndex < rgbaBuffer.length; targetIndex += 4, sourceIndex += 3) {
-        rgbaBuffer[targetIndex] = frames[sourceIndex];
-        rgbaBuffer[targetIndex + 1] = frames[sourceIndex + 1];
-        rgbaBuffer[targetIndex + 2] = frames[sourceIndex + 2];
-        rgbaBuffer[targetIndex + 3] = 255;
-      }
-    } else {
-      for (let sourceIndex = frameOffset, targetIndex = 0; targetIndex < rgbaBuffer.length; targetIndex += 4, sourceIndex += 1) {
-        const value = frames[sourceIndex];
-        rgbaBuffer[targetIndex] = value;
-        rgbaBuffer[targetIndex + 1] = value;
-        rgbaBuffer[targetIndex + 2] = value;
-        rgbaBuffer[targetIndex + 3] = 255;
-      }
-    }
-
-    context.putImageData(imageData, 0, 0);
-  };
 }
 
 async function encodeVideoToBlob(

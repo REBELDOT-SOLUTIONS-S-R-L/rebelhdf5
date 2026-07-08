@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   addBackendRoot,
   checkBackend,
+  type DatasetArticulation,
+  getDatasetAttributes,
   listFiles,
   pollBackendStatus,
   PYTHON_BACKEND_BASE_URL,
@@ -10,6 +12,7 @@ import {
   runLeRobotConvert,
   runProcess,
   scanFiles,
+  updateDatasetArticulation,
   type PythonLeRobotConvertRequest,
 } from './python-backend';
 
@@ -148,6 +151,92 @@ describe('resolveFiles', () => {
       Response.json({ error: 'forbidden path' }, { status: 403 }),
     );
     await expect(resolveFiles([])).rejects.toThrow('forbidden path');
+  });
+});
+
+describe('getDatasetAttributes', () => {
+  const result = {
+    path: '/data/f.h5',
+    attrs: { total: 12 },
+    articulation: {
+      name: 'robot',
+      joint_number: 7,
+      segmentation: {},
+      end_effectors: {},
+    },
+    articulationSource: 'attribute',
+    groups: [{ path: '/data', attrs: { total: 12 } }],
+  };
+
+  it('POSTs the path and returns the parsed attributes result', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(result));
+    const payload = await getDatasetAttributes('/data/f.h5');
+
+    expect(payload).toMatchObject({
+      path: '/data/f.h5',
+      articulationSource: 'attribute',
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      `${PYTHON_BACKEND_BASE_URL}/api/dataset-attributes`,
+      expect.objectContaining({
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: '/data/f.h5' }),
+      }),
+    );
+  });
+
+  it('throws the backend error message on non-ok responses', async () => {
+    fetchMock.mockResolvedValueOnce(
+      Response.json({ error: 'no such file' }, { status: 404 }),
+    );
+    await expect(getDatasetAttributes('/missing.h5')).rejects.toThrow(
+      'no such file',
+    );
+  });
+
+  it('falls back to a status-based message when the error body is not JSON', async () => {
+    fetchMock.mockResolvedValueOnce(new Response('boom', { status: 500 }));
+    await expect(getDatasetAttributes('/x.h5')).rejects.toThrow(/500/u);
+  });
+});
+
+describe('updateDatasetArticulation', () => {
+  const articulation: DatasetArticulation = {
+    name: 'robot',
+    joint_number: 7,
+    segmentation: { arm: { target: '[0:7]', obs: '[0:7]' } },
+    end_effectors: { left: { pose: '[0:7]', gripper: '[7:8]' } },
+  };
+
+  it('POSTs path + articulation and returns the parsed result', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        path: '/data/f.h5',
+        attrs: {},
+        articulation,
+        articulationSource: 'attribute',
+      }),
+    );
+    const payload = await updateDatasetArticulation('/data/f.h5', articulation);
+
+    expect(payload.articulation).toEqual(articulation);
+    expect(fetchMock).toHaveBeenCalledWith(
+      `${PYTHON_BACKEND_BASE_URL}/api/dataset-attributes/articulation`,
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ path: '/data/f.h5', articulation }),
+      }),
+    );
+  });
+
+  it('throws on non-ok responses', async () => {
+    fetchMock.mockResolvedValueOnce(
+      Response.json({ error: 'write failed' }, { status: 400 }),
+    );
+    await expect(
+      updateDatasetArticulation('/data/f.h5', articulation),
+    ).rejects.toThrow('write failed');
   });
 });
 

@@ -15,4 +15,7 @@ tqdm>=4.66              # download progress bars
 pyarrow>=14.0           # parquet read/write (backend/lerobot.py)
 
 # --- Tests only (scripts/tests/) ---
-# pytest>=8.0
+# Run from scripts/:  pytest tests
+# Coverage:           pytest tests --cov=backend --cov-report=term-missing
+pytest>=8.0
+pytest-cov>=5.0

@@ -17,13 +17,18 @@ import {
   type PlotSceneCamera,
 } from './pose-trace/plotConfig';
 import type {
-  DemoInfo,
   DemoRow,
   ParsedArticulation,
   PoseTraceSource,
 } from './pose-trace/types';
 import { type H5File, useStore } from './stores';
 import styles from './PoseTracePage.module.css';
+import {
+  clonePlotSceneCamera,
+  formatDemoOption,
+  jointSpecKey,
+  jointSpecLabel,
+} from './PoseTracePage.utils';
 import { resolveFileUrl } from './utils';
 
 interface ResolvedFileState {
@@ -188,35 +193,6 @@ function usePoseTraceSource(file: H5File | null): SourceState {
   }, [file]);
 
   return state;
-}
-
-function formatDemoOption(demo: DemoInfo): string {
-  const parts = [demo.name];
-  if (demo.num_samples != null) parts.push(`samples=${demo.num_samples}`);
-  if (demo.success != null) parts.push(`success=${demo.success ? 1 : 0}`);
-  if (demo.source_episode_index != null) parts.push(`source=${demo.source_episode_index}`);
-  return parts.join(' | ');
-}
-
-function clonePlotSceneCamera(camera: PlotSceneCamera | null | undefined): PlotSceneCamera | null {
-  if (!camera) {
-    return null;
-  }
-
-  return {
-    center: camera.center ? { ...camera.center } : undefined,
-    eye: camera.eye ? { ...camera.eye } : undefined,
-    up: camera.up ? { ...camera.up } : undefined,
-    projection: camera.projection ? { ...camera.projection } : undefined,
-  };
-}
-
-function jointSpecKey(spec: JointChartSpec): string {
-  return spec.id ?? `${spec.segmentName}_${spec.jointIndex}`;
-}
-
-function jointSpecLabel(spec: JointChartSpec): string {
-  return spec.label ?? `${spec.segmentName}: ${spec.jointIndex}`;
 }
 
 function JointChartsSection({

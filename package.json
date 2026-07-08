@@ -28,6 +28,7 @@
     "lint:prettier": "prettier --cache --check .",
     "test": "vitest",
     "test:run": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "test:ui": "vitest --ui",
     "analyze": "pnpm dlx source-map-explorer \"dist/assets/*.js\" --no-border-checks"
   },

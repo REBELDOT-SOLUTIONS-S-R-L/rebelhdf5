@@ -15,13 +15,21 @@ import { createSearchParams, Link, useSearchParams } from 'react-router-dom';
 import styles from './DatasetProcessingPage.module.css';
 import {
   buildBackendKeyInfos,
+  buildDefaultOutputName,
   buildKeyTree,
-  sumKeyInfos,
   type KeyTreeNode,
+  parseTaskRulesJson,
+  sumKeyInfos,
+} from './DatasetProcessingPage.utils';
+import {
   useDatasetProcessingSources,
   useResolvedFile,
 } from './dataset-selection';
-import { processDataset } from './pose-trace/hdf5';
+import {
+  getDatasetProcessingInfo,
+  openPoseTraceSource,
+  processDataset,
+} from './pose-trace/hdf5';
 import {
   type DatasetProcessingOperation,
   type DatasetProcessingProgress,
@@ -85,10 +93,6 @@ function getDesktopFilePath(file: File): string | undefined {
   }
 }
 
-function stripExtension(filename: string): string {
-  return filename.replace(/\.(h5|hdf5)$/iu, '');
-}
-
 function triggerDownloadBlob(fileName: string, blob: Blob) {
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
@@ -105,56 +109,6 @@ function triggerDownloadUrl(fileName: string, downloadUrl: string) {
   link.href = downloadUrl;
   link.download = fileName;
   link.click();
-}
-
-function parseTaskRulesJson(
-  text: string,
-): Array<Record<string, unknown>> | undefined {
-  const trimmed = text.trim();
-  if (trimmed.length === 0) {
-    return undefined;
-  }
-
-  const parsed = JSON.parse(trimmed) as unknown;
-  if (
-    !Array.isArray(parsed) ||
-    !parsed.every(
-      (entry) => entry && typeof entry === 'object' && !Array.isArray(entry),
-    )
-  ) {
-    throw new Error('Task rules must be a JSON array of objects.');
-  }
-
-  return parsed as Array<Record<string, unknown>>;
-}
-
-function buildDefaultOutputName(
-  operation: DatasetProcessingOperation,
-  sourceFiles: { name: string }[],
-  cutDemoNames: string[],
-): string {
-  if (operation === 'lerobot') {
-    if (sourceFiles.length === 1) {
-      return `${stripExtension(sourceFiles[0].name)}-lerobot-v21`;
-    }
-
-    return `lerobot-v21-${sourceFiles.length}-datasets`;
-  }
-
-  if (operation === 'cut') {
-    const baseName = stripExtension(sourceFiles[0]?.name ?? 'dataset');
-    const firstDemo = cutDemoNames[0] ?? 'start';
-    const lastDemo = cutDemoNames[cutDemoNames.length - 1] ?? 'end';
-    return `${baseName}-cut-${firstDemo}-${lastDemo}.hdf5`;
-  }
-
-  if (operation === 'append') {
-    const baseName = stripExtension(sourceFiles[0]?.name ?? 'dataset');
-    const appendCount = Math.max(sourceFiles.length - 1, 0);
-    return `${baseName}-append-${appendCount}-dataset${appendCount === 1 ? '' : 's'}.hdf5`;
-  }
-
-  return `merged-${sourceFiles.length}-datasets.hdf5`;
 }
 
 function KeyTreeNodeItem({
@@ -647,9 +601,14 @@ function DatasetProcessingPage() {
     }
   }, [cutEndDemoName, cutStartDemoName, primaryDemos]);
 
-  const selectedSourceStates = orderedSelectedSourceUrls
-    .map((url) => sourceStates[url])
-    .filter(Boolean);
+  // Memoized so downstream memos/effects (e.g. availableKeyInfos → selectedKeys)
+  // see a stable reference; otherwise a fresh array every render drives an
+  // effect→setState→re-render loop.
+  const selectedSourceStates = useMemo(
+    () =>
+      orderedSelectedSourceUrls.map((url) => sourceStates[url]).filter(Boolean),
+    [orderedSelectedSourceUrls, sourceStates],
+  );
   const selectedSourceFiles = selectedSourceStates.map((entry) => entry.file);
   const selectedSourceRefs =
     useBackend && backend.available
