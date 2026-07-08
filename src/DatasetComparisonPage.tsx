@@ -65,8 +65,7 @@ function EmptyState({ openedFileCount }: { openedFileCount: number }) {
     <div className={styles.emptyState}>
       <h2 className={styles.emptyTitle}>Dataset Comparison</h2>
       <p className={styles.emptyText}>
-        Open at least two HDF5 files in rebelHDF5, then compare their common
-        demo keys side by side.
+        Open an HDF5 file in rebelHDF5, then compare demo keys side by side.
       </p>
       <div className={styles.emptyActions}>
         <Link className={styles.openBtn} to="/">
@@ -341,7 +340,8 @@ function DatasetComparisonPage() {
 
   const [leftSourceUrl, setLeftSourceUrl] = useState<string | null>(null);
   const [rightSourceUrl, setRightSourceUrl] = useState<string | null>(null);
-  const [selectedDemoName, setSelectedDemoName] = useState<string | null>(null);
+  const [leftDemoName, setLeftDemoName] = useState<string | null>(null);
+  const [rightDemoName, setRightDemoName] = useState<string | null>(null);
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
   const [collapsedGroupPaths, setCollapsedGroupPaths] = useState<string[]>([]);
   const [comparison, setComparison] = useState<ComparisonResultState>({
@@ -395,17 +395,22 @@ function DatasetComparisonPage() {
   }, [file, fileUrl, sourceOptions]);
 
   useEffect(() => {
-    if (sourceOptions.length < 2) {
+    if (sourceOptions.length === 0) {
+      setRightSourceUrl(null);
+      return;
+    }
+
+    if (!leftSourceUrl) {
       setRightSourceUrl(null);
       return;
     }
 
     const fallback =
-      sourceOptions.find((entry) => entry.id !== leftSourceUrl)?.id ?? null;
+      sourceOptions.find((entry) => entry.id !== leftSourceUrl)?.id ??
+      sourceOptions.find((entry) => entry.id === leftSourceUrl)?.id ??
+      sourceOptions[0].id;
     setRightSourceUrl((current) =>
-      current &&
-      current !== leftSourceUrl &&
-      sourceOptions.some((entry) => entry.id === current)
+      current && sourceOptions.some((entry) => entry.id === current)
         ? current
         : fallback,
     );
@@ -438,26 +443,36 @@ function DatasetComparisonPage() {
     .filter((entry) => entry.error)
     .map((entry) => `${entry.file.name}: ${entry.error}`);
 
-  const commonDemos = useMemo(() => {
-    const leftDemos = leftSourceState?.source?.demos ?? [];
-    const rightDemoNames = new Set(
-      (rightSourceState?.source?.demos ?? []).map((demo) => demo.name),
-    );
-    return leftDemos
-      .map((demo) => demo.name)
-      .filter((demoName) => rightDemoNames.has(demoName));
-  }, [leftSourceState, rightSourceState]);
+  const leftDemos = useMemo(
+    () => (leftSourceState?.source?.demos ?? []).map((demo) => demo.name),
+    [leftSourceState],
+  );
+  const rightDemos = useMemo(
+    () => (rightSourceState?.source?.demos ?? []).map((demo) => demo.name),
+    [rightSourceState],
+  );
 
   useEffect(() => {
-    if (commonDemos.length === 0) {
-      setSelectedDemoName(null);
+    if (leftDemos.length === 0) {
+      setLeftDemoName(null);
       return;
     }
 
-    setSelectedDemoName((current) =>
-      current && commonDemos.includes(current) ? current : commonDemos[0],
+    setLeftDemoName((current) =>
+      current && leftDemos.includes(current) ? current : leftDemos[0],
     );
-  }, [commonDemos]);
+  }, [leftDemos]);
+
+  useEffect(() => {
+    if (rightDemos.length === 0) {
+      setRightDemoName(null);
+      return;
+    }
+
+    setRightDemoName((current) =>
+      current && rightDemos.includes(current) ? current : rightDemos[0],
+    );
+  }, [rightDemos]);
 
   const availableKeyInfos = useMemo(
     () =>
@@ -501,7 +516,8 @@ function DatasetComparisonPage() {
     if (
       !leftSource ||
       !rightSource ||
-      !selectedDemoName ||
+      !leftDemoName ||
+      !rightDemoName ||
       selectedKeys.length === 0
     ) {
       setComparison({ left: null, right: null, loading: false, error: null });
@@ -511,7 +527,8 @@ function DatasetComparisonPage() {
     let cancelled = false;
     const resolvedLeftSource = leftSource;
     const resolvedRightSource = rightSource;
-    const resolvedDemoName = selectedDemoName;
+    const resolvedLeftDemoName = leftDemoName;
+    const resolvedRightDemoName = rightDemoName;
     const resolvedSelectedKeys = selectedKeys;
     setComparison((current) => ({
       left: current.left,
@@ -525,12 +542,12 @@ function DatasetComparisonPage() {
         const [left, right] = await Promise.all([
           loadDatasetComparisonValues(
             resolvedLeftSource,
-            resolvedDemoName,
+            resolvedLeftDemoName,
             resolvedSelectedKeys,
           ),
           loadDatasetComparisonValues(
             resolvedRightSource,
-            resolvedDemoName,
+            resolvedRightDemoName,
             resolvedSelectedKeys,
           ),
         ]);
@@ -554,7 +571,13 @@ function DatasetComparisonPage() {
     return () => {
       cancelled = true;
     };
-  }, [leftSourceState, rightSourceState, selectedDemoName, selectedKeys]);
+  }, [
+    leftDemoName,
+    leftSourceState,
+    rightDemoName,
+    rightSourceState,
+    selectedKeys,
+  ]);
 
   function toggleKey(keyPath: string) {
     setSelectedKeys((current) =>
@@ -619,8 +642,8 @@ function DatasetComparisonPage() {
           <p className={styles.eyebrow}>Comparison</p>
           <h1 className={styles.title}>Dataset Comparison</h1>
           <p className={styles.subtitle}>
-            Select two opened datasets, choose a shared demo and common keys,
-            then inspect raw values side by side.
+            Select datasets and demos for each side, choose common keys, then
+            inspect raw values side by side.
           </p>
         </div>
       </header>
@@ -641,11 +664,7 @@ function DatasetComparisonPage() {
         </section>
       )}
 
-      {availableFiles.length === 1 && (
-        <EmptyState openedFileCount={opened.length} />
-      )}
-
-      {sourceOptions.length >= 2 && (
+      {sourceOptions.length >= 1 && (
         <>
           <section className={styles.controlsCard}>
             <div className={styles.controlGrid}>
@@ -665,11 +684,7 @@ function DatasetComparisonPage() {
                   }}
                 >
                   {sourceOptions.map((entry) => (
-                    <option
-                      key={entry.id}
-                      value={entry.id}
-                      disabled={entry.id === rightSourceUrl}
-                    >
+                    <option key={entry.id} value={entry.id}>
                       {entry.label}
                     </option>
                   ))}
@@ -692,11 +707,7 @@ function DatasetComparisonPage() {
                   }}
                 >
                   {sourceOptions.map((entry) => (
-                    <option
-                      key={entry.id}
-                      value={entry.id}
-                      disabled={entry.id === leftSourceUrl}
-                    >
+                    <option key={entry.id} value={entry.id}>
                       {entry.label}
                     </option>
                   ))}
@@ -706,20 +717,50 @@ function DatasetComparisonPage() {
               <div className={styles.field}>
                 <label
                   className={styles.fieldLabel}
-                  htmlFor="dataset-comparison-demo"
+                  htmlFor="dataset-comparison-left-demo"
                 >
-                  Demo
+                  Left Demo
                 </label>
                 <select
-                  id="dataset-comparison-demo"
+                  id="dataset-comparison-left-demo"
                   className={styles.select}
-                  value={selectedDemoName ?? ''}
+                  value={leftDemoName ?? ''}
                   onChange={(event) => {
-                    setSelectedDemoName(event.target.value || null);
+                    setLeftDemoName(event.target.value || null);
                   }}
-                  disabled={commonDemos.length === 0}
+                  disabled={leftDemos.length === 0}
                 >
-                  {commonDemos.map((demoName) => (
+                  {leftDemos.length === 0 && (
+                    <option value="">No demos available</option>
+                  )}
+                  {leftDemos.map((demoName) => (
+                    <option key={demoName} value={demoName}>
+                      {demoName}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className={styles.field}>
+                <label
+                  className={styles.fieldLabel}
+                  htmlFor="dataset-comparison-right-demo"
+                >
+                  Right Demo
+                </label>
+                <select
+                  id="dataset-comparison-right-demo"
+                  className={styles.select}
+                  value={rightDemoName ?? ''}
+                  onChange={(event) => {
+                    setRightDemoName(event.target.value || null);
+                  }}
+                  disabled={rightDemos.length === 0}
+                >
+                  {rightDemos.length === 0 && (
+                    <option value="">No demos available</option>
+                  )}
+                  {rightDemos.map((demoName) => (
                     <option key={demoName} value={demoName}>
                       {demoName}
                     </option>
@@ -734,8 +775,12 @@ function DatasetComparisonPage() {
                 {sourceOptions.length}
               </div>
               <div className={styles.statusItem}>
-                <span className={styles.statusKey}>Common Demos:</span>{' '}
-                {commonDemos.length}
+                <span className={styles.statusKey}>Left Demos:</span>{' '}
+                {leftDemos.length}
+              </div>
+              <div className={styles.statusItem}>
+                <span className={styles.statusKey}>Right Demos:</span>{' '}
+                {rightDemos.length}
               </div>
               <div className={styles.statusItem}>
                 <span className={styles.statusKey}>Common Keys:</span>{' '}
@@ -797,9 +842,9 @@ function DatasetComparisonPage() {
               <p className={styles.infoText}>
                 Loading source dataset structure…
               </p>
-            ) : commonDemos.length === 0 ? (
+            ) : leftDemos.length === 0 || rightDemos.length === 0 ? (
               <p className={styles.infoText}>
-                The selected datasets do not share any demo names.
+                Select datasets that expose demos on both sides.
               </p>
             ) : availableKeyInfos.length === 0 ? (
               <p className={styles.infoText}>
@@ -827,8 +872,9 @@ function DatasetComparisonPage() {
             <div>
               <h2 className={styles.sectionTitle}>Raw Data</h2>
               <p className={styles.sectionText}>
-                Values are shown for {selectedDemoName ?? 'the selected demo'}{' '}
-                using viewer-style matrix slices.
+                Values are shown for {leftDemoName ?? 'the left demo'} and{' '}
+                {rightDemoName ?? 'the right demo'} using viewer-style matrix
+                slices.
               </p>
             </div>
 

@@ -1,4 +1,5 @@
 import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -117,7 +118,7 @@ beforeEach(() => {
           shape: [2, 2],
           dtype: 'float64',
           selection: ':,:',
-          value: data.values[keyPath],
+          value: data.values[`${demoName}:${keyPath}`] ?? data.values[keyPath],
         })),
       };
     },
@@ -164,8 +165,15 @@ describe('DatasetComparisonPage', () => {
       expect(loadDatasetComparisonValues).toHaveBeenCalledTimes(2);
     });
 
-    const demoSelect = screen.getByLabelText<HTMLSelectElement>('Demo');
-    expect([...demoSelect.options].map((option) => option.value)).toEqual([
+    const leftDemoSelect =
+      screen.getByLabelText<HTMLSelectElement>('Left Demo');
+    const rightDemoSelect =
+      screen.getByLabelText<HTMLSelectElement>('Right Demo');
+    expect([...leftDemoSelect.options].map((option) => option.value)).toEqual([
+      'demo_0',
+      'demo_1',
+    ]);
+    expect([...rightDemoSelect.options].map((option) => option.value)).toEqual([
       'demo_0',
     ]);
     expect(screen.getByText('obs/pos')).toBeInTheDocument();
@@ -176,7 +184,7 @@ describe('DatasetComparisonPage', () => {
     expect(screen.getByText('8')).toBeInTheDocument();
   });
 
-  it('shows an empty state until at least two files are opened', () => {
+  it('renders controls when one file is opened', async () => {
     useStore.setState({
       opened: [makeRemote('https://x/a.h5', 'a.h5')],
     });
@@ -188,33 +196,42 @@ describe('DatasetComparisonPage', () => {
 
     renderPage();
 
-    expect(
-      screen.getByText(/open at least two hdf5 files/i),
-    ).toBeInTheDocument();
+    await expect(
+      screen.findByLabelText('Left Dataset'),
+    ).resolves.toBeInTheDocument();
+    expect(screen.getByLabelText('Right Dataset')).toBeInTheDocument();
   });
 
-  it('reports when selected datasets have no common demos', async () => {
+  it('allows comparing two demos from the same dataset', async () => {
+    const user = userEvent.setup();
     useStore.setState({
-      opened: [
-        makeRemote('https://x/a.h5', 'a.h5'),
-        makeRemote('https://x/b.h5', 'b.h5'),
-      ],
+      opened: [makeRemote('https://x/a.h5', 'a.h5')],
     });
     sourceData.set('https://x/a.h5', {
-      demos: ['demo_0'],
+      demos: ['demo_0', 'demo_1'],
       keys: ['obs/pos'],
-      values: { 'obs/pos': [[1]] },
-    });
-    sourceData.set('https://x/b.h5', {
-      demos: ['demo_1'],
-      keys: ['obs/pos'],
-      values: { 'obs/pos': [[2]] },
+      values: {
+        'demo_0:obs/pos': [[1]],
+        'demo_1:obs/pos': [[2]],
+      },
     });
 
     renderPage();
 
-    await expect(
-      screen.findByText(/do not share any demo names/i),
-    ).resolves.toBeInTheDocument();
+    await waitFor(() => {
+      expect(loadDatasetComparisonValues).toHaveBeenCalledTimes(2);
+    });
+
+    await user.selectOptions(screen.getByLabelText('Right Demo'), 'demo_1');
+
+    await waitFor(() => {
+      expect(loadDatasetComparisonValues).toHaveBeenLastCalledWith(
+        expect.objectContaining({ sourceId: 'https://x/a.h5' }),
+        'demo_1',
+        ['obs/pos'],
+      );
+    });
+    expect(screen.getAllByText('1').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('2').length).toBeGreaterThan(0);
   });
 });
