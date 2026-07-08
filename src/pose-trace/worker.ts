@@ -21,6 +21,8 @@ import type {
   ObjectDistributionSourceDetail,
   DemoInfo,
   DemoRow,
+  DatasetComparisonValue,
+  DatasetComparisonValuesResult,
   DatasetProcessingProgress,
   DatasetProcessingRequest,
   DatasetProcessingSourceInfo,
@@ -33,7 +35,10 @@ import type {
 type PoseSeries = number[][][];
 type H5Module = Awaited<typeof h5wasm.ready>;
 type H5WasmCreateDatasetArgs = Parameters<H5WasmGroup['create_dataset']>[0];
-type H5WasmCompressionConfig = Pick<H5WasmCreateDatasetArgs, 'compression' | 'compression_opts'>;
+type H5WasmCompressionConfig = Pick<
+  H5WasmCreateDatasetArgs,
+  'compression' | 'compression_opts'
+>;
 
 type OpenLocalSourcePayload = {
   file: File;
@@ -51,6 +56,12 @@ type LoadDemoRowsPayload = {
 
 type GetDatasetProcessingInfoPayload = {
   sourceId: string;
+};
+
+type LoadDatasetComparisonValuesPayload = {
+  sourceId: string;
+  demoName: string;
+  keyPaths: string[];
 };
 
 type LoadObjectDistributionPayload = ObjectDistributionRequest;
@@ -75,8 +86,21 @@ type PoseTraceWorkerRequest =
   | { id: number; type: 'openLocalSource'; payload: OpenLocalSourcePayload }
   | { id: number; type: 'openRemoteSource'; payload: OpenRemoteSourcePayload }
   | { id: number; type: 'loadDemoRows'; payload: LoadDemoRowsPayload }
-  | { id: number; type: 'getDatasetProcessingInfo'; payload: GetDatasetProcessingInfoPayload }
-  | { id: number; type: 'loadObjectDistribution'; payload: LoadObjectDistributionPayload }
+  | {
+      id: number;
+      type: 'getDatasetProcessingInfo';
+      payload: GetDatasetProcessingInfoPayload;
+    }
+  | {
+      id: number;
+      type: 'loadDatasetComparisonValues';
+      payload: LoadDatasetComparisonValuesPayload;
+    }
+  | {
+      id: number;
+      type: 'loadObjectDistribution';
+      payload: LoadObjectDistributionPayload;
+    }
   | { id: number; type: 'processDataset'; payload: ProcessDatasetPayload }
   | { id: number; type: 'listDemoVideos'; payload: ListDemoVideosPayload }
   | { id: number; type: 'loadDemoVideo'; payload: LoadDemoVideoPayload }
@@ -103,6 +127,7 @@ type PoseTraceWorkerResponse =
         | OpenSourceResultPayload
         | DemoRow[]
         | DatasetProcessingSourceInfo
+        | DatasetComparisonValuesResult
         | ObjectDistributionResult
         | ProcessDatasetResult
         | DemoVideoInfo[]
@@ -111,13 +136,20 @@ type PoseTraceWorkerResponse =
     }
   | { id: number; ok: false; error: string }
   | { id: number; type: 'progress'; progress: DatasetProcessingProgress }
-  | { id: number; type: 'chunk'; data: ArrayBuffer; index: number; total: number };
+  | {
+      id: number;
+      type: 'chunk';
+      data: ArrayBuffer;
+      index: number;
+      total: number;
+    };
 
 interface WorkerSuccessResult {
   result:
     | OpenSourceResultPayload
     | DemoRow[]
     | DatasetProcessingSourceInfo
+    | DatasetComparisonValuesResult
     | ObjectDistributionResult
     | ProcessDatasetResult
     | DemoVideoInfo[]
@@ -167,7 +199,10 @@ const FILTER_PLUGIN_NAMES: Record<number, Plugin> = {
 const openSources = new Map<string, OpenSourceEntry>();
 let modulePromise: Promise<H5Module> | null = null;
 const workerScope = self as unknown as {
-  postMessage: (message: PoseTraceWorkerResponse, transfer?: Transferable[]) => void;
+  postMessage: (
+    message: PoseTraceWorkerResponse,
+    transfer?: Transferable[],
+  ) => void;
 };
 
 function sanitizeFilename(filename: string): string {
@@ -289,12 +324,18 @@ function maybeChildGroup(group: H5WasmGroup, name: string): H5WasmGroup | null {
   return isGroup(child) ? child : null;
 }
 
-function maybeChildDataset(group: H5WasmGroup, name: string): H5WasmDataset | null {
+function maybeChildDataset(
+  group: H5WasmGroup,
+  name: string,
+): H5WasmDataset | null {
   const child = group.get(name);
   return isDataset(child) ? child : null;
 }
 
-function findDescendantGroup(group: H5WasmGroup, targetName: string): H5WasmGroup | null {
+function findDescendantGroup(
+  group: H5WasmGroup,
+  targetName: string,
+): H5WasmGroup | null {
   const directChild = maybeChildGroup(group, targetName);
   if (directChild) {
     return directChild;
@@ -319,7 +360,10 @@ function findDescendantGroup(group: H5WasmGroup, targetName: string): H5WasmGrou
   return null;
 }
 
-function findDescendantDataset(group: H5WasmGroup, targetName: string): H5WasmDataset | null {
+function findDescendantDataset(
+  group: H5WasmGroup,
+  targetName: string,
+): H5WasmDataset | null {
   const directChild = maybeChildDataset(group, targetName);
   if (directChild) {
     return directChild;
@@ -389,7 +433,10 @@ function getDataGroup(h5File: H5WasmFile): H5WasmGroup {
   );
 }
 
-function findPoseGroup(demoGroup: H5WasmGroup, name: string): H5WasmGroup | null {
+function findPoseGroup(
+  demoGroup: H5WasmGroup,
+  name: string,
+): H5WasmGroup | null {
   const searchRoots: H5WasmGroup[] = [];
   const obsGroup = maybeChildGroup(demoGroup, 'obs');
   if (obsGroup) {
@@ -413,7 +460,10 @@ function findPoseGroup(demoGroup: H5WasmGroup, name: string): H5WasmGroup | null
   return null;
 }
 
-function findVideoDataset(demoGroup: H5WasmGroup, name: DemoVideoKey): H5WasmDataset | null {
+function findVideoDataset(
+  demoGroup: H5WasmGroup,
+  name: DemoVideoKey,
+): H5WasmDataset | null {
   const obsGroup = maybeChildGroup(demoGroup, 'obs');
   if (!obsGroup) {
     return null;
@@ -473,22 +523,33 @@ function humanizeCameraLabel(name: string): string {
     .replaceAll(/\s+/g, ' ')
     .trim()
     .split(' ')
-    .map((word) => (word.length === 0 ? word : word[0].toUpperCase() + word.slice(1)))
+    .map((word) =>
+      word.length === 0 ? word : word[0].toUpperCase() + word.slice(1),
+    )
     .join(' ');
 }
 
-function isPoseShape(shape: number[] | null): shape is [number, number, number] {
-  return Array.isArray(shape) && shape.length === 3 && shape[1] === 4 && shape[2] === 4;
+function isPoseShape(
+  shape: number[] | null,
+): shape is [number, number, number] {
+  return (
+    Array.isArray(shape) &&
+    shape.length === 3 &&
+    shape[1] === 4 &&
+    shape[2] === 4
+  );
 }
 
-function isVideoShape(shape: number[] | null): shape is [number, number, number, number] {
+function isVideoShape(
+  shape: number[] | null,
+): shape is [number, number, number, number] {
   return (
-    Array.isArray(shape)
-    && shape.length === 4
-    && Number.isInteger(shape[0])
-    && Number.isInteger(shape[1])
-    && Number.isInteger(shape[2])
-    && [1, 3, 4].includes(shape[3] ?? 0)
+    Array.isArray(shape) &&
+    shape.length === 4 &&
+    Number.isInteger(shape[0]) &&
+    Number.isInteger(shape[1]) &&
+    Number.isInteger(shape[2]) &&
+    [1, 3, 4].includes(shape[3] ?? 0)
   );
 }
 
@@ -579,7 +640,8 @@ function extractXYZAtStep(
 
 function listDemos(h5File: H5WasmFile): DemoInfo[] {
   const dataGroup = getDataGroup(h5File);
-  const demoNames = dataGroup.keys()
+  const demoNames = dataGroup
+    .keys()
     .filter((name) => name.startsWith('demo_'))
     .sort((left, right) => {
       const leftKey = demoSortKey(left);
@@ -653,7 +715,9 @@ function coerceArticulationValue(value: unknown): unknown {
   return value;
 }
 
-function parseIndexRange(value: unknown): { start: number; end: number } | null {
+function parseIndexRange(
+  value: unknown,
+): { start: number; end: number } | null {
   const coerced = coerceArticulationValue(value);
   if (Array.isArray(coerced) && coerced.length === 2) {
     const start = optionalInt(coerced[0]);
@@ -710,7 +774,9 @@ function parseJointIndices(
     }
 
     const record = entry as Record<string, unknown>;
-    const index = optionalInt(record.column_index ?? record.index ?? record.joint_index);
+    const index = optionalInt(
+      record.column_index ?? record.index ?? record.joint_index,
+    );
     if (index == null) {
       continue;
     }
@@ -718,17 +784,19 @@ function parseJointIndices(
     const rawName = record.joint_name ?? record.name;
     joints.push({
       articulationName,
-      name: typeof rawName === 'string' || typeof rawName === 'number'
-        ? String(rawName)
-        : `joint_${index}`,
+      name:
+        typeof rawName === 'string' || typeof rawName === 'number'
+          ? String(rawName)
+          : `joint_${index}`,
       index,
     });
   }
 
-  return joints.sort((left, right) =>
-    left.articulationName.localeCompare(right.articulationName)
-    || left.index - right.index
-    || left.name.localeCompare(right.name),
+  return joints.sort(
+    (left, right) =>
+      left.articulationName.localeCompare(right.articulationName) ||
+      left.index - right.index ||
+      left.name.localeCompare(right.name),
   );
 }
 
@@ -758,14 +826,16 @@ function parseComponentSlices(
   const directPoseRange = parseIndexRange(record.pose);
   if (directPoseRange) {
     const gripperRange = parseIndexRange(record.gripper);
-    return [{
-      name: articulationName,
-      poseStart: directPoseRange.start,
-      poseEnd: directPoseRange.end,
-      poseOrder: [...poseOrder],
-      gripperStart: gripperRange?.start ?? null,
-      gripperEnd: gripperRange?.end ?? null,
-    }];
+    return [
+      {
+        name: articulationName,
+        poseStart: directPoseRange.start,
+        poseEnd: directPoseRange.end,
+        poseOrder: [...poseOrder],
+        gripperStart: gripperRange?.start ?? null,
+        gripperEnd: gripperRange?.end ?? null,
+      },
+    ];
   }
 
   const endEffectors: ArticulationEndEffector[] = [];
@@ -791,15 +861,19 @@ function parseComponentSlices(
     });
   }
 
-  return endEffectors.sort((left, right) => left.name.localeCompare(right.name));
+  return endEffectors.sort((left, right) =>
+    left.name.localeCompare(right.name),
+  );
 }
 
 function readStandardArticulationsFromAttrs(dataGroup: H5WasmGroup): unknown {
-  const articulationNames = [...new Set(
-    Object.keys(dataGroup.attrs)
-      .map((key) => key.match(/^articulations\/([^/]+)\//u)?.[1])
-      .filter((name): name is string => Boolean(name)),
-  )].sort((left, right) => left.localeCompare(right));
+  const articulationNames = [
+    ...new Set(
+      Object.keys(dataGroup.attrs)
+        .map((key) => key.match(/^articulations\/([^/]+)\//u)?.[1])
+        .filter((name): name is string => Boolean(name)),
+    ),
+  ].sort((left, right) => left.localeCompare(right));
 
   if (articulationNames.length === 0) {
     return null;
@@ -820,16 +894,22 @@ function readStandardArticulationsFromAttrs(dataGroup: H5WasmGroup): unknown {
       hasJointNumber = true;
     }
 
-    joints.push(...parseJointIndices(
-      articulationName,
-      getAttributeValue(dataGroup, `${prefix}/joints/joint_indices`),
-    ));
-    const poseOrder = parsePoseOrder(getAttributeValue(dataGroup, `${prefix}/pose/pose_order`));
-    endEffectors.push(...parseComponentSlices(
-      articulationName,
-      getAttributeValue(dataGroup, `${prefix}/pose/component_slices`),
-      poseOrder,
-    ));
+    joints.push(
+      ...parseJointIndices(
+        articulationName,
+        getAttributeValue(dataGroup, `${prefix}/joints/joint_indices`),
+      ),
+    );
+    const poseOrder = parsePoseOrder(
+      getAttributeValue(dataGroup, `${prefix}/pose/pose_order`),
+    );
+    endEffectors.push(
+      ...parseComponentSlices(
+        articulationName,
+        getAttributeValue(dataGroup, `${prefix}/pose/component_slices`),
+        poseOrder,
+      ),
+    );
   }
 
   return {
@@ -863,10 +943,18 @@ function readArticulationFromAttrs(dataGroup: H5WasmGroup): unknown {
   }
 
   return {
-    name: coerceArticulationValue(getAttributeValue(dataGroup, 'articulation/name')),
-    joint_number: coerceArticulationValue(getAttributeValue(dataGroup, 'articulation/joint_number')),
-    segmentation: coerceArticulationValue(getAttributeValue(dataGroup, 'articulation/segmentation')),
-    end_effectors: coerceArticulationValue(getAttributeValue(dataGroup, 'articulation/end_effectors')),
+    name: coerceArticulationValue(
+      getAttributeValue(dataGroup, 'articulation/name'),
+    ),
+    joint_number: coerceArticulationValue(
+      getAttributeValue(dataGroup, 'articulation/joint_number'),
+    ),
+    segmentation: coerceArticulationValue(
+      getAttributeValue(dataGroup, 'articulation/segmentation'),
+    ),
+    end_effectors: coerceArticulationValue(
+      getAttributeValue(dataGroup, 'articulation/end_effectors'),
+    ),
   };
 }
 
@@ -915,7 +1003,9 @@ function readArticulationFromGroup(dataGroup: H5WasmGroup): unknown {
   };
 }
 
-function parseInclusiveRange(value: unknown): { start: number; end: number } | null {
+function parseInclusiveRange(
+  value: unknown,
+): { start: number; end: number } | null {
   return parseIndexRange(value);
 }
 
@@ -932,7 +1022,9 @@ function parseArticulation(raw: unknown): ParsedArticulation | null {
   const segmentation: ArticulationSegment[] = [];
   const segRaw = rawRecord.segmentation;
   if (segRaw && typeof segRaw === 'object' && !Array.isArray(segRaw)) {
-    for (const [segName, segValue] of Object.entries(segRaw as Record<string, unknown>)) {
+    for (const [segName, segValue] of Object.entries(
+      segRaw as Record<string, unknown>,
+    )) {
       if (!segValue || typeof segValue !== 'object') {
         continue;
       }
@@ -957,18 +1049,28 @@ function parseArticulation(raw: unknown): ParsedArticulation | null {
   const eefRaw = rawRecord.end_effectors;
   if (Array.isArray(eefRaw)) {
     for (const eefValue of eefRaw) {
-      if (!eefValue || typeof eefValue !== 'object' || Array.isArray(eefValue)) {
+      if (
+        !eefValue ||
+        typeof eefValue !== 'object' ||
+        Array.isArray(eefValue)
+      ) {
         continue;
       }
       const eefRecord = eefValue as Record<string, unknown>;
       const poseStart = optionalInt(eefRecord.poseStart);
       const poseEnd = optionalInt(eefRecord.poseEnd);
-      if (typeof eefRecord.name !== 'string' || poseStart == null || poseEnd == null) {
+      if (
+        typeof eefRecord.name !== 'string' ||
+        poseStart == null ||
+        poseEnd == null
+      ) {
         continue;
       }
 
       const poseOrder = Array.isArray(eefRecord.poseOrder)
-        ? eefRecord.poseOrder.filter((entry): entry is string => typeof entry === 'string')
+        ? eefRecord.poseOrder.filter(
+            (entry): entry is string => typeof entry === 'string',
+          )
         : [];
       endEffectors.push({
         name: eefRecord.name,
@@ -981,7 +1083,9 @@ function parseArticulation(raw: unknown): ParsedArticulation | null {
     }
     endEffectors.sort((left, right) => left.name.localeCompare(right.name));
   } else if (eefRaw && typeof eefRaw === 'object') {
-    for (const [eefName, eefValue] of Object.entries(eefRaw as Record<string, unknown>)) {
+    for (const [eefName, eefValue] of Object.entries(
+      eefRaw as Record<string, unknown>,
+    )) {
       if (!eefValue || typeof eefValue !== 'object') {
         continue;
       }
@@ -1004,14 +1108,20 @@ function parseArticulation(raw: unknown): ParsedArticulation | null {
   }
 
   const joints = Array.isArray(rawRecord.joints)
-    ? (rawRecord.joints as ArticulationJoint[]).filter((joint) =>
-      typeof joint.articulationName === 'string'
-      && typeof joint.name === 'string'
-      && Number.isInteger(joint.index),
-    )
+    ? (rawRecord.joints as ArticulationJoint[]).filter(
+        (joint) =>
+          typeof joint.articulationName === 'string' &&
+          typeof joint.name === 'string' &&
+          Number.isInteger(joint.index),
+      )
     : [];
 
-  if (!name && segmentation.length === 0 && endEffectors.length === 0 && joints.length === 0) {
+  if (
+    !name &&
+    segmentation.length === 0 &&
+    endEffectors.length === 0 &&
+    joints.length === 0
+  ) {
     return null;
   }
 
@@ -1041,19 +1151,31 @@ function readArticulation(h5File: H5WasmFile): ParsedArticulation | null {
   return parseArticulation(readArticulationFromGroup(dataGroup));
 }
 
-function read2DDataset(demoGroup: H5WasmGroup, path: string): number[][] | null {
+function read2DDataset(
+  demoGroup: H5WasmGroup,
+  path: string,
+): number[][] | null {
   const dataset = maybeChildDataset(demoGroup, path);
   if (!dataset || !Array.isArray(dataset.shape) || dataset.shape.length !== 2) {
     return null;
   }
 
   const [rowCount, colCount] = dataset.shape;
-  if (!Number.isInteger(rowCount) || !Number.isInteger(colCount) || rowCount <= 0 || colCount <= 0) {
+  if (
+    !Number.isInteger(rowCount) ||
+    !Number.isInteger(colCount) ||
+    rowCount <= 0 ||
+    colCount <= 0
+  ) {
     return null;
   }
 
   const arrayValue = dataset.to_array();
-  if (Array.isArray(arrayValue) && arrayValue.length > 0 && Array.isArray(arrayValue[0])) {
+  if (
+    Array.isArray(arrayValue) &&
+    arrayValue.length > 0 &&
+    Array.isArray(arrayValue[0])
+  ) {
     return arrayValue as number[][];
   }
 
@@ -1160,8 +1282,12 @@ function loadEndEffectorPoses(
 ): Record<string, PoseSeries> {
   // New standard schema: `obs/end_effectors/<name>/pose` (T, 4, 4).
   const obsGroup = maybeChildGroup(demoGroup, 'obs');
-  const endEffectorsGroup = obsGroup ? maybeChildGroup(obsGroup, 'end_effectors') : null;
-  const obsEefPoseGroup = obsGroup ? maybeChildGroup(obsGroup, 'eef_pose') : null;
+  const endEffectorsGroup = obsGroup
+    ? maybeChildGroup(obsGroup, 'end_effectors')
+    : null;
+  const obsEefPoseGroup = obsGroup
+    ? maybeChildGroup(obsGroup, 'eef_pose')
+    : null;
 
   // Legacy schema: `obs/eef_pose/<name>` (T, 4, 4) or `datagen_info/eef_pose/<name>`.
   const legacyGroup = findPoseGroup(demoGroup, 'eef_pose');
@@ -1203,44 +1329,52 @@ function buildDemoRows(entry: OpenSourceEntry, demoName: string): DemoRow[] {
 
   let legacyTargetEefPose: Record<string, PoseSeries> = {};
   if (!usesActionsPoseTarget) {
-    const legacyTargetGroup = findPoseGroup(demoGroup, 'target_eef_pose')
-      ?? findPoseGroup(demoGroup, 'ik_input_eef_pose');
+    const legacyTargetGroup =
+      findPoseGroup(demoGroup, 'target_eef_pose') ??
+      findPoseGroup(demoGroup, 'ik_input_eef_pose');
     legacyTargetEefPose = loadPoseArrays(legacyTargetGroup);
   }
 
   const articulationName = articulation?.name?.trim() ?? '';
   const segments = articulation?.segmentation ?? [];
   const joints = articulation?.joints ?? [];
-  const actionsJoints = segments.length > 0 || joints.length > 0
-    ? read2DDataset(demoGroup, 'actions/joints')
-    : null;
-  const obsJointPositionPath = segments.length > 0
-    ? findObsJointPositionPath(demoGroup, articulationName)
-    : null;
+  const actionsJoints =
+    segments.length > 0 || joints.length > 0
+      ? read2DDataset(demoGroup, 'actions/joints')
+      : null;
+  const obsJointPositionPath =
+    segments.length > 0
+      ? findObsJointPositionPath(demoGroup, articulationName)
+      : null;
   const obsJointPosition = obsJointPositionPath
     ? read2DDataset(demoGroup, obsJointPositionPath)
     : null;
   const obsJointPositionByArticulation: Record<string, number[][] | null> = {};
-  for (const jointArticulationName of [...new Set(joints.map((joint) => joint.articulationName))]) {
+  for (const jointArticulationName of [
+    ...new Set(joints.map((joint) => joint.articulationName)),
+  ]) {
     const path = findObsJointPositionPath(demoGroup, jointArticulationName);
     obsJointPositionByArticulation[jointArticulationName] = path
       ? read2DDataset(demoGroup, path)
       : null;
   }
-  const hasMappedObsJointPosition = Object.values(obsJointPositionByArticulation)
-    .some((data) => data != null);
+  const hasMappedObsJointPosition = Object.values(
+    obsJointPositionByArticulation,
+  ).some((data) => data != null);
 
   if (
-    Object.keys(eefPose).length === 0
-    && Object.keys(legacyTargetEefPose).length === 0
-    && Object.keys(eefPosePostStep).length === 0
-    && Object.keys(objectPose).length === 0
-    && !actionsPose
-    && !actionsJoints
-    && !obsJointPosition
-    && !hasMappedObsJointPosition
+    Object.keys(eefPose).length === 0 &&
+    Object.keys(legacyTargetEefPose).length === 0 &&
+    Object.keys(eefPosePostStep).length === 0 &&
+    Object.keys(objectPose).length === 0 &&
+    !actionsPose &&
+    !actionsJoints &&
+    !obsJointPosition &&
+    !hasMappedObsJointPosition
   ) {
-    throw new Error(`Demo '${demoName}' does not contain usable pose datasets.`);
+    throw new Error(
+      `Demo '${demoName}' does not contain usable pose datasets.`,
+    );
   }
 
   const poseArrays = [
@@ -1250,23 +1384,32 @@ function buildDemoRows(entry: OpenSourceEntry, demoName: string): DemoRow[] {
     ...Object.values(objectPose),
   ];
   const poseLengths = poseArrays
-    .filter((series) => series.every((frame) => Array.isArray(frame) && frame.length === 4))
+    .filter((series) =>
+      series.every((frame) => Array.isArray(frame) && frame.length === 4),
+    )
     .map((series) => series.length);
 
   const arrayLengths: number[] = [...poseLengths];
   if (actionsPose) arrayLengths.push(actionsPose.length);
   if (actionsJoints) arrayLengths.push(actionsJoints.length);
   if (obsJointPosition) arrayLengths.push(obsJointPosition.length);
-  for (const mappedObsJointPosition of Object.values(obsJointPositionByArticulation)) {
-    if (mappedObsJointPosition) arrayLengths.push(mappedObsJointPosition.length);
+  for (const mappedObsJointPosition of Object.values(
+    obsJointPositionByArticulation,
+  )) {
+    if (mappedObsJointPosition)
+      arrayLengths.push(mappedObsJointPosition.length);
   }
 
   if (arrayLengths.length === 0) {
-    throw new Error(`Demo '${demoName}' does not contain valid pose or joint data.`);
+    throw new Error(
+      `Demo '${demoName}' does not contain valid pose or joint data.`,
+    );
   }
 
   const numSteps = Math.max(...arrayLengths);
-  const storedNumSamples = optionalInt(getAttributeValue(demoGroup, 'num_samples'));
+  const storedNumSamples = optionalInt(
+    getAttributeValue(demoGroup, 'num_samples'),
+  );
   const successValue = optionalBool(getAttributeValue(demoGroup, 'success'));
   const episodeIndex = optionalInt(demoName.split('_', 2)[1]);
   const sourceEpisodeIndex = optionalInt(
@@ -1289,7 +1432,9 @@ function buildDemoRows(entry: OpenSourceEntry, demoName: string): DemoRow[] {
       completed_successes: null,
     };
 
-    for (const eefName of Object.keys(eefPose).sort((left, right) => left.localeCompare(right))) {
+    for (const eefName of Object.keys(eefPose).sort((left, right) =>
+      left.localeCompare(right),
+    )) {
       const xyz = extractXYZAtStep(eefPose[eefName], stepIdx);
       row[`eef_${eefName}_x`] = xyz?.[0] ?? null;
       row[`eef_${eefName}_y`] = xyz?.[1] ?? null;
@@ -1298,9 +1443,21 @@ function buildDemoRows(entry: OpenSourceEntry, demoName: string): DemoRow[] {
 
     if (usesActionsPoseTarget && articulation) {
       for (const eef of articulation.endEffectors) {
-        const targetX = extractColumnAtStep(actionsPose, stepIdx, poseComponentColumn(eef, 'x'));
-        const targetY = extractColumnAtStep(actionsPose, stepIdx, poseComponentColumn(eef, 'y'));
-        const targetZ = extractColumnAtStep(actionsPose, stepIdx, poseComponentColumn(eef, 'z'));
+        const targetX = extractColumnAtStep(
+          actionsPose,
+          stepIdx,
+          poseComponentColumn(eef, 'x'),
+        );
+        const targetY = extractColumnAtStep(
+          actionsPose,
+          stepIdx,
+          poseComponentColumn(eef, 'y'),
+        );
+        const targetZ = extractColumnAtStep(
+          actionsPose,
+          stepIdx,
+          poseComponentColumn(eef, 'z'),
+        );
         row[`target_eef_${eef.name}_x`] = targetX;
         row[`target_eef_${eef.name}_y`] = targetY;
         row[`target_eef_${eef.name}_z`] = targetZ;
@@ -1309,8 +1466,13 @@ function buildDemoRows(entry: OpenSourceEntry, demoName: string): DemoRow[] {
         row[`ik_input_eef_${eef.name}_z`] = targetZ;
       }
     } else {
-      for (const eefName of Object.keys(legacyTargetEefPose).sort((left, right) => left.localeCompare(right))) {
-        const targetXYZ = extractXYZAtStep(legacyTargetEefPose[eefName], stepIdx);
+      for (const eefName of Object.keys(legacyTargetEefPose).sort(
+        (left, right) => left.localeCompare(right),
+      )) {
+        const targetXYZ = extractXYZAtStep(
+          legacyTargetEefPose[eefName],
+          stepIdx,
+        );
         row[`target_eef_${eefName}_x`] = targetXYZ?.[0] ?? null;
         row[`target_eef_${eefName}_y`] = targetXYZ?.[1] ?? null;
         row[`target_eef_${eefName}_z`] = targetXYZ?.[2] ?? null;
@@ -1320,14 +1482,18 @@ function buildDemoRows(entry: OpenSourceEntry, demoName: string): DemoRow[] {
       }
     }
 
-    for (const eefName of Object.keys(eefPosePostStep).sort((left, right) => left.localeCompare(right))) {
+    for (const eefName of Object.keys(eefPosePostStep).sort((left, right) =>
+      left.localeCompare(right),
+    )) {
       const postStepXYZ = extractXYZAtStep(eefPosePostStep[eefName], stepIdx);
       row[`eef_post_step_${eefName}_x`] = postStepXYZ?.[0] ?? null;
       row[`eef_post_step_${eefName}_y`] = postStepXYZ?.[1] ?? null;
       row[`eef_post_step_${eefName}_z`] = postStepXYZ?.[2] ?? null;
     }
 
-    for (const objectName of Object.keys(objectPose).sort((left, right) => left.localeCompare(right))) {
+    for (const objectName of Object.keys(objectPose).sort((left, right) =>
+      left.localeCompare(right),
+    )) {
       const xyz = extractXYZAtStep(objectPose[objectName], stepIdx);
       row[`object_${objectName}_x`] = xyz?.[0] ?? null;
       row[`object_${objectName}_y`] = xyz?.[1] ?? null;
@@ -1356,7 +1522,11 @@ function buildDemoRows(entry: OpenSourceEntry, demoName: string): DemoRow[] {
     }
 
     for (const joint of joints) {
-      const rowKey = makeJointRowKey(joint.articulationName, joint.name, joint.index);
+      const rowKey = makeJointRowKey(
+        joint.articulationName,
+        joint.name,
+        joint.index,
+      );
       row[`joint_target_${rowKey}`] = extractColumnAtStep(
         actionsJoints,
         stepIdx,
@@ -1382,6 +1552,137 @@ function readDatasetArray(dataset: H5WasmDataset): unknown {
   }
 
   return dataset.json_value ?? dataset.value ?? null;
+}
+
+function formatDatasetDtype(dataset: H5WasmDataset): string {
+  const dtype = dataset.dtype as unknown;
+  if (typeof dtype === 'string') {
+    return dtype;
+  }
+
+  try {
+    return JSON.stringify(dtype);
+  } catch {
+    return String(dtype);
+  }
+}
+
+function toComparisonValue(value: unknown): unknown {
+  if (value == null) {
+    return null;
+  }
+
+  if (typeof value === 'bigint') {
+    return value.toString();
+  }
+
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : String(value);
+  }
+
+  if (typeof value === 'string' || typeof value === 'boolean') {
+    return value;
+  }
+
+  if (ArrayBuffer.isView(value)) {
+    if ('length' in value) {
+      return Array.from(value as unknown as ArrayLike<unknown>).map(
+        toComparisonValue,
+      );
+    }
+
+    return Array.from(
+      new Uint8Array(value.buffer, value.byteOffset, value.byteLength),
+    );
+  }
+
+  if (Array.isArray(value)) {
+    return value.map(toComparisonValue);
+  }
+
+  if (value instanceof Map) {
+    return Object.fromEntries(
+      [...value.entries()].map(([key, entryValue]) => [
+        String(key),
+        toComparisonValue(entryValue),
+      ]),
+    );
+  }
+
+  if (typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(
+        ([key, entryValue]) => [key, toComparisonValue(entryValue)],
+      ),
+    );
+  }
+
+  return String(value);
+}
+
+function comparisonSelectionForShape(shape: readonly number[] | null): {
+  selection: string | null;
+  slices: Array<[number, number]> | null;
+} {
+  if (!shape) {
+    return { selection: null, slices: null };
+  }
+
+  if (shape.length === 0) {
+    return { selection: 'scalar', slices: [] };
+  }
+
+  if (shape.length <= 2) {
+    return {
+      selection: shape.map(() => ':').join(','),
+      slices: shape.map((size) => [0, size]),
+    };
+  }
+
+  return {
+    selection: shape
+      .map((_, index) => (index < shape.length - 2 ? '0' : ':'))
+      .join(','),
+    slices: shape.map((size, index) =>
+      index < shape.length - 2 ? [0, 1] : [0, size],
+    ),
+  };
+}
+
+function squeezeLeadingDimensions(value: unknown, count: number): unknown {
+  let result = value;
+  for (let index = 0; index < count; index += 1) {
+    if (!Array.isArray(result)) {
+      return result;
+    }
+
+    result = result[0];
+  }
+
+  return result;
+}
+
+function readDatasetComparisonValue(dataset: H5WasmDataset): {
+  value: unknown;
+  selection: string | null;
+} {
+  const shape = dataset.shape;
+  const { selection, slices } = comparisonSelectionForShape(shape);
+
+  if (shape && shape.length > 2 && slices) {
+    const rawValue = dataset.slice(slices);
+    return {
+      value: toComparisonValue(
+        squeezeLeadingDimensions(rawValue, shape.length - 2),
+      ),
+      selection,
+    };
+  }
+
+  return {
+    value: toComparisonValue(readDatasetArray(dataset)),
+    selection,
+  };
 }
 
 function isFiniteNumber(value: unknown): value is number {
@@ -1437,13 +1738,22 @@ function homogeneousMatrixToPoseVector(matrix: number[][]): number[] | null {
   const y = row1[3];
   const z = row2[3];
 
-  const r00 = row0[0]; const r01 = row0[1]; const r02 = row0[2];
-  const r10 = row1[0]; const r11 = row1[1]; const r12 = row1[2];
-  const r20 = row2[0]; const r21 = row2[1]; const r22 = row2[2];
+  const r00 = row0[0];
+  const r01 = row0[1];
+  const r02 = row0[2];
+  const r10 = row1[0];
+  const r11 = row1[1];
+  const r12 = row1[2];
+  const r20 = row2[0];
+  const r21 = row2[1];
+  const r22 = row2[2];
 
   // Shepperd's method: numerically stable rotation matrix → quaternion (wxyz).
   const trace = r00 + r11 + r22;
-  let qw: number; let qx: number; let qy: number; let qz: number;
+  let qw: number;
+  let qx: number;
+  let qy: number;
+  let qz: number;
   if (trace > 0) {
     const s = Math.sqrt(trace + 1) * 2;
     qw = 0.25 * s;
@@ -1479,8 +1789,10 @@ function homogeneousMatrixToPoseVector(matrix: number[][]): number[] | null {
 // Current schema: `initial_state/rigid_objects/<name>/initial_pose`. Older
 // variants live under `initial_state/objects/<name>/`.
 function maybeObjectsRoot(demoGroup: H5WasmGroup): H5WasmGroup | null {
-  return maybeChildGroup(demoGroup, 'initial_state/rigid_objects')
-    ?? maybeChildGroup(demoGroup, 'initial_state/objects');
+  return (
+    maybeChildGroup(demoGroup, 'initial_state/rigid_objects') ??
+    maybeChildGroup(demoGroup, 'initial_state/objects')
+  );
 }
 
 // The `initial_pose` dataset is either a (1, 7) xyz+quat vector or a
@@ -1526,7 +1838,10 @@ function listRigidObjectNames(demoGroup: H5WasmGroup): string[] {
   return names;
 }
 
-function readInitialPose(demoGroup: H5WasmGroup, objectName: string | null = null): number[] | null {
+function readInitialPose(
+  demoGroup: H5WasmGroup,
+  objectName: string | null = null,
+): number[] | null {
   const objectsRoot = maybeObjectsRoot(demoGroup);
   if (!objectsRoot) {
     return null;
@@ -1580,7 +1895,9 @@ function readSourceDemoIndices(
 
   const value = dataset.value;
   if (ArrayBuffer.isView(value)) {
-    return [...value].map((entry) => Math.trunc(Number(entry))).filter(Number.isFinite);
+    return [...value]
+      .map((entry) => Math.trunc(Number(entry)))
+      .filter(Number.isFinite);
   }
 
   const arrayValue = readDatasetArray(dataset);
@@ -1693,16 +2010,21 @@ function resolveSideSourceDetails(
   rawSource: string;
   details: ObjectDistributionSourceDetail[];
 } {
-  const values = [...selectedIndices].map((value) => Math.trunc(value)).filter(Number.isFinite);
+  const values = [...selectedIndices]
+    .map((value) => Math.trunc(value))
+    .filter(Number.isFinite);
   const rawSource = values.length > 0 ? values.join(',') : '-';
-  const grouped = new Map<string, {
-    teleopId: string;
-    datasetName: string;
-    demoName: string;
-    x: number;
-    y: number;
-    slots: number[];
-  }>();
+  const grouped = new Map<
+    string,
+    {
+      teleopId: string;
+      datasetName: string;
+      demoName: string;
+      x: number;
+      y: number;
+      slots: number[];
+    }
+  >();
 
   values.forEach((indexValue, slot) => {
     const demoName = `demo_${indexValue}`;
@@ -1725,16 +2047,19 @@ function resolveSideSourceDetails(
 
   const details = [...grouped.values()]
     .sort((left, right) => left.demoName.localeCompare(right.demoName))
-    .map((record) => ({
-      teleopId: record.teleopId,
-      datasetName: record.datasetName,
-      demoName: record.demoName,
-      x: record.x,
-      y: record.y,
-      slots: [...record.slots].sort((left, right) => left - right),
-      textLabel: record.demoName,
-      hoverLabel: `${side.toUpperCase()} arm → ${record.demoName}`,
-    } satisfies ObjectDistributionSourceDetail));
+    .map(
+      (record) =>
+        ({
+          teleopId: record.teleopId,
+          datasetName: record.datasetName,
+          demoName: record.demoName,
+          x: record.x,
+          y: record.y,
+          slots: [...record.slots].sort((left, right) => left - right),
+          textLabel: record.demoName,
+          hoverLabel: `${side.toUpperCase()} arm → ${record.demoName}`,
+        }) satisfies ObjectDistributionSourceDetail,
+    );
 
   return { rawSource, details };
 }
@@ -1753,7 +2078,12 @@ function collectGeneratedObjectPoints(
     const initialPose = readInitialPose(demoGroup, objectName);
     const anchorXY = readAnchorXY(demoGroup, anchor, objectName);
     let xy: [number, number] | null = anchorXY;
-    if (!xy && initialPose && isFiniteNumber(initialPose[0]) && isFiniteNumber(initialPose[1])) {
+    if (
+      !xy &&
+      initialPose &&
+      isFiniteNumber(initialPose[0]) &&
+      isFiniteNumber(initialPose[1])
+    ) {
       xy = [roundFloat(initialPose[0]), roundFloat(initialPose[1])];
     }
     if (!xy) {
@@ -1774,8 +2104,16 @@ function collectGeneratedObjectPoints(
       ...readSourceDemoIndices(demoGroup, 'source_demo_indices/right_arm'),
       ...readSourceDemoIndices(demoGroup, 'source_demo_indices/right'),
     ];
-    const leftSource = resolveSideSourceDetails(leftIndices, 'left', teleopSourcesByDemo);
-    const rightSource = resolveSideSourceDetails(rightIndices, 'right', teleopSourcesByDemo);
+    const leftSource = resolveSideSourceDetails(
+      leftIndices,
+      'left',
+      teleopSourcesByDemo,
+    );
+    const rightSource = resolveSideSourceDetails(
+      rightIndices,
+      'right',
+      teleopSourcesByDemo,
+    );
 
     points.push({
       category,
@@ -1801,16 +2139,28 @@ function collectGeneratedObjectPoints(
 function loadObjectDistribution(
   request: ObjectDistributionRequest,
 ): ObjectDistributionResult {
-  if (!(OBJECT_DISTRIBUTION_ANCHORS as readonly string[]).includes(request.anchor)) {
-    throw new Error(`Unsupported object distribution anchor: ${request.anchor}`);
+  if (
+    !(OBJECT_DISTRIBUTION_ANCHORS as readonly string[]).includes(request.anchor)
+  ) {
+    throw new Error(
+      `Unsupported object distribution anchor: ${request.anchor}`,
+    );
   }
 
-  const successEntry = request.successSourceId ? openSources.get(request.successSourceId) ?? null : null;
-  const failedEntry = request.failedSourceId ? openSources.get(request.failedSourceId) ?? null : null;
-  const teleopEntry = request.teleopSourceId ? openSources.get(request.teleopSourceId) ?? null : null;
+  const successEntry = request.successSourceId
+    ? (openSources.get(request.successSourceId) ?? null)
+    : null;
+  const failedEntry = request.failedSourceId
+    ? (openSources.get(request.failedSourceId) ?? null)
+    : null;
+  const teleopEntry = request.teleopSourceId
+    ? (openSources.get(request.teleopSourceId) ?? null)
+    : null;
 
   if (request.successSourceId && !successEntry) {
-    throw new Error('Selected successful generated source is no longer available.');
+    throw new Error(
+      'Selected successful generated source is no longer available.',
+    );
   }
   if (request.failedSourceId && !failedEntry) {
     throw new Error('Selected failed generated source is no longer available.');
@@ -1820,7 +2170,11 @@ function loadObjectDistribution(
   }
 
   const objectName = request.objectName ?? null;
-  const availableObjects = collectAvailableObjects([successEntry, failedEntry, teleopEntry]);
+  const availableObjects = collectAvailableObjects([
+    successEntry,
+    failedEntry,
+    teleopEntry,
+  ]);
 
   const teleopCollection = teleopEntry
     ? collectTeleopSources(teleopEntry, request.anchor, objectName)
@@ -1855,7 +2209,9 @@ function loadObjectDistribution(
 // Union of rigid-object names across the selected datasets, preserving the
 // in-file order of the first dataset that exposes them. Object sets are fixed
 // per scene, so inspecting the first demo of each entry is sufficient.
-function collectAvailableObjects(entries: (OpenSourceEntry | null)[]): string[] {
+function collectAvailableObjects(
+  entries: (OpenSourceEntry | null)[],
+): string[] {
   const names: string[] = [];
   const seen = new Set<string>();
 
@@ -1878,12 +2234,15 @@ function collectAvailableObjects(entries: (OpenSourceEntry | null)[]): string[] 
 
 interface H5AttributeOwner {
   path: string;
-  attrs: Record<string, {
-    value: unknown;
-    json_value: unknown;
-    shape: number[] | null;
-    dtype: Parameters<H5WasmGroup['create_attribute']>[3];
-  }>;
+  attrs: Record<
+    string,
+    {
+      value: unknown;
+      json_value: unknown;
+      shape: number[] | null;
+      dtype: Parameters<H5WasmGroup['create_attribute']>[3];
+    }
+  >;
   create_attribute: (
     name: string,
     data: Parameters<H5WasmGroup['create_attribute']>[1],
@@ -1912,7 +2271,9 @@ function collectRelativeDatasetPaths(
   }
 }
 
-function listDatasetProcessingInfo(entry: OpenSourceEntry): DatasetProcessingSourceInfo {
+function listDatasetProcessingInfo(
+  entry: OpenSourceEntry,
+): DatasetProcessingSourceInfo {
   const keyCounts = new Map<string, number>();
 
   for (const demo of entry.demos) {
@@ -1932,6 +2293,58 @@ function listDatasetProcessingInfo(entry: OpenSourceEntry): DatasetProcessingSou
         path,
         availableInDemoCount,
       })),
+  };
+}
+
+function loadDatasetComparisonValues(
+  entry: OpenSourceEntry,
+  demoName: string,
+  keyPaths: readonly string[],
+): DatasetComparisonValuesResult {
+  const demoGroup = getDemoGroup(entry, demoName);
+  const uniqueKeyPaths = [...new Set(keyPaths)].sort((left, right) =>
+    left.localeCompare(right),
+  );
+
+  return {
+    demoName,
+    values: uniqueKeyPaths.map<DatasetComparisonValue>((keyPath) => {
+      try {
+        const dataset = maybeChildDataset(demoGroup, keyPath);
+        if (!dataset) {
+          return {
+            keyPath,
+            status: 'missing',
+            shape: null,
+            dtype: null,
+            selection: null,
+            value: null,
+            error: `Dataset '${keyPath}' is not present in ${demoName}.`,
+          };
+        }
+
+        const { value, selection } = readDatasetComparisonValue(dataset);
+
+        return {
+          keyPath,
+          status: 'ok',
+          shape: dataset.shape ? [...dataset.shape] : null,
+          dtype: formatDatasetDtype(dataset),
+          selection,
+          value,
+        };
+      } catch (error: unknown) {
+        return {
+          keyPath,
+          status: 'error',
+          shape: null,
+          dtype: null,
+          selection: null,
+          value: null,
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+    }),
   };
 }
 
@@ -1971,7 +2384,9 @@ function getOrderedSourceEntries(sourceIds: string[]): OpenSourceEntry[] {
   return sourceIds.map((sourceId) => {
     const entry = openSources.get(sourceId);
     if (!entry) {
-      throw new Error('One of the selected source datasets is no longer available.');
+      throw new Error(
+        'One of the selected source datasets is no longer available.',
+      );
     }
 
     return entry;
@@ -2062,13 +2477,16 @@ function getDatasetCopyValue(
   throw new Error(`Dataset '${dataset.path}' does not expose copyable data.`);
 }
 
-function buildDatasetCopyPlan(selectedKeys: readonly string[]): DatasetCopyPlanGroup[] {
+function buildDatasetCopyPlan(
+  selectedKeys: readonly string[],
+): DatasetCopyPlanGroup[] {
   const planByParentGroup = new Map<string, DatasetCopyPlanGroup>();
 
   for (const keyPath of selectedKeys) {
     const splitIndex = keyPath.lastIndexOf('/');
     const parentGroupPath = splitIndex >= 0 ? keyPath.slice(0, splitIndex) : '';
-    const datasetName = splitIndex >= 0 ? keyPath.slice(splitIndex + 1) : keyPath;
+    const datasetName =
+      splitIndex >= 0 ? keyPath.slice(splitIndex + 1) : keyPath;
 
     let groupPlan = planByParentGroup.get(parentGroupPath);
     if (!groupPlan) {
@@ -2085,7 +2503,9 @@ function buildDatasetCopyPlan(selectedKeys: readonly string[]): DatasetCopyPlanG
   return [...planByParentGroup.values()];
 }
 
-function getDatasetCompressionConfig(dataset: H5WasmDataset): H5WasmCompressionConfig {
+function getDatasetCompressionConfig(
+  dataset: H5WasmDataset,
+): H5WasmCompressionConfig {
   for (let index = dataset.filters.length - 1; index >= 0; index -= 1) {
     const filter = dataset.filters[index];
 
@@ -2168,7 +2588,11 @@ function copyDatasetChunked(
   onSliceProgress?.(firstBatchSize, totalRows);
 
   // Write remaining batches by resizing and writing slices.
-  for (let offset = firstBatchSize; offset < totalRows; offset += CHUNKED_COPY_ROW_BATCH) {
+  for (
+    let offset = firstBatchSize;
+    offset < totalRows;
+    offset += CHUNKED_COPY_ROW_BATCH
+  ) {
     const end = Math.min(offset + CHUNKED_COPY_ROW_BATCH, totalRows);
     const batchData = source.slice([[offset, end]]);
     if (batchData == null) {
@@ -2185,7 +2609,11 @@ function copyDatasetChunked(
   copyAttributes(source, targetDataset);
 }
 
-type SliceProgressCallback = (datasetPath: string, copiedRows: number, totalRows: number) => void;
+type SliceProgressCallback = (
+  datasetPath: string,
+  copiedRows: number,
+  totalRows: number,
+) => void;
 
 function copySelectedDatasetsForDemo(
   sourceDemoGroup: H5WasmGroup,
@@ -2219,7 +2647,12 @@ function copySelectedDatasetsForDemo(
       const estimatedBytes = estimateDatasetBytes(sourceEntity);
       const metadata = sourceEntity.metadata;
 
-      if (estimatedBytes > CHUNKED_COPY_BYTE_THRESHOLD && metadata.shape && metadata.shape.length > 0 && metadata.chunks) {
+      if (
+        estimatedBytes > CHUNKED_COPY_BYTE_THRESHOLD &&
+        metadata.shape &&
+        metadata.shape.length > 0 &&
+        metadata.chunks
+      ) {
         // Large dataset: copy in chunks along the first axis.
         copyDatasetChunked(
           sourceEntity,
@@ -2268,20 +2701,25 @@ async function processDataset(
   const module = await ensureModule();
   const { FS } = module;
   const entries = getOrderedSourceEntries(request.orderedSourceIds);
-  const selectedKeys = [...new Set(request.selectedKeys)].sort((left, right) => left.localeCompare(right));
+  const selectedKeys = [...new Set(request.selectedKeys)].sort((left, right) =>
+    left.localeCompare(right),
+  );
   const copyPlan = buildDatasetCopyPlan(selectedKeys);
 
   if (selectedKeys.length === 0) {
-    throw new Error('Select at least one key to include in the processed dataset.');
+    throw new Error(
+      'Select at least one key to include in the processed dataset.',
+    );
   }
 
   // Pre-count total demos for accurate progress reporting.
   let overallDemoCount = 0;
   const demoNamesByEntry: string[][] = [];
   for (const entry of entries) {
-    const names = request.operation === 'cut'
-      ? getCutDemoNames(entry, request.cutRange)
-      : entry.demos.map((demo) => demo.name);
+    const names =
+      request.operation === 'cut'
+        ? getCutDemoNames(entry, request.cutRange)
+        : entry.demos.map((demo) => demo.name);
     demoNamesByEntry.push(names);
     overallDemoCount += names.length;
   }
@@ -2318,22 +2756,31 @@ async function processDataset(
         });
 
         const sourceDemoGroup = getDemoGroup(entry, sourceDemoName);
-        const targetDemoGroup = outputDataGroup.create_group(`demo_${outputDemoIndex}`, true);
+        const targetDemoGroup = outputDataGroup.create_group(
+          `demo_${outputDemoIndex}`,
+          true,
+        );
 
         copyAttributes(sourceDemoGroup, targetDemoGroup);
         const capturedDemoIndex = overallDemoIndex;
-        copySelectedDatasetsForDemo(sourceDemoGroup, targetDemoGroup, copyPlan, (datasetPath, copiedRows, totalRows) => {
-          reportProgress({
-            phase: 'copying',
-            overallDemoIndex: capturedDemoIndex,
-            overallDemoCount,
-            currentSourceName: entry.datasetName,
-            currentDemoName: sourceDemoName,
-            datasetDetail: { path: datasetPath, copiedRows, totalRows },
-          });
-        });
+        copySelectedDatasetsForDemo(
+          sourceDemoGroup,
+          targetDemoGroup,
+          copyPlan,
+          (datasetPath, copiedRows, totalRows) => {
+            reportProgress({
+              phase: 'copying',
+              overallDemoIndex: capturedDemoIndex,
+              overallDemoCount,
+              currentSourceName: entry.datasetName,
+              currentDemoName: sourceDemoName,
+              datasetDetail: { path: datasetPath, copiedRows, totalRows },
+            });
+          },
+        );
 
-        totalSamples += optionalInt(getAttributeValue(sourceDemoGroup, 'num_samples')) ?? 0;
+        totalSamples +=
+          optionalInt(getAttributeValue(sourceDemoGroup, 'num_samples')) ?? 0;
         outputDemoIndex += 1;
         overallDemoIndex += 1;
       }
@@ -2388,7 +2835,13 @@ async function processDataset(
         );
 
         workerScope.postMessage(
-          { id: messageId, type: 'chunk', data: arrayBuffer, index: i, total: totalChunks },
+          {
+            id: messageId,
+            type: 'chunk',
+            data: arrayBuffer,
+            index: i,
+            total: totalChunks,
+          },
           [arrayBuffer],
         );
       }
@@ -2416,7 +2869,10 @@ async function processDataset(
   }
 }
 
-function listDemoVideoInfo(entry: OpenSourceEntry, demoName: string): DemoVideoInfo[] {
+function listDemoVideoInfo(
+  entry: OpenSourceEntry,
+  demoName: string,
+): DemoVideoInfo[] {
   const demoGroup = getDemoGroup(entry, demoName);
   const videos: DemoVideoInfo[] = [];
 
@@ -2453,7 +2909,9 @@ function datasetToUint8Array(dataset: H5WasmDataset): Uint8Array {
 
   if (ArrayBuffer.isView(value)) {
     const copied = new Uint8Array(value.byteLength);
-    copied.set(new Uint8Array(value.buffer, value.byteOffset, value.byteLength));
+    copied.set(
+      new Uint8Array(value.buffer, value.byteOffset, value.byteLength),
+    );
     return copied;
   }
 
@@ -2470,8 +2928,8 @@ function loadDemoVideo(
 
   if (!dataset || !isVideoShape(dataset.shape)) {
     throw new Error(
-      `Demo '${demoName}' does not contain a supported video dataset for camera '${videoKey}' `
-      + `(expected at obs/cameras/${videoKey} or obs/${videoKey}).`,
+      `Demo '${demoName}' does not contain a supported video dataset for camera '${videoKey}' ` +
+        `(expected at obs/cameras/${videoKey} or obs/${videoKey}).`,
     );
   }
 
@@ -2538,7 +2996,10 @@ async function openLocalSource(file: File): Promise<OpenSourceResultPayload> {
   return { sourceId, datasetName, demos, articulation };
 }
 
-async function openRemoteSource(buffer: ArrayBuffer, name: string): Promise<OpenSourceResultPayload> {
+async function openRemoteSource(
+  buffer: ArrayBuffer,
+  name: string,
+): Promise<OpenSourceResultPayload> {
   const module = await ensureModule();
   const { FS } = module;
   const fsName = `/${uniqueName(sanitizeFilename(name))}`;
@@ -2584,12 +3045,19 @@ async function closeSource(sourceId: string) {
   return null;
 }
 
-async function handleRequest(message: PoseTraceWorkerRequest): Promise<WorkerSuccessResult> {
+async function handleRequest(
+  message: PoseTraceWorkerRequest,
+): Promise<WorkerSuccessResult> {
   switch (message.type) {
     case 'openLocalSource':
       return { result: await openLocalSource(message.payload.file) };
     case 'openRemoteSource':
-      return { result: await openRemoteSource(message.payload.buffer, message.payload.name) };
+      return {
+        result: await openRemoteSource(
+          message.payload.buffer,
+          message.payload.name,
+        ),
+      };
     case 'loadDemoRows': {
       const entry = openSources.get(message.payload.sourceId);
       if (!entry) {
@@ -2603,6 +3071,19 @@ async function handleRequest(message: PoseTraceWorkerRequest): Promise<WorkerSuc
         throw new Error('Pose Trace source is no longer available.');
       }
       return { result: listDatasetProcessingInfo(entry) };
+    }
+    case 'loadDatasetComparisonValues': {
+      const entry = openSources.get(message.payload.sourceId);
+      if (!entry) {
+        throw new Error('Pose Trace source is no longer available.');
+      }
+      return {
+        result: loadDatasetComparisonValues(
+          entry,
+          message.payload.demoName,
+          message.payload.keyPaths,
+        ),
+      };
     }
     case 'loadObjectDistribution':
       return { result: loadObjectDistribution(message.payload) };

@@ -42,7 +42,10 @@ describe('OpenedFiles', () => {
 
   it('renders one entry per opened file', () => {
     useStore.setState({
-      opened: [makeRemote('https://x/a.h5', 'a.h5'), makeRemote('https://x/b.h5', 'b.h5')],
+      opened: [
+        makeRemote('https://x/a.h5', 'a.h5'),
+        makeRemote('https://x/b.h5', 'b.h5'),
+      ],
     });
 
     renderAt('/view?url=https%3A%2F%2Fx%2Fa.h5');
@@ -67,11 +70,16 @@ describe('OpenedFiles', () => {
 
   it('removes a file from the store when its trash button is clicked', async () => {
     useStore.setState({
-      opened: [makeRemote('https://x/a.h5', 'a.h5'), makeRemote('https://x/b.h5', 'b.h5')],
+      opened: [
+        makeRemote('https://x/a.h5', 'a.h5'),
+        makeRemote('https://x/b.h5', 'b.h5'),
+      ],
     });
 
     renderAt('/');
-    const removeButtons = screen.getAllByRole('button', { name: 'Remove file' });
+    const removeButtons = screen.getAllByRole('button', {
+      name: 'Remove file',
+    });
     await userEvent.click(removeButtons[0]);
 
     expect(useStore.getState().opened.map((f) => f.url)).toEqual([
@@ -85,6 +93,19 @@ describe('OpenedFiles', () => {
 
     const link = screen.getByRole('link', { name: 'a.h5' });
     expect(link.getAttribute('href')).toContain('/pose-trace?');
-    expect(link.getAttribute('href')).toContain(encodeURIComponent('https://x/a.h5'));
+    expect(link.getAttribute('href')).toContain(
+      encodeURIComponent('https://x/a.h5'),
+    );
+  });
+
+  it('routes entry links to the dataset comparison page when active', () => {
+    useStore.setState({ opened: [makeRemote('https://x/a.h5', 'a.h5')] });
+    renderAt('/dataset-comparison?url=https%3A%2F%2Fx%2Fa.h5');
+
+    const link = screen.getByRole('link', { name: 'a.h5' });
+    expect(link.getAttribute('href')).toContain('/dataset-comparison?');
+    expect(link.getAttribute('href')).toContain(
+      encodeURIComponent('https://x/a.h5'),
+    );
   });
 });

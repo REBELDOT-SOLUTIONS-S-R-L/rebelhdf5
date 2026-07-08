@@ -14,16 +14,17 @@ import { createSearchParams, Link, useSearchParams } from 'react-router-dom';
 
 import styles from './DatasetProcessingPage.module.css';
 import {
-  getDatasetProcessingInfo,
-  openPoseTraceSource,
-  processDataset,
-} from './pose-trace/hdf5';
-import  {
-  type DatasetProcessingKeyInfo,
+  buildBackendKeyInfos,
+  buildKeyTree,
+  sumKeyInfos,
+  type KeyTreeNode,
+  useDatasetProcessingSources,
+  useResolvedFile,
+} from './dataset-selection';
+import { processDataset } from './pose-trace/hdf5';
+import {
   type DatasetProcessingOperation,
   type DatasetProcessingProgress,
-  type DatasetProcessingSourceInfo,
-  type PoseTraceSource,
 } from './pose-trace/types';
 import {
   pollBackendStatus,
@@ -34,21 +35,6 @@ import {
   scanFiles,
 } from './python-backend';
 import { type H5File, useStore } from './stores';
-import { resolveFileUrl } from './utils';
-
-interface ResolvedFileState {
-  file: H5File | null;
-  loading: boolean;
-  error: string | null;
-}
-
-interface ProcessingSourceState {
-  file: H5File;
-  source: PoseTraceSource | null;
-  info: DatasetProcessingSourceInfo | null;
-  loading: boolean;
-  error: string | null;
-}
 
 interface ProcessResultState {
   fileName: string;
@@ -70,25 +56,21 @@ interface SourceOption {
   backendPath?: string;
 }
 
-
-
-interface KeyTreeNode {
-  name: string;
-  fullPath: string;
-  children: KeyTreeNode[];
-  keyInfo: DatasetProcessingKeyInfo | null;
-  leafKeyPaths: string[];
-}
-
 const OPERATION_LABELS: Record<DatasetProcessingOperation, string> = {
   cut: 'Cut',
   merge: 'Merge',
   append: 'Append',
   lerobot: 'LeRobot',
 };
-const DATASET_PROCESSING_OPERATIONS: DatasetProcessingOperation[] = ['cut', 'merge', 'append', 'lerobot'];
+const DATASET_PROCESSING_OPERATIONS: DatasetProcessingOperation[] = [
+  'cut',
+  'merge',
+  'append',
+  'lerobot',
+];
 const BACKEND_SOURCE_PREFIX = 'backend:';
-const DEFAULT_LEROBOT_MODALITY_JSON = '/workspace/IsaacTools/ROBOTICS-lehome-challenge/configs/gr00t/modality.json';
+const DEFAULT_LEROBOT_MODALITY_JSON =
+  '/workspace/IsaacTools/ROBOTICS-lehome-challenge/configs/gr00t/modality.json';
 const DEFAULT_LEROBOT_TASK = 'Complete the task';
 
 function getBackendSourceId(path: string): string {
@@ -125,14 +107,21 @@ function triggerDownloadUrl(fileName: string, downloadUrl: string) {
   link.click();
 }
 
-function parseTaskRulesJson(text: string): Array<Record<string, unknown>> | undefined {
+function parseTaskRulesJson(
+  text: string,
+): Array<Record<string, unknown>> | undefined {
   const trimmed = text.trim();
   if (trimmed.length === 0) {
     return undefined;
   }
 
   const parsed = JSON.parse(trimmed) as unknown;
-  if (!Array.isArray(parsed) || !parsed.every((entry) => entry && typeof entry === 'object' && !Array.isArray(entry))) {
+  if (
+    !Array.isArray(parsed) ||
+    !parsed.every(
+      (entry) => entry && typeof entry === 'object' && !Array.isArray(entry),
+    )
+  ) {
     throw new Error('Task rules must be a JSON array of objects.');
   }
 
@@ -166,120 +155,6 @@ function buildDefaultOutputName(
   }
 
   return `merged-${sourceFiles.length}-datasets.hdf5`;
-}
-
-function sortKeyTreeNodes(nodes: KeyTreeNode[]): KeyTreeNode[] {
-  return nodes
-    .map((node) => ({
-      ...node,
-      children: sortKeyTreeNodes(node.children),
-    }))
-    .sort((left, right) => {
-      const leftIsLeaf = Boolean(left.keyInfo);
-      const rightIsLeaf = Boolean(right.keyInfo);
-      if (leftIsLeaf !== rightIsLeaf) {
-        return leftIsLeaf ? 1 : -1;
-      }
-
-      return left.name.localeCompare(right.name);
-    });
-}
-
-function buildKeyTree(keyInfos: DatasetProcessingKeyInfo[]): KeyTreeNode[] {
-  type MutableKeyTreeNode = KeyTreeNode & {
-    childrenByName: Map<string, MutableKeyTreeNode>;
-  };
-
-  function createNode(
-    name: string,
-    fullPath: string,
-    keyInfo: DatasetProcessingKeyInfo | null,
-  ): MutableKeyTreeNode {
-    return {
-      name,
-      fullPath,
-      children: [],
-      keyInfo,
-      leafKeyPaths: keyInfo ? [fullPath] : [],
-      childrenByName: new Map<string, MutableKeyTreeNode>(),
-    };
-  }
-
-  function finalizeNode(node: MutableKeyTreeNode): KeyTreeNode {
-    const children = [...node.childrenByName.values()].map(finalizeNode);
-    return {
-      name: node.name,
-      fullPath: node.fullPath,
-      keyInfo: node.keyInfo,
-      children,
-      leafKeyPaths: node.keyInfo ? [node.fullPath] : children.flatMap((child) => child.leafKeyPaths),
-    };
-  }
-
-  const rootNodes = new Map<string, MutableKeyTreeNode>();
-
-  for (const keyInfo of keyInfos) {
-    const segments = keyInfo.path.split('/');
-    let currentLevel = rootNodes;
-    let currentPath = '';
-
-    for (const [index, segment] of segments.entries()) {
-      currentPath = currentPath ? `${currentPath}/${segment}` : segment;
-      const isLeaf = index === segments.length - 1;
-      const existing = currentLevel.get(segment);
-
-      if (existing) {
-        if (isLeaf) {
-          existing.keyInfo = keyInfo;
-        }
-      } else {
-        currentLevel.set(segment, createNode(segment, currentPath, isLeaf ? keyInfo : null));
-      }
-
-      const node = currentLevel.get(segment)!;
-      currentLevel = node.childrenByName;
-    }
-  }
-
-  return sortKeyTreeNodes([...rootNodes.values()].map(finalizeNode));
-}
-
-function sumKeyInfos(keyInfos: readonly DatasetProcessingKeyInfo[]): DatasetProcessingKeyInfo[] {
-  const keyMap = new Map<string, DatasetProcessingKeyInfo>();
-
-  for (const keyInfo of keyInfos) {
-    const existing = keyMap.get(keyInfo.path);
-    if (existing) {
-      existing.availableInDemoCount += keyInfo.availableInDemoCount;
-      continue;
-    }
-
-    keyMap.set(keyInfo.path, { ...keyInfo });
-  }
-
-  return [...keyMap.values()].sort((left, right) => left.path.localeCompare(right.path));
-}
-
-function buildBackendKeyInfos(fileInfo: PythonScanResult['files'][number] | null): DatasetProcessingKeyInfo[] {
-  if (!fileInfo) {
-    return [];
-  }
-
-  if (fileInfo.keyCounts) {
-    return Object.entries(fileInfo.keyCounts)
-      .map(([path, availableInDemoCount]) => ({
-        path,
-        availableInDemoCount,
-      }))
-      .sort((left, right) => left.path.localeCompare(right.path));
-  }
-
-  return fileInfo.keys
-    .map((path) => ({
-      path,
-      availableInDemoCount: fileInfo.demoCount,
-    }))
-    .sort((left, right) => left.path.localeCompare(right.path));
 }
 
 function KeyTreeNodeItem({
@@ -322,7 +197,9 @@ function KeyTreeNodeItem({
     );
   }
 
-  const selectedCount = node.leafKeyPaths.filter((keyPath) => selectedKeys.has(keyPath)).length;
+  const selectedCount = node.leafKeyPaths.filter((keyPath) =>
+    selectedKeys.has(keyPath),
+  ).length;
   const allSelected = selectedCount === node.leafKeyPaths.length;
   const isCollapsed = collapsedGroups.has(node.fullPath);
   const FolderIcon = allSelected ? HiFolder : FiFolder;
@@ -360,7 +237,9 @@ function KeyTreeNodeItem({
           )}
           <span className={styles.treeBranchName}>{node.name}</span>
         </button>
-        <small className={styles.treeMeta}>{selectedCount}/{node.leafKeyPaths.length}</small>
+        <small className={styles.treeMeta}>
+          {selectedCount}/{node.leafKeyPaths.length}
+        </small>
       </div>
       {!isCollapsed && (
         <div className={styles.treeChildren}>
@@ -382,186 +261,23 @@ function KeyTreeNodeItem({
   );
 }
 
-function useResolvedFile(fileUrl: string | null): ResolvedFileState {
-  const opened = useStore((state) => state.opened);
-  const openFiles = useStore((state) => state.openFiles);
-
-  const [state, setState] = useState<ResolvedFileState>({
-    file: null,
-    loading: false,
-    error: null,
-  });
-
-  useEffect(() => {
-    if (!fileUrl) {
-      setState({ file: null, loading: false, error: null });
-      return;
-    }
-
-    const openedFile = opened.find((file) => file.url === fileUrl);
-    if (openedFile) {
-      setState({ file: openedFile, loading: false, error: null });
-      return;
-    }
-
-    let cancelled = false;
-    setState({ file: null, loading: true, error: null });
-
-    resolveFileUrl(fileUrl)
-      .then((resolvedFile) => {
-        if (cancelled) {
-          return;
-        }
-
-        if (!resolvedFile) {
-          setState({
-            file: null,
-            loading: false,
-            error: 'This file cannot be reopened automatically. Open it again from the home page.',
-          });
-          return;
-        }
-
-        openFiles([resolvedFile]);
-        setState({ file: resolvedFile, loading: false, error: null });
-      })
-      .catch((error: unknown) => {
-        if (cancelled) {
-          return;
-        }
-
-        setState({
-          file: null,
-          loading: false,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [fileUrl, openFiles, opened]);
-
-  return state;
-}
-
-function useDatasetProcessingSources(
-  availableFiles: H5File[],
-  selectedSourceUrls: string[],
-): Record<string, ProcessingSourceState> {
-  const [state, setState] = useState<Record<string, ProcessingSourceState>>({});
-
-  const availableFileMap = useMemo(
-    () => new Map(availableFiles.map((file) => [file.url, file])),
-    [availableFiles],
-  );
-  const selectedUrls = useMemo(
-    () => [...new Set(selectedSourceUrls)].filter((url) => availableFileMap.has(url)),
-    [availableFileMap, selectedSourceUrls],
-  );
-
-  useEffect(() => {
-    if (selectedUrls.length === 0) {
-      setState({});
-      return;
-    }
-
-    let cancelled = false;
-    const cleanups: (() => void)[] = [];
-
-    setState(
-      Object.fromEntries(
-        selectedUrls.map((url) => [
-          url,
-          {
-            file: availableFileMap.get(url)!,
-            source: null,
-            info: null,
-            loading: true,
-            error: null,
-          },
-        ]),
-      ),
-    );
-
-    void Promise.all(
-      selectedUrls.map(async (url) => {
-        const file = availableFileMap.get(url);
-        if (!file) {
-          return;
-        }
-
-        try {
-          const source = await openPoseTraceSource(file);
-          if (cancelled) {
-            source.cleanup();
-            return;
-          }
-
-          cleanups.push(source.cleanup);
-          const info = await getDatasetProcessingInfo(source);
-          if (cancelled) {
-            source.cleanup();
-            return;
-          }
-
-          setState((current) => ({
-            ...current,
-            [url]: {
-              file,
-              source,
-              info,
-              loading: false,
-              error: null,
-            },
-          }));
-        } catch (error: unknown) {
-          if (cancelled) {
-            return;
-          }
-
-          setState((current) => ({
-            ...current,
-            [url]: {
-              file,
-              source: null,
-              info: null,
-              loading: false,
-              error: error instanceof Error ? error.message : String(error),
-            },
-          }));
-        }
-      }),
-    );
-
-    return () => {
-      cancelled = true;
-      cleanups.forEach((cleanup) => {
-        cleanup();
-      });
-    };
-  }, [availableFileMap, selectedUrls]);
-
-  return state;
-}
-
-function EmptyState({
-  openedFileCount,
-}: {
-  openedFileCount: number;
-}) {
+function EmptyState({ openedFileCount }: { openedFileCount: number }) {
   return (
     <div className={styles.emptyState}>
       <h2 className={styles.emptyTitle}>Dataset Processing</h2>
       <p className={styles.emptyText}>
-        Open one or more HDF5 files in rebelHDF5, then switch to this page to cut, merge, append, or convert datasets.
+        Open one or more HDF5 files in rebelHDF5, then switch to this page to
+        cut, merge, append, or convert datasets.
       </p>
       <div className={styles.emptyActions}>
         <Link className={styles.openBtn} to="/">
           Open HDF5
         </Link>
         {openedFileCount > 0 && (
-          <span>{openedFileCount} opened file{openedFileCount === 1 ? '' : 's'} available in the sidebar.</span>
+          <span>
+            {openedFileCount} opened file{openedFileCount === 1 ? '' : 's'}{' '}
+            available in the sidebar.
+          </span>
         )}
       </div>
     </div>
@@ -573,17 +289,26 @@ function DatasetProcessingPage() {
   const fileUrl = searchParams.get('url');
   const opened = useStore((state) => state.opened);
 
-  const { file, loading: fileLoading, error: fileError } = useResolvedFile(fileUrl);
+  const {
+    file,
+    loading: fileLoading,
+    error: fileError,
+  } = useResolvedFile(fileUrl);
   const [operation, setOperation] = useState<DatasetProcessingOperation>('cut');
   const [primarySourceUrl, setPrimarySourceUrl] = useState<string | null>(null);
   const [mergeSourceUrls, setMergeSourceUrls] = useState<string[]>([]);
   const [appendSourceUrls, setAppendSourceUrls] = useState<string[]>([]);
   const [lerobotSourceUrls, setLerobotSourceUrls] = useState<string[]>([]);
   const [skipFailedDemos, setSkipFailedDemos] = useState(true);
-  const [lerobotModalityJsonPath, setLerobotModalityJsonPath] = useState(DEFAULT_LEROBOT_MODALITY_JSON);
-  const [lerobotConversionConfigPath, setLerobotConversionConfigPath] = useState('');
-  const [lerobotModalityPythonPath, setLerobotModalityPythonPath] = useState('');
-  const [lerobotDefaultTask, setLerobotDefaultTask] = useState(DEFAULT_LEROBOT_TASK);
+  const [lerobotModalityJsonPath, setLerobotModalityJsonPath] = useState(
+    DEFAULT_LEROBOT_MODALITY_JSON,
+  );
+  const [lerobotConversionConfigPath, setLerobotConversionConfigPath] =
+    useState('');
+  const [lerobotModalityPythonPath, setLerobotModalityPythonPath] =
+    useState('');
+  const [lerobotDefaultTask, setLerobotDefaultTask] =
+    useState(DEFAULT_LEROBOT_TASK);
   const [lerobotTaskRulesText, setLerobotTaskRulesText] = useState('');
   const [cutStartDemoName, setCutStartDemoName] = useState<string | null>(null);
   const [cutEndDemoName, setCutEndDemoName] = useState<string | null>(null);
@@ -592,7 +317,9 @@ function DatasetProcessingPage() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingError, setProcessingError] = useState<string | null>(null);
   const [lastResult, setLastResult] = useState<ProcessResultState | null>(null);
-  const [progress, setProgress] = useState<DatasetProcessingProgress | null>(null);
+  const [progress, setProgress] = useState<DatasetProcessingProgress | null>(
+    null,
+  );
 
   // Python backend state.
   const [backend, setBackend] = useState<PythonBackendStatus>({
@@ -601,7 +328,6 @@ function DatasetProcessingPage() {
     version: null,
   });
   const [useBackend, setUseBackend] = useState(false);
-
 
   const [backendScan, setBackendScan] = useState<PythonScanResult | null>(null);
   const [backendLoading, setBackendLoading] = useState(false);
@@ -669,7 +395,11 @@ function DatasetProcessingPage() {
     }
 
     return {
-      sourceOptions: availableFiles.map((f) => ({ id: f.url, name: f.name, label: f.name })),
+      sourceOptions: availableFiles.map((f) => ({
+        id: f.url,
+        name: f.name,
+        label: f.name,
+      })),
       skippedNames: [],
     };
   }, [availableFiles, backend.available, useBackend]);
@@ -685,7 +415,10 @@ function DatasetProcessingPage() {
       return;
     }
 
-    const activeId = (!useBackend ? (fileUrl ?? file?.url) : null) ?? sourceOptions[0]?.id ?? null;
+    const activeId =
+      (!useBackend ? (fileUrl ?? file?.url) : null) ??
+      sourceOptions[0]?.id ??
+      null;
     setPrimarySourceUrl((current) =>
       current && sourceOptions.some((entry) => entry.id === current)
         ? current
@@ -699,7 +432,9 @@ function DatasetProcessingPage() {
     const firstOther = sourceOptions.find((entry) => entry.id !== activeId)?.id;
 
     setMergeSourceUrls((current) => {
-      const valid = current.filter((url) => availableIds.has(url) && url !== activeId);
+      const valid = current.filter(
+        (url) => availableIds.has(url) && url !== activeId,
+      );
       if (valid.length > 0) {
         return valid;
       }
@@ -708,7 +443,9 @@ function DatasetProcessingPage() {
     });
 
     setAppendSourceUrls((current) => {
-      const valid = current.filter((url) => availableIds.has(url) && url !== activeId);
+      const valid = current.filter(
+        (url) => availableIds.has(url) && url !== activeId,
+      );
       if (valid.length > 0) {
         return valid;
       }
@@ -739,15 +476,26 @@ function DatasetProcessingPage() {
 
     return sourceOptions
       .map((entry) => entry.id)
-      .filter((id) =>
-        id === primarySourceUrl
-          || (operation === 'append' ? appendSourceUrls.includes(id) : mergeSourceUrls.includes(id)),
+      .filter(
+        (id) =>
+          id === primarySourceUrl ||
+          (operation === 'append'
+            ? appendSourceUrls.includes(id)
+            : mergeSourceUrls.includes(id)),
       );
-  }, [appendSourceUrls, lerobotSourceUrls, mergeSourceUrls, operation, primarySourceUrl, sourceOptions]);
+  }, [
+    appendSourceUrls,
+    lerobotSourceUrls,
+    mergeSourceUrls,
+    operation,
+    primarySourceUrl,
+    sourceOptions,
+  ]);
   const selectedSourceOptions = useMemo(
-    () => orderedSelectedSourceUrls
-      .map((id) => sourceOptionMap.get(id))
-      .filter((entry): entry is SourceOption => Boolean(entry)),
+    () =>
+      orderedSelectedSourceUrls
+        .map((id) => sourceOptionMap.get(id))
+        .filter((entry): entry is SourceOption => Boolean(entry)),
     [orderedSelectedSourceUrls, sourceOptionMap],
   );
 
@@ -765,21 +513,18 @@ function DatasetProcessingPage() {
       : null;
   }, [backend.available, selectedSourceOptions, useBackend]);
 
-  const backendScanPaths = useMemo(
-    () => {
-      if (resolveError) {
-        return [];
-      }
+  const backendScanPaths = useMemo(() => {
+    if (resolveError) {
+      return [];
+    }
 
-      if (selectedSourceOptions.length === 0) {
-        return [];
-      }
+    if (selectedSourceOptions.length === 0) {
+      return [];
+    }
 
-      const paths = selectedSourceOptions.map((entry) => entry.backendPath);
-      return paths.every((p): p is string => Boolean(p)) ? paths : [];
-    },
-    [resolveError, selectedSourceOptions],
-  );
+    const paths = selectedSourceOptions.map((entry) => entry.backendPath);
+    return paths.every((p): p is string => Boolean(p)) ? paths : [];
+  }, [resolveError, selectedSourceOptions]);
 
   // Demo names for the primary source in backend mode.
   const backendPrimaryDemos = useMemo(() => {
@@ -796,7 +541,9 @@ function DatasetProcessingPage() {
       return [];
     }
 
-    const fileInfo = backendScan.files.find((f) => f.path === primaryOption.backendPath);
+    const fileInfo = backendScan.files.find(
+      (f) => f.path === primaryOption.backendPath,
+    );
     return fileInfo?.demoNames ?? [];
   }, [backendScan, primarySourceUrl, sourceOptionMap, useBackend]);
 
@@ -834,12 +581,16 @@ function DatasetProcessingPage() {
       .catch((error: unknown) => {
         if (!cancelled) {
           setBackendScan(null);
-          setBackendError(error instanceof Error ? error.message : String(error));
+          setBackendError(
+            error instanceof Error ? error.message : String(error),
+          );
           setBackendLoading(false);
         }
       });
 
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [
     backend.available,
     backend.rootDir,
@@ -848,13 +599,18 @@ function DatasetProcessingPage() {
     useBackend,
   ]);
 
-  const sourceStates = useDatasetProcessingSources(availableFiles, orderedSelectedSourceUrls);
+  const sourceStates = useDatasetProcessingSources(
+    availableFiles,
+    orderedSelectedSourceUrls,
+  );
 
-  const primarySourceState = primarySourceUrl ? sourceStates[primarySourceUrl] ?? null : null;
+  const primarySourceState = primarySourceUrl
+    ? (sourceStates[primarySourceUrl] ?? null)
+    : null;
   const primarySource = primarySourceState?.source ?? null;
   const primaryDemos = useBackend
     ? backendPrimaryDemos.map((name) => ({ name }))
-    : primarySource?.demos ?? [];
+    : (primarySource?.demos ?? []);
 
   useEffect(() => {
     if (primaryDemos.length === 0) {
@@ -864,7 +620,9 @@ function DatasetProcessingPage() {
     }
 
     setCutStartDemoName((current) =>
-      current && primaryDemos.some((demo) => demo.name === current) ? current : primaryDemos[0].name,
+      current && primaryDemos.some((demo) => demo.name === current)
+        ? current
+        : primaryDemos[0].name,
     );
     setCutEndDemoName((current) =>
       current && primaryDemos.some((demo) => demo.name === current)
@@ -878,8 +636,12 @@ function DatasetProcessingPage() {
       return;
     }
 
-    const startIndex = primaryDemos.findIndex((demo) => demo.name === cutStartDemoName);
-    const endIndex = primaryDemos.findIndex((demo) => demo.name === cutEndDemoName);
+    const startIndex = primaryDemos.findIndex(
+      (demo) => demo.name === cutStartDemoName,
+    );
+    const endIndex = primaryDemos.findIndex(
+      (demo) => demo.name === cutEndDemoName,
+    );
     if (startIndex !== -1 && endIndex !== -1 && startIndex > endIndex) {
       setCutEndDemoName(cutStartDemoName);
     }
@@ -889,15 +651,21 @@ function DatasetProcessingPage() {
     .map((url) => sourceStates[url])
     .filter(Boolean);
   const selectedSourceFiles = selectedSourceStates.map((entry) => entry.file);
-  const selectedSourceRefs = useBackend && backend.available
-    ? selectedSourceOptions.map((entry) => ({ name: entry.name }))
-    : selectedSourceFiles;
-  const selectedSourceLoading = selectedSourceStates.some((entry) => entry.loading);
+  const selectedSourceRefs =
+    useBackend && backend.available
+      ? selectedSourceOptions.map((entry) => ({ name: entry.name }))
+      : selectedSourceFiles;
+  const selectedSourceLoading = selectedSourceStates.some(
+    (entry) => entry.loading,
+  );
   const selectedSourceErrors = selectedSourceStates
     .filter((entry) => entry.error)
     .map((entry) => `${entry.file.name}: ${entry.error}`);
-  const selectedSourcesReady = selectedSourceStates.length === orderedSelectedSourceUrls.length
-    && selectedSourceStates.every((entry) => entry.source && entry.info && !entry.loading && !entry.error);
+  const selectedSourcesReady =
+    selectedSourceStates.length === orderedSelectedSourceUrls.length &&
+    selectedSourceStates.every(
+      (entry) => entry.source && entry.info && !entry.loading && !entry.error,
+    );
 
   const availableKeyInfos = useMemo(() => {
     if (operation === 'lerobot') {
@@ -906,13 +674,18 @@ function DatasetProcessingPage() {
 
     if (useBackend && backendScan) {
       if (operation === 'cut') {
-        const primaryOption = primarySourceUrl ? sourceOptionMap.get(primarySourceUrl) ?? null : null;
+        const primaryOption = primarySourceUrl
+          ? (sourceOptionMap.get(primarySourceUrl) ?? null)
+          : null;
         const primaryPath = primaryOption?.backendPath ?? null;
-        const primaryInfo = backendScan.files.find((entry) => entry.path === primaryPath) ?? null;
+        const primaryInfo =
+          backendScan.files.find((entry) => entry.path === primaryPath) ?? null;
         return buildBackendKeyInfos(primaryInfo);
       }
 
-      return sumKeyInfos(backendScan.files.flatMap((fileInfo) => buildBackendKeyInfos(fileInfo)));
+      return sumKeyInfos(
+        backendScan.files.flatMap((fileInfo) => buildBackendKeyInfos(fileInfo)),
+      );
     }
 
     if (useBackend) {
@@ -924,30 +697,50 @@ function DatasetProcessingPage() {
     }
 
     const readySources = selectedSourceStates.filter((entry) => entry.info);
-    return sumKeyInfos(readySources.flatMap((entry) => entry.info?.keyPaths ?? []));
-  }, [backendScan, operation, primarySourceState, primarySourceUrl, selectedSourceStates, sourceOptionMap, useBackend]);
+    return sumKeyInfos(
+      readySources.flatMap((entry) => entry.info?.keyPaths ?? []),
+    );
+  }, [
+    backendScan,
+    operation,
+    primarySourceState,
+    primarySourceUrl,
+    selectedSourceStates,
+    sourceOptionMap,
+    useBackend,
+  ]);
 
   const availableKeySet = useMemo(
     () => new Set(availableKeyInfos.map((keyInfo) => keyInfo.path)),
     [availableKeyInfos],
   );
   const baseKeyPaths = useMemo(
-    () => (primarySourceState?.info?.keyPaths ?? []).map((keyInfo) => keyInfo.path),
+    () =>
+      (primarySourceState?.info?.keyPaths ?? []).map((keyInfo) => keyInfo.path),
     [primarySourceState],
   );
-  const keyTreeNodes = useMemo(() => buildKeyTree(availableKeyInfos), [availableKeyInfos]);
+  const keyTreeNodes = useMemo(
+    () => buildKeyTree(availableKeyInfos),
+    [availableKeyInfos],
+  );
   const selectedKeySet = useMemo(() => new Set(selectedKeys), [selectedKeys]);
-  const collapsedGroupSet = useMemo(() => new Set(collapsedGroupPaths), [collapsedGroupPaths]);
+  const collapsedGroupSet = useMemo(
+    () => new Set(collapsedGroupPaths),
+    [collapsedGroupPaths],
+  );
 
   useEffect(() => {
-    const nextAvailableKeyPaths = availableKeyInfos.map((keyInfo) => keyInfo.path);
+    const nextAvailableKeyPaths = availableKeyInfos.map(
+      (keyInfo) => keyInfo.path,
+    );
     const previousAvailableKeyPaths = previousAvailableKeyPathsRef.current;
 
     setSelectedKeys((current) => {
       const filtered = current.filter((key) => availableKeySet.has(key));
-      const hadAllPreviousKeysSelected = previousAvailableKeyPaths.length > 0
-        && current.length === previousAvailableKeyPaths.length
-        && previousAvailableKeyPaths.every((key) => current.includes(key));
+      const hadAllPreviousKeysSelected =
+        previousAvailableKeyPaths.length > 0 &&
+        current.length === previousAvailableKeyPaths.length &&
+        previousAvailableKeyPaths.every((key) => current.includes(key));
 
       if (filtered.length > 0 && !hadAllPreviousKeysSelected) {
         return filtered;
@@ -964,13 +757,19 @@ function DatasetProcessingPage() {
       return [];
     }
 
-    const startIndex = primaryDemos.findIndex((demo) => demo.name === cutStartDemoName);
-    const endIndex = primaryDemos.findIndex((demo) => demo.name === cutEndDemoName);
+    const startIndex = primaryDemos.findIndex(
+      (demo) => demo.name === cutStartDemoName,
+    );
+    const endIndex = primaryDemos.findIndex(
+      (demo) => demo.name === cutEndDemoName,
+    );
     if (startIndex === -1 || endIndex === -1 || startIndex > endIndex) {
       return [];
     }
 
-    return primaryDemos.slice(startIndex, endIndex + 1).map((demo) => demo.name);
+    return primaryDemos
+      .slice(startIndex, endIndex + 1)
+      .map((demo) => demo.name);
   }, [cutEndDemoName, cutStartDemoName, primaryDemos]);
 
   const defaultOutputName = useMemo(
@@ -991,17 +790,24 @@ function DatasetProcessingPage() {
     }
 
     return `Cutting ${cutDemoNames.length} demo${cutDemoNames.length === 1 ? '' : 's'} into a new file. Video-heavy keys can take a while to copy.`;
-  }, [appendSourceUrls.length, cutDemoNames.length, operation, orderedSelectedSourceUrls.length]);
+  }, [
+    appendSourceUrls.length,
+    cutDemoNames.length,
+    operation,
+    orderedSelectedSourceUrls.length,
+  ]);
 
   const canProcess = useMemo(() => {
     if (operation === 'lerobot') {
-      return useBackend
-        && backend.available
-        && Boolean(backendScan)
-        && orderedSelectedSourceUrls.length > 0
-        && backendScanPaths.length === orderedSelectedSourceUrls.length
-        && !backendLoading
-        && !resolveError;
+      return (
+        useBackend &&
+        backend.available &&
+        Boolean(backendScan) &&
+        orderedSelectedSourceUrls.length > 0 &&
+        backendScanPaths.length === orderedSelectedSourceUrls.length &&
+        !backendLoading &&
+        !resolveError
+      );
     }
 
     if (selectedKeys.length === 0) {
@@ -1010,11 +816,13 @@ function DatasetProcessingPage() {
 
     // Python backend: need selected sources and not loading.
     if (useBackend && backend.available) {
-      return Boolean(backendScan)
-        && orderedSelectedSourceUrls.length > 0
-        && backendScanPaths.length === orderedSelectedSourceUrls.length
-        && !backendLoading
-        && !resolveError;
+      return (
+        Boolean(backendScan) &&
+        orderedSelectedSourceUrls.length > 0 &&
+        backendScanPaths.length === orderedSelectedSourceUrls.length &&
+        !backendLoading &&
+        !resolveError
+      );
     }
 
     if (selectedSourceLoading || !selectedSourcesReady) {
@@ -1048,22 +856,23 @@ function DatasetProcessingPage() {
     useBackend,
   ]);
   const resultResetKey = useMemo(
-    () => JSON.stringify({
-      operation,
-      primarySourceUrl,
-      mergeSourceUrls,
-      appendSourceUrls,
-      lerobotSourceUrls,
-      skipFailedDemos,
-      lerobotModalityJsonPath,
-      lerobotConversionConfigPath,
-      lerobotModalityPythonPath,
-      lerobotDefaultTask,
-      lerobotTaskRulesText,
-      cutStartDemoName,
-      cutEndDemoName,
-      selectedKeys,
-    }),
+    () =>
+      JSON.stringify({
+        operation,
+        primarySourceUrl,
+        mergeSourceUrls,
+        appendSourceUrls,
+        lerobotSourceUrls,
+        skipFailedDemos,
+        lerobotModalityJsonPath,
+        lerobotConversionConfigPath,
+        lerobotModalityPythonPath,
+        lerobotDefaultTask,
+        lerobotTaskRulesText,
+        cutStartDemoName,
+        cutEndDemoName,
+        selectedKeys,
+      }),
     [
       appendSourceUrls,
       cutEndDemoName,
@@ -1081,7 +890,9 @@ function DatasetProcessingPage() {
       skipFailedDemos,
     ],
   );
-  const hasDownloadReady = Boolean(lastResult?.downloadUrl || lastResult?.downloadBlob);
+  const hasDownloadReady = Boolean(
+    lastResult?.downloadUrl || lastResult?.downloadBlob,
+  );
 
   useEffect(() => {
     setLastResult(null);
@@ -1101,7 +912,10 @@ function DatasetProcessingPage() {
       if (useBackend && backend.available) {
         // Python backend processing.
         if (backendScanPaths.length === 0 || resolveError) {
-          throw new Error(resolveError ?? 'Could not resolve file paths on the Python backend.');
+          throw new Error(
+            resolveError ??
+              'Could not resolve file paths on the Python backend.',
+          );
         }
 
         if (operation === 'lerobot') {
@@ -1112,7 +926,8 @@ function DatasetProcessingPage() {
               outputName: defaultOutputName,
               skipFailed: skipFailedDemos,
               modalityJson: lerobotModalityJsonPath.trim() || undefined,
-              conversionConfigJson: lerobotConversionConfigPath.trim() || undefined,
+              conversionConfigJson:
+                lerobotConversionConfigPath.trim() || undefined,
               modalityPython: lerobotModalityPythonPath.trim() || undefined,
               defaultTask: lerobotDefaultTask.trim() || undefined,
               taskRules,
@@ -1139,9 +954,13 @@ function DatasetProcessingPage() {
             selectedKeys,
             outputName: defaultOutputName,
             operation,
-            cutRange: operation === 'cut' && cutStartDemoName && cutEndDemoName
-              ? { startDemoName: cutStartDemoName, endDemoName: cutEndDemoName }
-              : undefined,
+            cutRange:
+              operation === 'cut' && cutStartDemoName && cutEndDemoName
+                ? {
+                    startDemoName: cutStartDemoName,
+                    endDemoName: cutEndDemoName,
+                  }
+                : undefined,
           },
           { onProgress: setProgress },
         );
@@ -1165,12 +984,13 @@ function DatasetProcessingPage() {
             orderedSourceIds,
             selectedKeys,
             fileName: defaultOutputName,
-            cutRange: operation === 'cut' && cutStartDemoName && cutEndDemoName
-              ? {
-                  startDemoName: cutStartDemoName,
-                  endDemoName: cutEndDemoName,
-                }
-              : undefined,
+            cutRange:
+              operation === 'cut' && cutStartDemoName && cutEndDemoName
+                ? {
+                    startDemoName: cutStartDemoName,
+                    endDemoName: cutEndDemoName,
+                  }
+                : undefined,
           },
           {
             onProgress: setProgress,
@@ -1188,7 +1008,9 @@ function DatasetProcessingPage() {
         });
       }
     } catch (error: unknown) {
-      setProcessingError(error instanceof Error ? error.message : String(error));
+      setProcessingError(
+        error instanceof Error ? error.message : String(error),
+      );
     } finally {
       setIsProcessing(false);
       setProgress(null);
@@ -1210,7 +1032,11 @@ function DatasetProcessingPage() {
     }
   }
 
-  function toggleSource(url: string, selectedUrls: string[], setter: (next: string[]) => void) {
+  function toggleSource(
+    url: string,
+    selectedUrls: string[],
+    setter: (next: string[]) => void,
+  ) {
     setter(
       selectedUrls.includes(url)
         ? selectedUrls.filter((currentUrl) => currentUrl !== url)
@@ -1222,7 +1048,9 @@ function DatasetProcessingPage() {
     setSelectedKeys((current) =>
       current.includes(keyPath)
         ? current.filter((key) => key !== keyPath)
-        : [...current, keyPath].sort((left, right) => left.localeCompare(right)),
+        : [...current, keyPath].sort((left, right) =>
+            left.localeCompare(right),
+          ),
     );
   }
 
@@ -1258,7 +1086,9 @@ function DatasetProcessingPage() {
           <p className={styles.eyebrow}>Processing</p>
           <h1 className={styles.title}>Dataset Processing</h1>
           <p className={styles.subtitle}>
-            Cut demos, merge multiple datasets, append one dataset to another, or convert HDF5 files to LeRobot v2.1. Processing leaves the original files unchanged.
+            Cut demos, merge multiple datasets, append one dataset to another,
+            or convert HDF5 files to LeRobot v2.1. Processing leaves the
+            original files unchanged.
           </p>
         </div>
       </header>
@@ -1270,8 +1100,14 @@ function DatasetProcessingPage() {
             <div>
               <p className={styles.backendTitle}>Python Processing Server</p>
               <p className={styles.backendSubtitle}>
-                Native processing — orders of magnitude faster for large files with video data.
-                {backend.outputDir && <> Output directory: <code>{backend.outputDir}</code></>}
+                Native processing — orders of magnitude faster for large files
+                with video data.
+                {backend.outputDir && (
+                  <>
+                    {' '}
+                    Output directory: <code>{backend.outputDir}</code>
+                  </>
+                )}
               </p>
             </div>
             <label className={styles.backendToggle}>
@@ -1286,24 +1122,34 @@ function DatasetProcessingPage() {
             </label>
           </div>
           {useBackend && backendError && (
-            <p className={styles.errorText} style={{ marginTop: '0.75rem' }}>{backendError}</p>
+            <p className={styles.errorText} style={{ marginTop: '0.75rem' }}>
+              {backendError}
+            </p>
           )}
           {useBackend && backendLoading && !backendError && (
-            <p className={styles.infoText} style={{ marginTop: '0.75rem' }}>Scanning files…</p>
+            <p className={styles.infoText} style={{ marginTop: '0.75rem' }}>
+              Scanning files…
+            </p>
           )}
           {useBackend && skippedNames.length > 0 && (
             <p className={styles.infoText} style={{ marginTop: '0.75rem' }}>
-              Hidden from backend processing because they were opened without a desktop filesystem path:{' '}
-              {skippedNames.join(', ')}. Reopen them with the desktop file picker or turn the backend off to process them via WASM.
+              Hidden from backend processing because they were opened without a
+              desktop filesystem path: {skippedNames.join(', ')}. Reopen them
+              with the desktop file picker or turn the backend off to process
+              them via WASM.
             </p>
           )}
           {useBackend && resolveError && (
-            <p className={styles.errorText} style={{ marginTop: '0.75rem' }}>{resolveError}</p>
+            <p className={styles.errorText} style={{ marginTop: '0.75rem' }}>
+              {resolveError}
+            </p>
           )}
         </section>
       )}
 
-      {!useBackend && !fileUrl && !file && !fileLoading && <EmptyState openedFileCount={opened.length} />}
+      {!useBackend && !fileUrl && !file && !fileLoading && (
+        <EmptyState openedFileCount={opened.length} />
+      )}
 
       {!useBackend && fileError && (
         <section className={styles.messageCard}>
@@ -1317,20 +1163,27 @@ function DatasetProcessingPage() {
         </section>
       )}
 
-      {useBackend && backend.available && sourceOptions.length === 0 && skippedNames.length === 0 && (
-        <section className={styles.messageCard}>
-          <p className={styles.infoText}>
-            Open one or more HDF5 files from the home page to enable processing.
-          </p>
-        </section>
-      )}
+      {useBackend &&
+        backend.available &&
+        sourceOptions.length === 0 &&
+        skippedNames.length === 0 && (
+          <section className={styles.messageCard}>
+            <p className={styles.infoText}>
+              Open one or more HDF5 files from the home page to enable
+              processing.
+            </p>
+          </section>
+        )}
 
       {sourceOptions.length > 0 && (
         <>
           <section className={styles.controlsCard}>
             <div className={styles.controlGrid}>
               <div className={styles.field}>
-                <label className={styles.fieldLabel} htmlFor="dataset-processing-operation">
+                <label
+                  className={styles.fieldLabel}
+                  htmlFor="dataset-processing-operation"
+                >
                   Operation
                 </label>
                 <select
@@ -1338,7 +1191,8 @@ function DatasetProcessingPage() {
                   className={styles.select}
                   value={operation}
                   onChange={(event) => {
-                    const nextOperation = event.target.value as DatasetProcessingOperation;
+                    const nextOperation = event.target
+                      .value as DatasetProcessingOperation;
                     setOperation(nextOperation);
                     if (nextOperation === 'lerobot' && backend.available) {
                       setUseBackend(true);
@@ -1355,7 +1209,10 @@ function DatasetProcessingPage() {
 
               {operation !== 'lerobot' && (
                 <div className={styles.field}>
-                  <label className={styles.fieldLabel} htmlFor="dataset-processing-primary-source">
+                  <label
+                    className={styles.fieldLabel}
+                    htmlFor="dataset-processing-primary-source"
+                  >
                     {operation === 'cut' ? 'Source Dataset' : 'Base Dataset'}
                   </label>
                   <select
@@ -1381,7 +1238,10 @@ function DatasetProcessingPage() {
             {operation === 'cut' && (
               <div className={styles.controlGrid}>
                 <div className={styles.field}>
-                  <label className={styles.fieldLabel} htmlFor="dataset-processing-cut-start">
+                  <label
+                    className={styles.fieldLabel}
+                    htmlFor="dataset-processing-cut-start"
+                  >
                     Start Demo
                   </label>
                   <select
@@ -1403,7 +1263,10 @@ function DatasetProcessingPage() {
                 </div>
 
                 <div className={styles.field}>
-                  <label className={styles.fieldLabel} htmlFor="dataset-processing-cut-end">
+                  <label
+                    className={styles.fieldLabel}
+                    htmlFor="dataset-processing-cut-end"
+                  >
                     End Demo
                   </label>
                   <select
@@ -1423,7 +1286,6 @@ function DatasetProcessingPage() {
                     ))}
                   </select>
                 </div>
-
               </div>
             )}
 
@@ -1434,16 +1296,20 @@ function DatasetProcessingPage() {
                   {sourceOptions
                     .filter((entry) => entry.id !== primarySourceUrl)
                     .map((entry) => (
-                    <label key={entry.id} className={styles.checkboxItem}>
-                      <input
-                        type="checkbox"
-                        checked={mergeSourceUrls.includes(entry.id)}
-                        onChange={() => {
-                          toggleSource(entry.id, mergeSourceUrls, setMergeSourceUrls);
-                        }}
-                      />
-                      <span>{entry.label}</span>
-                    </label>
+                      <label key={entry.id} className={styles.checkboxItem}>
+                        <input
+                          type="checkbox"
+                          checked={mergeSourceUrls.includes(entry.id)}
+                          onChange={() => {
+                            toggleSource(
+                              entry.id,
+                              mergeSourceUrls,
+                              setMergeSourceUrls,
+                            );
+                          }}
+                        />
+                        <span>{entry.label}</span>
+                      </label>
                     ))}
                 </div>
               </>
@@ -1461,7 +1327,11 @@ function DatasetProcessingPage() {
                           type="checkbox"
                           checked={appendSourceUrls.includes(entry.id)}
                           onChange={() => {
-                            toggleSource(entry.id, appendSourceUrls, setAppendSourceUrls);
+                            toggleSource(
+                              entry.id,
+                              appendSourceUrls,
+                              setAppendSourceUrls,
+                            );
                           }}
                         />
                         <span>{entry.label}</span>
@@ -1481,7 +1351,11 @@ function DatasetProcessingPage() {
                         type="checkbox"
                         checked={lerobotSourceUrls.includes(entry.id)}
                         onChange={() => {
-                          toggleSource(entry.id, lerobotSourceUrls, setLerobotSourceUrls);
+                          toggleSource(
+                            entry.id,
+                            lerobotSourceUrls,
+                            setLerobotSourceUrls,
+                          );
                         }}
                       />
                       <span>{entry.label}</span>
@@ -1499,11 +1373,15 @@ function DatasetProcessingPage() {
                   <span>Skip demos whose success attribute is false</span>
                 </label>
                 <p className={styles.infoText}>
-                  The converter writes LeRobot v2.1 parquet, metadata, modality.json, and GPU-encoded MP4 videos.
+                  The converter writes LeRobot v2.1 parquet, metadata,
+                  modality.json, and GPU-encoded MP4 videos.
                 </p>
                 <div className={styles.lerobotConfigGrid}>
                   <div className={styles.field}>
-                    <label className={styles.fieldLabel} htmlFor="lerobot-modality-json-path">
+                    <label
+                      className={styles.fieldLabel}
+                      htmlFor="lerobot-modality-json-path"
+                    >
                       Modality JSON
                     </label>
                     <input
@@ -1521,7 +1399,9 @@ function DatasetProcessingPage() {
                       accept=".json,application/json"
                       onChange={(event) => {
                         const pickedFile = event.currentTarget.files?.[0];
-                        const pickedPath = pickedFile ? getDesktopFilePath(pickedFile) : undefined;
+                        const pickedPath = pickedFile
+                          ? getDesktopFilePath(pickedFile)
+                          : undefined;
                         if (pickedPath) {
                           setLerobotModalityJsonPath(pickedPath);
                         }
@@ -1531,7 +1411,10 @@ function DatasetProcessingPage() {
                   </div>
 
                   <div className={styles.field}>
-                    <label className={styles.fieldLabel} htmlFor="lerobot-conversion-config-path">
+                    <label
+                      className={styles.fieldLabel}
+                      htmlFor="lerobot-conversion-config-path"
+                    >
                       Conversion Config JSON
                     </label>
                     <input
@@ -1550,7 +1433,9 @@ function DatasetProcessingPage() {
                       accept=".json,application/json"
                       onChange={(event) => {
                         const pickedFile = event.currentTarget.files?.[0];
-                        const pickedPath = pickedFile ? getDesktopFilePath(pickedFile) : undefined;
+                        const pickedPath = pickedFile
+                          ? getDesktopFilePath(pickedFile)
+                          : undefined;
                         if (pickedPath) {
                           setLerobotConversionConfigPath(pickedPath);
                         }
@@ -1560,7 +1445,10 @@ function DatasetProcessingPage() {
                   </div>
 
                   <div className={styles.field}>
-                    <label className={styles.fieldLabel} htmlFor="lerobot-modality-python-path">
+                    <label
+                      className={styles.fieldLabel}
+                      htmlFor="lerobot-modality-python-path"
+                    >
                       GR00T Python Config
                     </label>
                     <input
@@ -1579,7 +1467,9 @@ function DatasetProcessingPage() {
                       accept=".py,text/x-python"
                       onChange={(event) => {
                         const pickedFile = event.currentTarget.files?.[0];
-                        const pickedPath = pickedFile ? getDesktopFilePath(pickedFile) : undefined;
+                        const pickedPath = pickedFile
+                          ? getDesktopFilePath(pickedFile)
+                          : undefined;
                         if (pickedPath) {
                           setLerobotModalityPythonPath(pickedPath);
                         }
@@ -1589,7 +1479,10 @@ function DatasetProcessingPage() {
                   </div>
 
                   <div className={styles.field}>
-                    <label className={styles.fieldLabel} htmlFor="lerobot-default-task">
+                    <label
+                      className={styles.fieldLabel}
+                      htmlFor="lerobot-default-task"
+                    >
                       Default Task String
                     </label>
                     <input
@@ -1604,13 +1497,18 @@ function DatasetProcessingPage() {
                 </div>
 
                 <div className={styles.field}>
-                  <label className={styles.fieldLabel} htmlFor="lerobot-task-rules">
+                  <label
+                    className={styles.fieldLabel}
+                    htmlFor="lerobot-task-rules"
+                  >
                     Task Rules JSON
                   </label>
                   <textarea
                     id="lerobot-task-rules"
                     className={styles.textarea}
-                    placeholder={'Optional: [{"match":"Top_Long","task":"Fold the long-sleeve top on the table"}]'}
+                    placeholder={
+                      'Optional: [{"match":"Top_Long","task":"Fold the long-sleeve top on the table"}]'
+                    }
                     value={lerobotTaskRulesText}
                     onChange={(event) => {
                       setLerobotTaskRulesText(event.target.value);
@@ -1622,20 +1520,25 @@ function DatasetProcessingPage() {
 
             <div className={styles.statusRow}>
               <div className={styles.statusItem}>
-                <span className={styles.statusKey}>Opened:</span> {sourceOptions.length}
+                <span className={styles.statusKey}>Opened:</span>{' '}
+                {sourceOptions.length}
               </div>
               <div className={styles.statusItem}>
-                <span className={styles.statusKey}>Selected Sources:</span> {orderedSelectedSourceUrls.length}
+                <span className={styles.statusKey}>Selected Sources:</span>{' '}
+                {orderedSelectedSourceUrls.length}
               </div>
               <div className={styles.statusItem}>
                 <span className={styles.statusKey}>
-                  {operation === 'lerobot' ? 'Output Format:' : 'Selected Keys:'}
+                  {operation === 'lerobot'
+                    ? 'Output Format:'
+                    : 'Selected Keys:'}
                 </span>{' '}
                 {operation === 'lerobot' ? 'LeRobot v2.1' : selectedKeys.length}
               </div>
               {operation === 'cut' && (
                 <div className={styles.statusItem}>
-                  <span className={styles.statusKey}>Cut Demos:</span> {cutDemoNames.length}
+                  <span className={styles.statusKey}>Cut Demos:</span>{' '}
+                  {cutDemoNames.length}
                 </div>
               )}
             </div>
@@ -1644,7 +1547,9 @@ function DatasetProcessingPage() {
           {selectedSourceErrors.length > 0 && (
             <section className={styles.messageCard}>
               {selectedSourceErrors.map((errorMessage) => (
-                <p key={errorMessage} className={styles.errorText}>{errorMessage}</p>
+                <p key={errorMessage} className={styles.errorText}>
+                  {errorMessage}
+                </p>
               ))}
             </section>
           )}
@@ -1654,105 +1559,148 @@ function DatasetProcessingPage() {
       {availableFiles.length > 0 && (
         <>
           {operation !== 'lerobot' && (
-          <section className={styles.keysCard}>
-            <div className={styles.keysHeader}>
-              <div>
-                <h2 className={styles.sectionTitle}>Output Keys</h2>
-                <p className={styles.sectionText}>
-                  {operation === 'cut'
-                    ? 'Choose which demo-level dataset paths will be copied into the output file.'
-                    : 'Choose which demo-level dataset paths will be copied into the output file. Merge and append expose the union of selected source keys, and keys missing in a given demo are skipped for that demo.'}
-                </p>
-              </div>
-              <div className={styles.keyActions}>
-                {(operation === 'merge' || operation === 'append') && (
+            <section className={styles.keysCard}>
+              <div className={styles.keysHeader}>
+                <div>
+                  <h2 className={styles.sectionTitle}>Output Keys</h2>
+                  <p className={styles.sectionText}>
+                    {operation === 'cut'
+                      ? 'Choose which demo-level dataset paths will be copied into the output file.'
+                      : 'Choose which demo-level dataset paths will be copied into the output file. Merge and append expose the union of selected source keys, and keys missing in a given demo are skipped for that demo.'}
+                  </p>
+                </div>
+                <div className={styles.keyActions}>
+                  {(operation === 'merge' || operation === 'append') && (
+                    <button
+                      type="button"
+                      className={styles.secondaryBtn}
+                      onClick={() => {
+                        setSelectedKeys(
+                          baseKeyPaths.filter((keyPath) =>
+                            availableKeySet.has(keyPath),
+                          ),
+                        );
+                      }}
+                      disabled={baseKeyPaths.length === 0}
+                    >
+                      Match Base Dataset
+                    </button>
+                  )}
                   <button
                     type="button"
                     className={styles.secondaryBtn}
                     onClick={() => {
-                      setSelectedKeys(baseKeyPaths.filter((keyPath) => availableKeySet.has(keyPath)));
+                      setSelectedKeys(
+                        availableKeyInfos.map((keyInfo) => keyInfo.path),
+                      );
                     }}
-                    disabled={baseKeyPaths.length === 0}
+                    disabled={availableKeyInfos.length === 0}
                   >
-                    Match Base Dataset
+                    Select All
                   </button>
-                )}
-                <button
-                  type="button"
-                  className={styles.secondaryBtn}
-                  onClick={() => {
-                    setSelectedKeys(availableKeyInfos.map((keyInfo) => keyInfo.path));
-                  }}
-                  disabled={availableKeyInfos.length === 0}
-                >
-                  Select All
-                </button>
-                <button
-                  type="button"
-                  className={styles.secondaryBtn}
-                  onClick={() => {
-                    setSelectedKeys([]);
-                  }}
-                  disabled={availableKeyInfos.length === 0}
-                >
-                  Clear All
-                </button>
+                  <button
+                    type="button"
+                    className={styles.secondaryBtn}
+                    onClick={() => {
+                      setSelectedKeys([]);
+                    }}
+                    disabled={availableKeyInfos.length === 0}
+                  >
+                    Clear All
+                  </button>
+                </div>
               </div>
-            </div>
 
-            {selectedSourceLoading ? (
-              <p className={styles.infoText}>Loading source dataset structure…</p>
-            ) : availableKeyInfos.length === 0 ? (
-              <p className={styles.infoText}>
-                Select valid source datasets to inspect their available keys.
-              </p>
-            ) : (
-              <div className={styles.keyTree}>
-                {keyTreeNodes.map((node) => (
-                  <KeyTreeNodeItem
-                    key={node.fullPath}
-                    node={node}
-                    depth={0}
-                    selectedKeys={selectedKeySet}
-                    collapsedGroups={collapsedGroupSet}
-                    onToggleKey={toggleKey}
-                    onToggleGroup={toggleKeyGroup}
-                    onToggleCollapse={toggleGroupCollapse}
-                  />
-                ))}
-              </div>
-            )}
-          </section>
+              {selectedSourceLoading ? (
+                <p className={styles.infoText}>
+                  Loading source dataset structure…
+                </p>
+              ) : availableKeyInfos.length === 0 ? (
+                <p className={styles.infoText}>
+                  Select valid source datasets to inspect their available keys.
+                </p>
+              ) : (
+                <div className={styles.keyTree}>
+                  {keyTreeNodes.map((node) => (
+                    <KeyTreeNodeItem
+                      key={node.fullPath}
+                      node={node}
+                      depth={0}
+                      selectedKeys={selectedKeySet}
+                      collapsedGroups={collapsedGroupSet}
+                      onToggleKey={toggleKey}
+                      onToggleGroup={toggleKeyGroup}
+                      onToggleCollapse={toggleGroupCollapse}
+                    />
+                  ))}
+                </div>
+              )}
+            </section>
           )}
 
           <section className={styles.actionsCard}>
             <div>
               <h2 className={styles.sectionTitle}>Create Output</h2>
               <p className={styles.sectionText}>
-                {operation === 'lerobot'
-                  ? <>The LeRobot dataset directory will be created as <code>{defaultOutputName}</code>.</>
-                  : <>The processed output will be created as <code>{defaultOutputName}</code>.</>}
+                {operation === 'lerobot' ? (
+                  <>
+                    The LeRobot dataset directory will be created as{' '}
+                    <code>{defaultOutputName}</code>.
+                  </>
+                ) : (
+                  <>
+                    The processed output will be created as{' '}
+                    <code>{defaultOutputName}</code>.
+                  </>
+                )}
               </p>
             </div>
 
-            {processingError && <p className={styles.errorText}>{processingError}</p>}
+            {processingError && (
+              <p className={styles.errorText}>{processingError}</p>
+            )}
             {lastResult && (
               <p className={styles.successText}>
-                {lastResult.outputType === 'directory'
-                  ? (
-                    <>
-                      Created {lastResult.fileName} with {lastResult.demoCount} demos
-                      {typeof lastResult.totalFrames === 'number' && <> and {lastResult.totalFrames} frames</>}
-                      {typeof lastResult.taskCount === 'number' && <> across {lastResult.taskCount} task{lastResult.taskCount === 1 ? '' : 's'}</>}.
-                      {lastResult.outputPath && <> Output: <code>{lastResult.outputPath}</code></>}
-                      {Boolean(lastResult.skippedDemoCount) && <> Skipped {lastResult.skippedDemoCount} incompatible demo{lastResult.skippedDemoCount === 1 ? '' : 's'}.</>}
-                    </>
-                  )
-                  : `Created ${lastResult.fileName} with ${lastResult.demoCount} demos and ${lastResult.selectedKeyCount} keys. Ready to download.`}
+                {lastResult.outputType === 'directory' ? (
+                  <>
+                    Created {lastResult.fileName} with {lastResult.demoCount}{' '}
+                    demos
+                    {typeof lastResult.totalFrames === 'number' && (
+                      <> and {lastResult.totalFrames} frames</>
+                    )}
+                    {typeof lastResult.taskCount === 'number' && (
+                      <>
+                        {' '}
+                        across {lastResult.taskCount} task
+                        {lastResult.taskCount === 1 ? '' : 's'}
+                      </>
+                    )}
+                    .
+                    {lastResult.outputPath && (
+                      <>
+                        {' '}
+                        Output: <code>{lastResult.outputPath}</code>
+                      </>
+                    )}
+                    {Boolean(lastResult.skippedDemoCount) && (
+                      <>
+                        {' '}
+                        Skipped {lastResult.skippedDemoCount} incompatible demo
+                        {lastResult.skippedDemoCount === 1 ? '' : 's'}.
+                      </>
+                    )}
+                  </>
+                ) : (
+                  `Created ${lastResult.fileName} with ${lastResult.demoCount} demos and ${lastResult.selectedKeyCount} keys. Ready to download.`
+                )}
               </p>
             )}
             {isProcessing && (
-              <div className={styles.processingStatus} role="status" aria-live="polite">
+              <div
+                className={styles.processingStatus}
+                role="status"
+                aria-live="polite"
+              >
                 <FiLoader aria-hidden className={styles.processingSpinner} />
                 <div className={styles.processingCopy}>
                   <p className={styles.processingTitle}>
@@ -1770,23 +1718,36 @@ function DatasetProcessingPage() {
                                 ? 'Writing LeRobot metadata…'
                                 : 'Processing dataset operation…'}
                   </p>
-                  {progress && ['copying', 'converting', 'encoding'].includes(progress.phase) ? (
+                  {progress &&
+                  ['copying', 'converting', 'encoding'].includes(
+                    progress.phase,
+                  ) ? (
                     <>
                       <p className={styles.processingText}>
-                        {progress.phase === 'copying' ? 'Copying' : progress.phase === 'encoding' ? 'Encoding' : 'Converting'} <strong>{progress.currentDemoName}</strong> from{' '}
+                        {progress.phase === 'copying'
+                          ? 'Copying'
+                          : progress.phase === 'encoding'
+                            ? 'Encoding'
+                            : 'Converting'}{' '}
+                        <strong>{progress.currentDemoName}</strong> from{' '}
                         <strong>{progress.currentSourceName}</strong>
-                        {' — '}demo {progress.overallDemoIndex + 1} of {progress.overallDemoCount}
+                        {' — '}demo {progress.overallDemoIndex + 1} of{' '}
+                        {progress.overallDemoCount}
                         {progress.datasetDetail && (
                           <>
-                            {' — '}<code>{progress.datasetDetail.path}</code>
-                            {' '}{progress.datasetDetail.copiedRows}/{progress.datasetDetail.totalRows} rows
+                            {' — '}
+                            <code>{progress.datasetDetail.path}</code>{' '}
+                            {progress.datasetDetail.copiedRows}/
+                            {progress.datasetDetail.totalRows} rows
                           </>
                         )}
                       </p>
                       <div className={styles.progressBar}>
                         <div
                           className={styles.progressFill}
-                          style={{ width: `${((progress.overallDemoIndex + 1) / progress.overallDemoCount) * 100}%` }}
+                          style={{
+                            width: `${((progress.overallDemoIndex + 1) / progress.overallDemoCount) * 100}%`,
+                          }}
                         />
                       </div>
                     </>
@@ -1809,10 +1770,10 @@ function DatasetProcessingPage() {
                     ? 'Select at least one backend-backed HDF5 file to convert to LeRobot v2.1.'
                     : 'LeRobot conversion requires the local Python processing server.'
                   : operation === 'merge'
-                  ? 'Select at least two datasets and one key to create a merged output.'
-                  : operation === 'append'
-                    ? 'Select a base dataset, at least one dataset to append, and one key to create the output.'
-                    : 'Select a source dataset, a valid demo range, and at least one key to create the output.'}
+                    ? 'Select at least two datasets and one key to create a merged output.'
+                    : operation === 'append'
+                      ? 'Select a base dataset, at least one dataset to append, and one key to create the output.'
+                      : 'Select a source dataset, a valid demo range, and at least one key to create the output.'}
               </p>
             )}
 
@@ -1830,11 +1791,21 @@ function DatasetProcessingPage() {
                 }}
                 disabled={isProcessing || (!hasDownloadReady && !canProcess)}
               >
-                {hasDownloadReady ? <FiDownload aria-hidden /> : <FiFile aria-hidden />}
+                {hasDownloadReady ? (
+                  <FiDownload aria-hidden />
+                ) : (
+                  <FiFile aria-hidden />
+                )}
                 <span>
                   {isProcessing
-                    ? operation === 'lerobot' ? 'Converting…' : 'Processing…'
-                    : hasDownloadReady ? 'Download' : operation === 'lerobot' ? 'Convert' : 'Create'}
+                    ? operation === 'lerobot'
+                      ? 'Converting…'
+                      : 'Processing…'
+                    : hasDownloadReady
+                      ? 'Download'
+                      : operation === 'lerobot'
+                        ? 'Convert'
+                        : 'Create'}
                 </span>
               </button>
               {operation !== 'lerobot' && (
@@ -1842,7 +1813,9 @@ function DatasetProcessingPage() {
                   type="button"
                   className={styles.secondaryBtn}
                   onClick={() => {
-                    setSelectedKeys(availableKeyInfos.map((keyInfo) => keyInfo.path));
+                    setSelectedKeys(
+                      availableKeyInfos.map((keyInfo) => keyInfo.path),
+                    );
                     setProcessingError(null);
                     setLastResult(null);
                   }}
@@ -1860,7 +1833,8 @@ function DatasetProcessingPage() {
       {!file && !fileLoading && fileUrl && availableFiles.length === 0 && (
         <section className={styles.messageCard}>
           <p>
-            Select an opened file from the sidebar to process datasets, or go back to the viewer.
+            Select an opened file from the sidebar to process datasets, or go
+            back to the viewer.
           </p>
           <div className={styles.emptyActions}>
             <Link

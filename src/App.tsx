@@ -7,10 +7,19 @@ import styles from './ErrorFallback.module.css';
 import Layout from './Layout';
 import Loader from './Loader';
 
-const ObjectDistributionPage = lazy(async () => import('./ObjectDistributionPage'));
-const DatasetAttributesPage = lazy(async () => import('./DatasetAttributesPage'));
+const ObjectDistributionPage = lazy(
+  async () => import('./ObjectDistributionPage'),
+);
+const DatasetAttributesPage = lazy(
+  async () => import('./DatasetAttributesPage'),
+);
 const DatabricksPage = lazy(async () => import('./DatabricksPage'));
-const DatasetProcessingPage = lazy(async () => import('./DatasetProcessingPage'));
+const DatasetComparisonPage = lazy(
+  async () => import('./DatasetComparisonPage'),
+);
+const DatasetProcessingPage = lazy(
+  async () => import('./DatasetProcessingPage'),
+);
 const PoseTracePage = lazy(async () => import('./PoseTracePage'));
 const ServicesPage = lazy(async () => import('./ServicesPage'));
 const VideoConverterPage = lazy(async () => import('./VideoConverterPage'));
@@ -49,9 +58,22 @@ function App() {
               <Route path="/view" element={<ViewPage />} />
               <Route path="/pose-trace" element={<PoseTracePage />} />
               <Route path="/video-converter" element={<VideoConverterPage />} />
-              <Route path="/dataset-processing" element={<DatasetProcessingPage />} />
-              <Route path="/dataset-attributes" element={<DatasetAttributesPage />} />
-              <Route path="/object-distribution" element={<ObjectDistributionPage />} />
+              <Route
+                path="/dataset-processing"
+                element={<DatasetProcessingPage />}
+              />
+              <Route
+                path="/dataset-comparison"
+                element={<DatasetComparisonPage />}
+              />
+              <Route
+                path="/dataset-attributes"
+                element={<DatasetAttributesPage />}
+              />
+              <Route
+                path="/object-distribution"
+                element={<ObjectDistributionPage />}
+              />
               <Route path="/databricks" element={<DatabricksPage />} />
             </Routes>
           </Suspense>

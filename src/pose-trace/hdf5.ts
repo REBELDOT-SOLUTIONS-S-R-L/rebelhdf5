@@ -5,6 +5,7 @@ import type {
   ObjectDistributionResult,
   DemoInfo,
   DemoRow,
+  DatasetComparisonValuesResult,
   DatasetProcessingProgress,
   DatasetProcessingRequest,
   DatasetProcessingResultMeta,
@@ -32,6 +33,12 @@ type LoadDemoRowsPayload = {
 
 type GetDatasetProcessingInfoPayload = {
   sourceId: string;
+};
+
+type LoadDatasetComparisonValuesPayload = {
+  sourceId: string;
+  demoName: string;
+  keyPaths: string[];
 };
 
 type LoadObjectDistributionPayload = ObjectDistributionRequest;
@@ -67,8 +74,21 @@ type PoseTraceWorkerRequest =
   | { id: number; type: 'openLocalSource'; payload: OpenLocalSourcePayload }
   | { id: number; type: 'openRemoteSource'; payload: OpenRemoteSourcePayload }
   | { id: number; type: 'loadDemoRows'; payload: LoadDemoRowsPayload }
-  | { id: number; type: 'getDatasetProcessingInfo'; payload: GetDatasetProcessingInfoPayload }
-  | { id: number; type: 'loadObjectDistribution'; payload: LoadObjectDistributionPayload }
+  | {
+      id: number;
+      type: 'getDatasetProcessingInfo';
+      payload: GetDatasetProcessingInfoPayload;
+    }
+  | {
+      id: number;
+      type: 'loadDatasetComparisonValues';
+      payload: LoadDatasetComparisonValuesPayload;
+    }
+  | {
+      id: number;
+      type: 'loadObjectDistribution';
+      payload: LoadObjectDistributionPayload;
+    }
   | { id: number; type: 'processDataset'; payload: ProcessDatasetPayload }
   | { id: number; type: 'listDemoVideos'; payload: ListDemoVideosPayload }
   | { id: number; type: 'loadDemoVideo'; payload: LoadDemoVideoPayload }
@@ -82,6 +102,7 @@ type PoseTraceWorkerResponse =
         | OpenSourceResult
         | DemoRow[]
         | DatasetProcessingSourceInfo
+        | DatasetComparisonValuesResult
         | ObjectDistributionResult
         | DatasetProcessingResultMeta
         | DemoVideoInfo[]
@@ -90,7 +111,13 @@ type PoseTraceWorkerResponse =
     }
   | { id: number; ok: false; error: string }
   | { id: number; type: 'progress'; progress: DatasetProcessingProgress }
-  | { id: number; type: 'chunk'; data: ArrayBuffer; index: number; total: number };
+  | {
+      id: number;
+      type: 'chunk';
+      data: ArrayBuffer;
+      index: number;
+      total: number;
+    };
 
 type PendingRequest = {
   resolve: (value: unknown) => void;
@@ -112,7 +139,9 @@ function ensureWorker(): Worker {
     return worker;
   }
 
-  worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' });
+  worker = new Worker(new URL('./worker.ts', import.meta.url), {
+    type: 'module',
+  });
   worker.onmessage = (event: MessageEvent<PoseTraceWorkerResponse>) => {
     const data = event.data;
     const pending = pendingRequests.get(data.id);
@@ -163,11 +192,16 @@ function callWorker<T>(
       resolve: (value) => resolve(value as T),
       reject,
     });
-    instance.postMessage({ id, type, payload } as PoseTraceWorkerRequest, transfer);
+    instance.postMessage(
+      { id, type, payload } as PoseTraceWorkerRequest,
+      transfer,
+    );
   });
 }
 
-async function readLocalFileFresh(serverPath: string): Promise<ArrayBuffer | null> {
+async function readLocalFileFresh(
+  serverPath: string,
+): Promise<ArrayBuffer | null> {
   const readFile = globalThis.rebelHdf5Desktop?.readFile;
   if (typeof readFile !== 'function') {
     return null;
@@ -180,7 +214,9 @@ async function readLocalFileFresh(serverPath: string): Promise<ArrayBuffer | nul
   }
 }
 
-export async function openPoseTraceSource(file: H5File): Promise<PoseTraceSource> {
+export async function openPoseTraceSource(
+  file: H5File,
+): Promise<PoseTraceSource> {
   let result: OpenSourceResult;
 
   if (file.service === FileService.Local) {
@@ -200,7 +236,9 @@ export async function openPoseTraceSource(file: H5File): Promise<PoseTraceSource
         [freshBuffer],
       );
     } else {
-      result = await callWorker<OpenSourceResult>('openLocalSource', { file: file.file });
+      result = await callWorker<OpenSourceResult>('openLocalSource', {
+        file: file.file,
+      });
     }
   } else {
     const buffer = await fetchBuffer(file.resolvedUrl);
@@ -217,14 +255,19 @@ export async function openPoseTraceSource(file: H5File): Promise<PoseTraceSource
     demos: result.demos,
     articulation: result.articulation,
     cleanup: () => {
-      void callWorker<null>('closeSource', { sourceId: result.sourceId }).catch(() => {
-        // Ignore best-effort cleanup failures during route changes/unmounts.
-      });
+      void callWorker<null>('closeSource', { sourceId: result.sourceId }).catch(
+        () => {
+          // Ignore best-effort cleanup failures during route changes/unmounts.
+        },
+      );
     },
   };
 }
 
-export function loadDemoRows(source: PoseTraceSource, demoName: string): Promise<DemoRow[]> {
+export function loadDemoRows(
+  source: PoseTraceSource,
+  demoName: string,
+): Promise<DemoRow[]> {
   return callWorker<DemoRow[]>('loadDemoRows', {
     sourceId: source.sourceId,
     demoName,
@@ -239,10 +282,28 @@ export function getDatasetProcessingInfo(
   });
 }
 
+export function loadDatasetComparisonValues(
+  source: PoseTraceSource,
+  demoName: string,
+  keyPaths: string[],
+): Promise<DatasetComparisonValuesResult> {
+  return callWorker<DatasetComparisonValuesResult>(
+    'loadDatasetComparisonValues',
+    {
+      sourceId: source.sourceId,
+      demoName,
+      keyPaths,
+    },
+  );
+}
+
 export function loadObjectDistribution(
   request: ObjectDistributionRequest,
 ): Promise<ObjectDistributionResult> {
-  return callWorker<ObjectDistributionResult>('loadObjectDistribution', request);
+  return callWorker<ObjectDistributionResult>(
+    'loadObjectDistribution',
+    request,
+  );
 }
 
 export function processDataset(
@@ -263,7 +324,11 @@ export function processDataset(
       onProgress: callbacks.onProgress,
       onChunk: callbacks.onChunk,
     });
-    instance.postMessage({ id, type: 'processDataset', payload: request } as never);
+    instance.postMessage({
+      id,
+      type: 'processDataset',
+      payload: request,
+    } as never);
   });
 }
 
