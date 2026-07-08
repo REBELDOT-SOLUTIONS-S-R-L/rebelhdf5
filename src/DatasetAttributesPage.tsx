@@ -19,29 +19,21 @@ import {
   type DatasetAttributesResult,
   type PythonBackendStatus,
 } from './python-backend';
+import {
+  articulationFromRows,
+  type AttributeTreeNode,
+  buildSlashTree,
+  endEffectorRowsFromArticulation,
+  type EndEffectorRow,
+  formatGroupTitle,
+  makeSegmentId,
+  prettifyLeafValue,
+  rowsFromArticulation,
+  type SegmentRow,
+  validateNamedRows,
+} from './DatasetAttributesPage.utils';
 import { FileService, type H5File, useStore } from './stores';
 import styles from './DatasetAttributesPage.module.css';
-
-interface SegmentRow {
-  id: string;
-  name: string;
-  target: string;
-  obs: string;
-}
-
-interface EndEffectorRow {
-  id: string;
-  name: string;
-  pose: string;
-  gripper: string;
-}
-
-interface AttributeTreeNode {
-  name: string;
-  path: string;
-  value?: string;
-  children?: AttributeTreeNode[];
-}
 
 const EMPTY_ARTICULATION: DatasetArticulation = {
   name: '',
@@ -49,101 +41,6 @@ const EMPTY_ARTICULATION: DatasetArticulation = {
   segmentation: {},
   end_effectors: {},
 };
-
-function formatAttrValue(value: unknown): string {
-  if (value == null) {
-    return '-';
-  }
-
-  if (typeof value === 'string') {
-    return value;
-  }
-
-  return JSON.stringify(value);
-}
-
-function createLeaf(path: string, name: string, value: unknown): AttributeTreeNode {
-  return {
-    path,
-    name,
-    value: formatAttrValue(value),
-  };
-}
-
-function buildSlashTree(
-  groupPath: string,
-  attrs: Record<string, unknown>,
-): AttributeTreeNode[] {
-  interface MutableNode {
-    name: string;
-    path: string;
-    value?: unknown;
-    isLeaf: boolean;
-    children: Map<string, MutableNode>;
-  }
-
-  const root: MutableNode = {
-    name: '',
-    path: groupPath,
-    isLeaf: false,
-    children: new Map(),
-  };
-
-  for (const [fullName, value] of Object.entries(attrs)) {
-    const parts = fullName.split('/').filter((segment) => segment.length > 0);
-    if (parts.length === 0) {
-      continue;
-    }
-
-    let cursor = root;
-    parts.forEach((segment, index) => {
-      const isLeaf = index === parts.length - 1;
-      let next = cursor.children.get(segment);
-      if (!next) {
-        next = {
-          name: segment,
-          path: `${cursor.path}#${parts.slice(0, index + 1).join('/')}`,
-          isLeaf,
-          children: new Map(),
-        };
-        cursor.children.set(segment, next);
-      }
-      if (isLeaf) {
-        next.value = value;
-        next.isLeaf = true;
-      }
-      cursor = next;
-    });
-  }
-
-  const toNode = (node: MutableNode): AttributeTreeNode => {
-    const sortedChildren = [...node.children.values()].sort((left, right) =>
-      left.name.localeCompare(right.name),
-    );
-
-    if (sortedChildren.length === 0) {
-      return createLeaf(node.path, node.name, node.value);
-    }
-
-    return {
-      name: node.name,
-      path: node.path,
-      value: node.isLeaf ? formatAttrValue(node.value) : undefined,
-      children: sortedChildren.map(toNode),
-    };
-  };
-
-  return [...root.children.values()]
-    .sort((left, right) => left.name.localeCompare(right.name))
-    .map(toNode);
-}
-
-function formatGroupTitle(path: string): string {
-  if (path === '/' || path === '') {
-    return '/.attrs';
-  }
-  return `${path.replace(/^\//, '')}.attrs`;
-}
 
 interface ExpandedLeafContextValue {
   isExpanded: (path: string) => boolean;
@@ -154,21 +51,6 @@ const ExpandedLeafContext = createContext<ExpandedLeafContextValue>({
   isExpanded: () => false,
   toggle: () => {},
 });
-
-function prettifyLeafValue(formatted: string | undefined): string {
-  if (formatted == null || formatted === '') {
-    return '-';
-  }
-  try {
-    const parsed: unknown = JSON.parse(formatted);
-    if (parsed !== null && typeof parsed === 'object') {
-      return JSON.stringify(parsed, null, 2);
-    }
-  } catch {
-    // Not JSON — fall through and return as-is.
-  }
-  return formatted;
-}
 
 function AttributeTreeItem({
   node,
@@ -235,90 +117,6 @@ function AttributeTreeItem({
       )}
     </div>
   );
-}
-
-function makeSegmentId(name: string): string {
-  return `${name}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
-}
-
-function rowsFromArticulation(articulation: DatasetArticulation): SegmentRow[] {
-  return Object.entries(articulation.segmentation ?? {})
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([name, segment]) => ({
-      id: makeSegmentId(name),
-      name,
-      target: segment.target,
-      obs: segment.obs,
-    }));
-}
-
-function endEffectorRowsFromArticulation(articulation: DatasetArticulation): EndEffectorRow[] {
-  return Object.entries(articulation.end_effectors ?? {})
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([name, endEffector]) => ({
-      id: makeSegmentId(name),
-      name,
-      pose: endEffector.pose,
-      gripper: endEffector.gripper,
-    }));
-}
-
-function articulationFromRows(
-  name: string,
-  jointNumber: string,
-  rows: SegmentRow[],
-  endEffectorRows: EndEffectorRow[],
-): DatasetArticulation {
-  const segmentation: DatasetArticulation['segmentation'] = {};
-  for (const row of rows) {
-    const segmentName = row.name.trim();
-    if (!segmentName) {
-      continue;
-    }
-
-    segmentation[segmentName] = {
-      target: row.target.trim(),
-      obs: row.obs.trim(),
-    };
-  }
-  const end_effectors: DatasetArticulation['end_effectors'] = {};
-  for (const row of endEffectorRows) {
-    const eefName = row.name.trim();
-    if (!eefName) {
-      continue;
-    }
-
-    end_effectors[eefName] = {
-      pose: row.pose.trim(),
-      gripper: row.gripper.trim(),
-    };
-  }
-
-  const parsedJointNumber = Number.parseInt(jointNumber, 10);
-  return {
-    name: name.trim(),
-    joint_number: Number.isFinite(parsedJointNumber) ? parsedJointNumber : null,
-    segmentation,
-    end_effectors,
-  };
-}
-
-function validateNamedRows(
-  rows: Array<{ name: string }>,
-  label: string,
-): string | null {
-  const names = new Set<string>();
-  for (const row of rows) {
-    const name = row.name.trim();
-    if (!name) {
-      return `Every ${label} needs a name before saving.`;
-    }
-    if (names.has(name)) {
-      return `${label} names must be unique: ${name}`;
-    }
-    names.add(name);
-  }
-  return null;
 }
 
 function resolveActiveFile(opened: H5File[], fileUrl: string | null): H5File | null {
