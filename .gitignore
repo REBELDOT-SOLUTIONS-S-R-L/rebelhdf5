@@ -7,3 +7,8 @@ Thumbs.db
 *.log
 *.tsbuildinfo
 *.pyc
+
+# Test coverage output
+coverage/
+.nyc_output/
+*.lcov
