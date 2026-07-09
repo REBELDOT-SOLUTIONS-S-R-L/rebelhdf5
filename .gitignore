@@ -1,6 +1,7 @@
 /node_modules/
 /dist/
 /.venv/
+.pytest_cache/
 
 Thumbs.db
 .DS_Store

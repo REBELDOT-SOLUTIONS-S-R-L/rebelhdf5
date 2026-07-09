@@ -104,15 +104,19 @@ function EmptyState({ openedFileCount }: { openedFileCount: number }) {
     <div className={styles.emptyState}>
       <h2 className={styles.emptyTitle}>Object Distribution</h2>
       <p className={styles.emptyText}>
-        Open HDF5 files in rebelHDF5, then use this page to compare generated datasets, inspect
-        source-demo links, and analyze failure coverage across the object reset space.
+        Open HDF5 files in rebelHDF5, then use this page to compare generated
+        datasets, inspect source-demo links, and analyze failure coverage across
+        the object reset space.
       </p>
       <div className={styles.emptyActions}>
         <Link className={styles.openBtn} to="/">
           Open HDF5
         </Link>
         {openedFileCount > 0 && (
-          <span>{openedFileCount} opened file{openedFileCount === 1 ? '' : 's'} available in the sidebar.</span>
+          <span>
+            {openedFileCount} opened file{openedFileCount === 1 ? '' : 's'}{' '}
+            available in the sidebar.
+          </span>
         )}
       </div>
     </div>
@@ -135,15 +139,22 @@ function ObjectDistributionPage() {
   const [result, setResult] = useState<ObjectDistributionResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [selectedPoint, setSelectedPoint] = useState<ObjectDistributionPoint | null>(null);
+  const [selectedPoint, setSelectedPoint] =
+    useState<ObjectDistributionPoint | null>(null);
 
   useEffect(() => {
     const availableUrls = new Set(opened.map((file) => file.url));
     const selection = selectDatasetGroup(opened, activeUrl);
 
-    setSuccessUrl((current) => (current && availableUrls.has(current) ? current : selection.successUrl));
-    setFailedUrl((current) => (current && availableUrls.has(current) ? current : selection.failedUrl));
-    setTeleopUrl((current) => (current && availableUrls.has(current) ? current : selection.teleopUrl));
+    setSuccessUrl((current) =>
+      current && availableUrls.has(current) ? current : selection.successUrl,
+    );
+    setFailedUrl((current) =>
+      current && availableUrls.has(current) ? current : selection.failedUrl,
+    );
+    setTeleopUrl((current) =>
+      current && availableUrls.has(current) ? current : selection.teleopUrl,
+    );
   }, [activeUrl, opened]);
 
   const successFile = useMemo(
@@ -164,11 +175,20 @@ function ObjectDistributionPage() {
   const teleopState = usePoseSource(teleopFile);
 
   const selectedStates = useMemo(
-    () => [
-      { label: 'Successful Generated Dataset', url: successUrl, state: successState },
-      { label: 'Failed Generated Dataset', url: failedUrl, state: failedState },
-      { label: 'Teleop Dataset', url: teleopUrl, state: teleopState },
-    ].filter((entry) => entry.url),
+    () =>
+      [
+        {
+          label: 'Successful Generated Dataset',
+          url: successUrl,
+          state: successState,
+        },
+        {
+          label: 'Failed Generated Dataset',
+          url: failedUrl,
+          state: failedState,
+        },
+        { label: 'Teleop Dataset', url: teleopUrl, state: teleopState },
+      ].filter((entry) => entry.url),
     [failedState, failedUrl, successState, successUrl, teleopState, teleopUrl],
   );
 
@@ -192,7 +212,9 @@ function ObjectDistributionPage() {
       return;
     }
 
-    if (selectedStates.some((entry) => entry.state.loading || !entry.state.source)) {
+    if (
+      selectedStates.some((entry) => entry.state.loading || !entry.state.source)
+    ) {
       setLoading(true);
       setLoadError(null);
       setResult(null);
@@ -253,19 +275,27 @@ function ObjectDistributionPage() {
     teleopState.source,
   ]);
 
-  const availableObjects = useMemo(() => result?.availableObjects ?? [], [result]);
+  const availableObjects = useMemo(
+    () => result?.availableObjects ?? [],
+    [result],
+  );
 
   // Drop a stale selection when the chosen object is no longer present in the
   // selected datasets (falls back to the default first-object behavior).
   useEffect(() => {
-    if (objectName && availableObjects.length > 0 && !availableObjects.includes(objectName)) {
+    if (
+      objectName &&
+      availableObjects.length > 0 &&
+      !availableObjects.includes(objectName)
+    ) {
       setObjectName(null);
     }
   }, [availableObjects, objectName]);
 
-  const totalPointCount = (result?.successPoints.length ?? 0)
-    + (result?.failedPoints.length ?? 0)
-    + (result?.teleopPoints.length ?? 0);
+  const totalPointCount =
+    (result?.successPoints.length ?? 0) +
+    (result?.failedPoints.length ?? 0) +
+    (result?.teleopPoints.length ?? 0);
   const hasScatterData = totalPointCount > 0;
   const hasAnalysisDatasets = Boolean(successUrl && failedUrl);
   const analysisResult = useMemo(
@@ -291,12 +321,12 @@ function ObjectDistributionPage() {
 
   const teleopMessage = useMemo(() => {
     if (
-      loading
-      || loadError
-      || !teleopUrl
-      || !teleopState.source
-      || !result
-      || result.teleopPoints.length > 0
+      loading ||
+      loadError ||
+      !teleopUrl ||
+      !teleopState.source ||
+      !result ||
+      result.teleopPoints.length > 0
     ) {
       return '';
     }
@@ -314,16 +344,17 @@ function ObjectDistributionPage() {
   }, [loadError, loading, result, teleopState.source, teleopUrl]);
 
   const plotRevision = useMemo(
-    () => hashRevisionKey([
-      activeTab,
-      anchor,
-      objectName ?? 'default',
-      successState.source?.sourceId ?? 'none',
-      failedState.source?.sourceId ?? 'none',
-      teleopState.source?.sourceId ?? 'none',
-      showTeleopOverlay,
-      minGeneratedCount,
-    ]),
+    () =>
+      hashRevisionKey([
+        activeTab,
+        anchor,
+        objectName ?? 'default',
+        successState.source?.sourceId ?? 'none',
+        failedState.source?.sourceId ?? 'none',
+        teleopState.source?.sourceId ?? 'none',
+        showTeleopOverlay,
+        minGeneratedCount,
+      ]),
     [
       activeTab,
       anchor,
@@ -383,7 +414,15 @@ function ObjectDistributionPage() {
     }
 
     return buildFailureSliceLayout(analysisResult.slices);
-  }, [activeTab, analysisMessage, analysisResult, anchor, hasScatterData, loading, result]);
+  }, [
+    activeTab,
+    analysisMessage,
+    analysisResult,
+    anchor,
+    hasScatterData,
+    loading,
+    result,
+  ]);
 
   return (
     <div className={styles.root}>
@@ -392,8 +431,9 @@ function ObjectDistributionPage() {
           <p className={styles.eyebrow}>Distribution</p>
           <h1 className={styles.title}>Object Distribution</h1>
           <p className={styles.subtitle}>
-            Compare generated datasets and map failure coverage over the object initial-pose reset
-            space. Use the analysis tabs to find under-covered teleop regions.
+            Compare generated datasets and map failure coverage over the object
+            initial-pose reset space. Use the analysis tabs to find
+            under-covered teleop regions.
           </p>
         </div>
       </header>
@@ -403,14 +443,20 @@ function ObjectDistributionPage() {
       {opened.length > 0 && (
         <>
           <section className={styles.controlsCard}>
-            <div className={styles.tabBar} role="tablist" aria-label="Object distribution views">
+            <div
+              className={styles.tabBar}
+              role="tablist"
+              aria-label="Object distribution views"
+            >
               {VIEW_TABS.map((tab) => (
                 <button
                   key={tab.id}
                   type="button"
                   role="tab"
                   aria-selected={activeTab === tab.id}
-                  className={activeTab === tab.id ? styles.tabBtnActive : styles.tabBtn}
+                  className={
+                    activeTab === tab.id ? styles.tabBtnActive : styles.tabBtn
+                  }
                   onClick={() => {
                     setActiveTab(tab.id);
                   }}
@@ -422,7 +468,10 @@ function ObjectDistributionPage() {
 
             <div className={styles.controlGrid}>
               <div className={styles.field}>
-                <label className={styles.fieldLabel} htmlFor="object-success-source">
+                <label
+                  className={styles.fieldLabel}
+                  htmlFor="object-success-source"
+                >
                   Successful Generated Dataset
                 </label>
                 <select
@@ -443,7 +492,10 @@ function ObjectDistributionPage() {
               </div>
 
               <div className={styles.field}>
-                <label className={styles.fieldLabel} htmlFor="object-failed-source">
+                <label
+                  className={styles.fieldLabel}
+                  htmlFor="object-failed-source"
+                >
                   Failed Generated Dataset
                 </label>
                 <select
@@ -464,7 +516,10 @@ function ObjectDistributionPage() {
               </div>
 
               <div className={styles.field}>
-                <label className={styles.fieldLabel} htmlFor="object-teleop-source">
+                <label
+                  className={styles.fieldLabel}
+                  htmlFor="object-teleop-source"
+                >
                   Teleop Dataset
                 </label>
                 <select
@@ -492,7 +547,10 @@ function ObjectDistributionPage() {
                   <select
                     id="object-object"
                     className={styles.select}
-                    value={objectName ?? (availableObjects.length > 0 ? availableObjects[0] : '')}
+                    value={
+                      objectName ??
+                      (availableObjects.length > 0 ? availableObjects[0] : '')
+                    }
                     disabled={availableObjects.length === 0}
                     onChange={(event) => {
                       setObjectName(event.target.value || null);
@@ -511,7 +569,10 @@ function ObjectDistributionPage() {
               ) : (
                 <>
                   <div className={styles.field}>
-                    <label className={styles.fieldLabel} htmlFor="object-min-support">
+                    <label
+                      className={styles.fieldLabel}
+                      htmlFor="object-min-support"
+                    >
                       Min Neighborhood Support
                     </label>
                     <select
@@ -530,7 +591,10 @@ function ObjectDistributionPage() {
                     </select>
                   </div>
 
-                  <label className={styles.checkboxField} htmlFor="object-show-teleop">
+                  <label
+                    className={styles.checkboxField}
+                    htmlFor="object-show-teleop"
+                  >
                     <input
                       id="object-show-teleop"
                       type="checkbox"
@@ -547,22 +611,28 @@ function ObjectDistributionPage() {
 
             <div className={styles.statusRow}>
               <div className={styles.statusItem}>
-                <span className={styles.statusKey}>Opened:</span> {opened.length}
+                <span className={styles.statusKey}>Opened:</span>{' '}
+                {opened.length}
               </div>
               <div className={styles.statusItem}>
-                <span className={styles.statusKey}>Success:</span> {result?.successPoints.length ?? 0}
+                <span className={styles.statusKey}>Success:</span>{' '}
+                {result?.successPoints.length ?? 0}
               </div>
               <div className={styles.statusItem}>
-                <span className={styles.statusKey}>Failed:</span> {result?.failedPoints.length ?? 0}
+                <span className={styles.statusKey}>Failed:</span>{' '}
+                {result?.failedPoints.length ?? 0}
               </div>
               <div className={styles.statusItem}>
-                <span className={styles.statusKey}>Teleop:</span> {result?.teleopPoints.length ?? 0}
+                <span className={styles.statusKey}>Teleop:</span>{' '}
+                {result?.teleopPoints.length ?? 0}
               </div>
 
               {activeTab !== 'scatter' && (
                 <>
                   <div className={styles.statusItem}>
-                    <span className={styles.statusKey}>Analyzed Generated:</span>{' '}
+                    <span className={styles.statusKey}>
+                      Analyzed Generated:
+                    </span>{' '}
                     {analysisResult?.stats.analyzedGeneratedCount ?? 0}
                   </div>
                   <div className={styles.statusItem}>
@@ -574,7 +644,8 @@ function ObjectDistributionPage() {
                     {analysisResult?.stats.analyzedTeleopCount ?? 0}
                   </div>
                   <div className={styles.statusItem}>
-                    <span className={styles.statusKey}>Min Support:</span> {minGeneratedCount}+
+                    <span className={styles.statusKey}>Min Support:</span>{' '}
+                    {minGeneratedCount}+
                   </div>
                 </>
               )}
@@ -584,8 +655,14 @@ function ObjectDistributionPage() {
           {(loadError || loading || teleopMessage) && (
             <section className={styles.messageCard}>
               {loadError && <p className={styles.errorText}>{loadError}</p>}
-              {loading && <p className={styles.infoText}>Loading object-distribution data…</p>}
-              {!loadError && !loading && teleopMessage && <p className={styles.infoText}>{teleopMessage}</p>}
+              {loading && (
+                <p className={styles.infoText}>
+                  Loading object-distribution data…
+                </p>
+              )}
+              {!loadError && !loading && teleopMessage && (
+                <p className={styles.infoText}>{teleopMessage}</p>
+              )}
             </section>
           )}
 
@@ -594,17 +671,23 @@ function ObjectDistributionPage() {
               revision={plotRevision}
               data={plotData}
               layout={plotLayout}
-              onClick={activeTab === 'scatter'
-                ? (event) => {
-                    setSelectedPoint(resolveClickedPoint(event as PlotClickEvent, result));
-                  }
-                : undefined}
-              onDoubleClick={activeTab === 'scatter'
-                ? () => {
-                    setSelectedPoint(null);
-                    return false;
-                  }
-                : undefined}
+              onClick={
+                activeTab === 'scatter'
+                  ? (event) => {
+                      setSelectedPoint(
+                        resolveClickedPoint(event as PlotClickEvent, result),
+                      );
+                    }
+                  : undefined
+              }
+              onDoubleClick={
+                activeTab === 'scatter'
+                  ? () => {
+                      setSelectedPoint(null);
+                      return false;
+                    }
+                  : undefined
+              }
               useResizeHandler
               style={{ width: '100%' }}
               config={{ responsive: true }}
@@ -615,11 +698,16 @@ function ObjectDistributionPage() {
             <section className={styles.recommendationsCard}>
               <div className={styles.recommendationsHeader}>
                 <div>
-                  <p className={styles.recommendationsEyebrow}>Recommendations</p>
-                  <h2 className={styles.recommendationsTitle}>Teleop Candidate Regions</h2>
+                  <p className={styles.recommendationsEyebrow}>
+                    Recommendations
+                  </p>
+                  <h2 className={styles.recommendationsTitle}>
+                    Teleop Candidate Regions
+                  </h2>
                   <p className={styles.recommendationsText}>
-                    Ranked from connected high-risk neighborhoods in the spatial slices, using
-                    failure confidence, local support, and nearby teleop density.
+                    Ranked from connected high-risk neighborhoods in the spatial
+                    slices, using failure confidence, local support, and nearby
+                    teleop density.
                   </p>
                 </div>
               </div>
@@ -628,58 +716,103 @@ function ObjectDistributionPage() {
                 <p className={styles.infoText}>{analysisMessage}</p>
               )}
 
-              {analysisResult && analysisResult.recommendations.length === 0 && (
-                <p className={styles.infoText}>
-                  No connected high-risk regions met the current neighborhood-support threshold.
-                </p>
-              )}
+              {analysisResult &&
+                analysisResult.recommendations.length === 0 && (
+                  <p className={styles.infoText}>
+                    No connected high-risk regions met the current
+                    neighborhood-support threshold.
+                  </p>
+                )}
 
               {analysisResult && analysisResult.recommendations.length > 0 && (
                 <div className={styles.recommendationsGrid}>
-                  {analysisResult.recommendations.map((recommendation, index) => (
-                    <article key={`${recommendation.sliceRowIndex}-${recommendation.sliceColIndex}-${index}`} className={styles.recommendationItem}>
-                      <div className={styles.recommendationRank}>#{index + 1}</div>
-                      <p className={styles.recommendationRate}>
-                        {formatPercent(recommendation.failureRate)} local fail
-                      </p>
-                      <p className={styles.recommendationLine}>
-                        <span className={styles.recommendationLabel}>95% ci</span>
-                        {formatPercent(recommendation.confidenceLower)} to {formatPercent(recommendation.confidenceUpper)}
-                      </p>
-                      <p className={styles.recommendationLine}>
-                        <span className={styles.recommendationLabel}>rot x</span>
-                        {formatRange(recommendation.rotXStart, recommendation.rotXEnd, 'deg')}
-                      </p>
-                      <p className={styles.recommendationLine}>
-                        <span className={styles.recommendationLabel}>rot y</span>
-                        {formatRange(recommendation.rotYStart, recommendation.rotYEnd, 'deg')}
-                      </p>
-                      <p className={styles.recommendationLine}>
-                        <span className={styles.recommendationLabel}>x</span>
-                        {formatRange(recommendation.xStart, recommendation.xEnd, 'm')}
-                      </p>
-                      <p className={styles.recommendationLine}>
-                        <span className={styles.recommendationLabel}>y</span>
-                        {formatRange(recommendation.yStart, recommendation.yEnd, 'm')}
-                      </p>
-                      <p className={styles.recommendationLine}>
-                        <span className={styles.recommendationLabel}>support</span>
-                        {formatSupport(recommendation.smoothedGeneratedSupport)} total / {formatSupport(recommendation.smoothedFailedSupport)} failed
-                      </p>
-                      <p className={styles.recommendationLine}>
-                        <span className={styles.recommendationLabel}>teleop dens.</span>
-                        {formatSupport(recommendation.teleopDensity)}
-                      </p>
-                      <p className={styles.recommendationLine}>
-                        <span className={styles.recommendationLabel}>confidence</span>
-                        {formatPercent(recommendation.confidenceScore)}
-                      </p>
-                      <p className={styles.recommendationLine}>
-                        <span className={styles.recommendationLabel}>region cells</span>
-                        {recommendation.cellCount}
-                      </p>
-                    </article>
-                  ))}
+                  {analysisResult.recommendations.map(
+                    (recommendation, index) => (
+                      <article
+                        key={`${recommendation.sliceRowIndex}-${recommendation.sliceColIndex}-${index}`}
+                        className={styles.recommendationItem}
+                      >
+                        <div className={styles.recommendationRank}>
+                          #{index + 1}
+                        </div>
+                        <p className={styles.recommendationRate}>
+                          {formatPercent(recommendation.failureRate)} local fail
+                        </p>
+                        <p className={styles.recommendationLine}>
+                          <span className={styles.recommendationLabel}>
+                            95% ci
+                          </span>
+                          {formatPercent(recommendation.confidenceLower)} to{' '}
+                          {formatPercent(recommendation.confidenceUpper)}
+                        </p>
+                        <p className={styles.recommendationLine}>
+                          <span className={styles.recommendationLabel}>
+                            rot x
+                          </span>
+                          {formatRange(
+                            recommendation.rotXStart,
+                            recommendation.rotXEnd,
+                            'deg',
+                          )}
+                        </p>
+                        <p className={styles.recommendationLine}>
+                          <span className={styles.recommendationLabel}>
+                            rot y
+                          </span>
+                          {formatRange(
+                            recommendation.rotYStart,
+                            recommendation.rotYEnd,
+                            'deg',
+                          )}
+                        </p>
+                        <p className={styles.recommendationLine}>
+                          <span className={styles.recommendationLabel}>x</span>
+                          {formatRange(
+                            recommendation.xStart,
+                            recommendation.xEnd,
+                            'm',
+                          )}
+                        </p>
+                        <p className={styles.recommendationLine}>
+                          <span className={styles.recommendationLabel}>y</span>
+                          {formatRange(
+                            recommendation.yStart,
+                            recommendation.yEnd,
+                            'm',
+                          )}
+                        </p>
+                        <p className={styles.recommendationLine}>
+                          <span className={styles.recommendationLabel}>
+                            support
+                          </span>
+                          {formatSupport(
+                            recommendation.smoothedGeneratedSupport,
+                          )}{' '}
+                          total /{' '}
+                          {formatSupport(recommendation.smoothedFailedSupport)}{' '}
+                          failed
+                        </p>
+                        <p className={styles.recommendationLine}>
+                          <span className={styles.recommendationLabel}>
+                            teleop dens.
+                          </span>
+                          {formatSupport(recommendation.teleopDensity)}
+                        </p>
+                        <p className={styles.recommendationLine}>
+                          <span className={styles.recommendationLabel}>
+                            confidence
+                          </span>
+                          {formatPercent(recommendation.confidenceScore)}
+                        </p>
+                        <p className={styles.recommendationLine}>
+                          <span className={styles.recommendationLabel}>
+                            region cells
+                          </span>
+                          {recommendation.cellCount}
+                        </p>
+                      </article>
+                    ),
+                  )}
                 </div>
               )}
             </section>

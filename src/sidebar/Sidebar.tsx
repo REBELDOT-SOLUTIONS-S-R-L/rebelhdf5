@@ -1,9 +1,21 @@
-import { FiActivity, FiAperture, FiCloud, FiDatabase, FiEye, FiFileText, FiFilm, FiLayers, FiPlusCircle } from 'react-icons/fi';
+import {
+  FiActivity,
+  FiAperture,
+  FiCloud,
+  FiColumns,
+  FiDatabase,
+  FiEye,
+  FiFileText,
+  FiFilm,
+  FiLayers,
+  FiPlusCircle,
+} from 'react-icons/fi';
 import { NavLink, useMatch, useSearchParams } from 'react-router-dom';
 
 import { useStore } from '../stores';
 import {
   getDatasetAttributesLink,
+  getDatasetComparisonLink,
   getDatasetProcessingLink,
   getObjectDistributionLink,
   getPoseTraceLink,
@@ -132,6 +144,29 @@ function Sidebar() {
             >
               <FiLayers className={styles.icon} />
               <span className={styles.label}>Dataset Processing</span>
+            </button>
+          )}
+
+          {activeFileUrl ? (
+            <NavLink
+              className={styles.mainNavItem}
+              to={getDatasetComparisonLink(activeFileUrl)}
+              aria-label="Dataset Comparison"
+              title="Dataset Comparison"
+            >
+              <FiColumns className={styles.icon} />
+              <span className={styles.label}>Dataset Comparison</span>
+            </NavLink>
+          ) : (
+            <button
+              type="button"
+              className={styles.navBtn}
+              aria-label="Dataset Comparison"
+              title="Dataset Comparison"
+              disabled
+            >
+              <FiColumns className={styles.icon} />
+              <span className={styles.label}>Dataset Comparison</span>
             </button>
           )}
 

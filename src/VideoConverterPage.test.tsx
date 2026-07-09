@@ -84,6 +84,8 @@ describe('VideoConverterPage', () => {
       expect(screen.getByText('Demos:').parentElement).toHaveTextContent('1');
     });
     // With no videos, the video selector shows the empty message.
-    expect(screen.getByText('No supported videos found')).toBeInTheDocument();
+    expect(
+      await screen.findByText('No supported videos found'),
+    ).toBeInTheDocument();
   });
 });

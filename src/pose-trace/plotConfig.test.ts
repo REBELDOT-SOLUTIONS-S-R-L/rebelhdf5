@@ -57,10 +57,10 @@ function makeRow(step: number, overrides: Partial<DemoRow> = {}): DemoRow {
 describe('buildEmptyLayout', () => {
   it('returns a 2D layout with the title and message annotated', () => {
     const layout = buildEmptyLayout('No data', 'Please pick a file');
-    expect(layout.title).toEqual(
-      expect.objectContaining({ text: 'No data' }),
-    );
-    expect(layout.annotations?.[0]).toMatchObject({ text: 'Please pick a file' });
+    expect(layout.title).toEqual(expect.objectContaining({ text: 'No data' }));
+    expect(layout.annotations?.[0]).toMatchObject({
+      text: 'Please pick a file',
+    });
     expect(layout.height).toBe(520);
     // 2D layout hides plain xaxis, doesn't add a 3D scene.
     expect(layout.xaxis).toMatchObject({ visible: false });
@@ -76,7 +76,9 @@ describe('buildEmptyLayout', () => {
 });
 
 describe('getJointChartSpecs', () => {
-  function segment(overrides: Partial<ArticulationSegment> = {}): ArticulationSegment {
+  function segment(
+    overrides: Partial<ArticulationSegment> = {},
+  ): ArticulationSegment {
     return {
       name: 'left_arm',
       targetStart: 0,
@@ -94,17 +96,18 @@ describe('getJointChartSpecs', () => {
   });
 
   it('uses the smaller of target and obs lengths when ranges differ', () => {
-    const specs = getJointChartSpecs([
-      segment({ targetEnd: 5, obsEnd: 3 }),
-    ]);
+    const specs = getJointChartSpecs([segment({ targetEnd: 5, obsEnd: 3 })]);
     expect(specs).toHaveLength(4);
   });
 
   it('builds specs from articulation joint indices with name and index labels', () => {
-    const specs = getJointChartSpecs([], [
-      { articulationName: 'robot', name: 'shoulder_pan', index: 2 },
-      { articulationName: 'robot', name: 'elbow', index: 5 },
-    ]);
+    const specs = getJointChartSpecs(
+      [],
+      [
+        { articulationName: 'robot', name: 'shoulder_pan', index: 2 },
+        { articulationName: 'robot', name: 'elbow', index: 5 },
+      ],
+    );
     expect(specs).toHaveLength(2);
     expect(specs.map((spec) => spec.label)).toEqual([
       'robot / shoulder_pan [2]',
@@ -136,10 +139,13 @@ describe('buildJointChartData', () => {
   });
 
   it('combines selected joint target and obs series into one chart', () => {
-    const specs = getJointChartSpecs([], [
-      { articulationName: 'robot', name: 'shoulder_pan', index: 0 },
-      { articulationName: 'robot', name: 'elbow', index: 1 },
-    ]);
+    const specs = getJointChartSpecs(
+      [],
+      [
+        { articulationName: 'robot', name: 'shoulder_pan', index: 0 },
+        { articulationName: 'robot', name: 'elbow', index: 1 },
+      ],
+    );
     const rows = Array.from({ length: 3 }, (_, i) =>
       makeRow(i, {
         'joint_target_robot::shoulder_pan::0': i,
@@ -148,7 +154,9 @@ describe('buildJointChartData', () => {
         'joint_obs_robot::elbow::1': i + 1.1,
       }),
     );
-    const traces = buildCombinedJointChartData(rows, specs) as Array<{ name?: string }>;
+    const traces = buildCombinedJointChartData(rows, specs) as Array<{
+      name?: string;
+    }>;
     expect(traces.map((trace) => trace.name)).toEqual([
       'robot / shoulder_pan [0] target',
       'robot / shoulder_pan [0] obs',
@@ -266,7 +274,11 @@ describe('buildObjectDistribution helpers', () => {
   });
 
   it('returns a layout regardless of result presence', () => {
-    expect(buildObjectDistributionLayout(null, 'initial_pose').height).toBe(820);
-    expect(buildObjectDistributionLayout(emptyResult(), 'initial_pose').height).toBe(820);
+    expect(buildObjectDistributionLayout(null, 'initial_pose').height).toBe(
+      820,
+    );
+    expect(
+      buildObjectDistributionLayout(emptyResult(), 'initial_pose').height,
+    ).toBe(820);
   });
 });

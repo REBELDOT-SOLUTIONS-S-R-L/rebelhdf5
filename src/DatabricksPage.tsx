@@ -100,7 +100,10 @@ function SecretsSection({ backendAvailable }: { backendAvailable: boolean }) {
         body: JSON.stringify({ secrets, scope: 'brev' }),
       });
 
-      const data: { allOk: boolean; results: { key: string; ok: boolean; error: string | null }[] } = await response.json();
+      const data: {
+        allOk: boolean;
+        results: { key: string; ok: boolean; error: string | null }[];
+      } = await response.json();
       if (data.allOk) {
         setResult(`Saved ${Object.keys(secrets).length} secret(s).`);
         setMaxSteps('');
@@ -108,7 +111,9 @@ function SecretsSection({ backendAvailable }: { backendAvailable: boolean }) {
         setBrevToken('');
         setInstanceName('');
       } else {
-        const failed = data.results.filter((r) => !r.ok).map((r) => `${r.key}: ${String(r.error)}`);
+        const failed = data.results
+          .filter((r) => !r.ok)
+          .map((r) => `${r.key}: ${String(r.error)}`);
         setResult(`Some secrets failed: ${failed.join(', ')}`);
       }
     } catch (error: unknown) {
@@ -120,33 +125,86 @@ function SecretsSection({ backendAvailable }: { backendAvailable: boolean }) {
 
   return (
     <section className={styles.card}>
-      <h2 className={styles.sectionTitle}><FiKey aria-hidden /> Secrets</h2>
-      <p className={styles.sectionText}>Push secrets to the Databricks <code>brev</code> scope.</p>
+      <h2 className={styles.sectionTitle}>
+        <FiKey aria-hidden /> Secrets
+      </h2>
+      <p className={styles.sectionText}>
+        Push secrets to the Databricks <code>brev</code> scope.
+      </p>
       <div className={styles.secretsGrid}>
         <label className={styles.field}>
           <span className={styles.fieldLabel}>max_steps</span>
-          <input className={styles.input} type="text" value={maxSteps} onChange={(e) => { setMaxSteps(e.target.value); }} placeholder="e.g. 5000" />
+          <input
+            className={styles.input}
+            type="text"
+            value={maxSteps}
+            onChange={(e) => {
+              setMaxSteps(e.target.value);
+            }}
+            placeholder="e.g. 5000"
+          />
         </label>
         <label className={styles.field}>
           <span className={styles.fieldLabel}>save_steps</span>
-          <input className={styles.input} type="text" value={saveSteps} onChange={(e) => { setSaveSteps(e.target.value); }} placeholder="e.g. 2500" />
+          <input
+            className={styles.input}
+            type="text"
+            value={saveSteps}
+            onChange={(e) => {
+              setSaveSteps(e.target.value);
+            }}
+            placeholder="e.g. 2500"
+          />
         </label>
         <label className={styles.field}>
           <span className={styles.fieldLabel}>token</span>
-          <input className={styles.input} type="password" value={brevToken} onChange={(e) => { setBrevToken(e.target.value); }} placeholder="Brev API token" />
+          <input
+            className={styles.input}
+            type="password"
+            value={brevToken}
+            onChange={(e) => {
+              setBrevToken(e.target.value);
+            }}
+            placeholder="Brev API token"
+          />
         </label>
         <label className={styles.field}>
           <span className={styles.fieldLabel}>instance</span>
-          <input className={styles.input} type="text" value={instanceName} onChange={(e) => { setInstanceName(e.target.value); }} placeholder="e.g. my-gpu-instance" />
+          <input
+            className={styles.input}
+            type="text"
+            value={instanceName}
+            onChange={(e) => {
+              setInstanceName(e.target.value);
+            }}
+            placeholder="e.g. my-gpu-instance"
+          />
         </label>
       </div>
       <div className={styles.actionRow}>
-        <button type="button" className={styles.primaryBtn} onClick={() => { void handleSave(); }} disabled={saving || !backendAvailable}>
-          {saving ? <FiLoader aria-hidden className={styles.spin} /> : <FiUpload aria-hidden />}
+        <button
+          type="button"
+          className={styles.primaryBtn}
+          onClick={() => {
+            void handleSave();
+          }}
+          disabled={saving || !backendAvailable}
+        >
+          {saving ? (
+            <FiLoader aria-hidden className={styles.spin} />
+          ) : (
+            <FiUpload aria-hidden />
+          )}
           <span>{saving ? 'Saving...' : 'Push Secrets'}</span>
         </button>
         {result && (
-          <span className={result.startsWith('Saved') ? styles.successText : styles.resultText}>
+          <span
+            className={
+              result.startsWith('Saved')
+                ? styles.successText
+                : styles.resultText
+            }
+          >
             {result}
           </span>
         )}
@@ -162,7 +220,9 @@ function SecretsSection({ backendAvailable }: { backendAvailable: boolean }) {
 function UploadSection({ backendAvailable }: { backendAvailable: boolean }) {
   const opened = useStore((state) => state.opened);
   const [selectedFile, setSelectedFile] = useState('');
-  const [volume, setVolume] = useState('/Volumes/workspace/default/mimicgen_annotated_hdf5_datasets/');
+  const [volume, setVolume] = useState(
+    '/Volumes/workspace/default/mimicgen_annotated_hdf5_datasets/',
+  );
   const [uploading, setUploading] = useState(false);
   const [uploadPercent, setUploadPercent] = useState(0);
   const [uploadStatus, setUploadStatus] = useState('');
@@ -185,11 +245,14 @@ function UploadSection({ backendAvailable }: { backendAvailable: boolean }) {
     setUploadLog([]);
 
     try {
-      const response = await fetch(`${BASE_URL}/api/databricks/upload-dataset`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ filePath, volume }),
-      });
+      const response = await fetch(
+        `${BASE_URL}/api/databricks/upload-dataset`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ filePath, volume }),
+        },
+      );
 
       const reader = response.body?.getReader();
       if (!reader) {
@@ -229,7 +292,10 @@ function UploadSection({ backendAvailable }: { backendAvailable: boolean }) {
               setUploadStatus('Upload complete.');
             } else if (event.type === 'error') {
               setUploadStatus(`Error: ${event.message as string}`);
-              setUploadLog((prev) => [...prev, `Error: ${event.message as string}`]);
+              setUploadLog((prev) => [
+                ...prev,
+                `Error: ${event.message as string}`,
+              ]);
             }
           } catch {
             // skip
@@ -247,30 +313,61 @@ function UploadSection({ backendAvailable }: { backendAvailable: boolean }) {
 
   return (
     <section className={styles.card}>
-      <h2 className={styles.sectionTitle}><FiUpload aria-hidden /> Upload Dataset</h2>
-      <p className={styles.sectionText}>Upload an opened dataset to a Databricks volume.</p>
+      <h2 className={styles.sectionTitle}>
+        <FiUpload aria-hidden /> Upload Dataset
+      </h2>
+      <p className={styles.sectionText}>
+        Upload an opened dataset to a Databricks volume.
+      </p>
       <div className={styles.controlGrid}>
         <label className={styles.field}>
           <span className={styles.fieldLabel}>Dataset</span>
-          <select className={styles.input} value={selectedFile} onChange={(e) => { setSelectedFile(e.target.value); }}>
+          <select
+            className={styles.input}
+            value={selectedFile}
+            onChange={(e) => {
+              setSelectedFile(e.target.value);
+            }}
+          >
             <option value="">Select a dataset...</option>
             {opened.map((f) => (
-              <option key={f.url} value={f.url}>{f.name}</option>
+              <option key={f.url} value={f.url}>
+                {f.name}
+              </option>
             ))}
           </select>
         </label>
         <label className={styles.field}>
           <span className={styles.fieldLabel}>Volume</span>
-          <select className={styles.input} value={volume} onChange={(e) => { setVolume(e.target.value); }}>
+          <select
+            className={styles.input}
+            value={volume}
+            onChange={(e) => {
+              setVolume(e.target.value);
+            }}
+          >
             {VOLUMES.map((v) => (
-              <option key={v} value={`/Volumes/${v.replaceAll('.', '/')}/`}>{v}</option>
+              <option key={v} value={`/Volumes/${v.replaceAll('.', '/')}/`}>
+                {v}
+              </option>
             ))}
           </select>
         </label>
       </div>
       <div className={styles.actionRow}>
-        <button type="button" className={styles.primaryBtn} onClick={() => { void handleUpload(); }} disabled={uploading || !selectedFile || !backendAvailable}>
-          {uploading ? <FiLoader aria-hidden className={styles.spin} /> : <FiCloud aria-hidden />}
+        <button
+          type="button"
+          className={styles.primaryBtn}
+          onClick={() => {
+            void handleUpload();
+          }}
+          disabled={uploading || !selectedFile || !backendAvailable}
+        >
+          {uploading ? (
+            <FiLoader aria-hidden className={styles.spin} />
+          ) : (
+            <FiCloud aria-hidden />
+          )}
           <span>{uploading ? 'Uploading...' : 'Upload'}</span>
         </button>
       </div>
@@ -278,11 +375,16 @@ function UploadSection({ backendAvailable }: { backendAvailable: boolean }) {
         <div>
           <div className={styles.uploadProgressRow}>
             <div className={styles.progressBar}>
-              <div className={styles.progressFill} style={{ width: `${String(uploadPercent)}%` }} />
+              <div
+                className={styles.progressFill}
+                style={{ width: `${String(uploadPercent)}%` }}
+              />
             </div>
             <span className={styles.uploadPercentText}>{uploadPercent}%</span>
           </div>
-          {uploadStatus && <p className={styles.uploadStatusText}>{uploadStatus}</p>}
+          {uploadStatus && (
+            <p className={styles.uploadStatusText}>{uploadStatus}</p>
+          )}
         </div>
       )}
       {uploadLog.length > 0 && (
@@ -313,14 +415,27 @@ function PipelinesSection({ backendAvailable }: { backendAvailable: boolean }) {
   const pollStatus = useCallback((runId: string) => {
     const poll = async () => {
       try {
-        const response = await fetch(`${BASE_URL}/api/databricks/job-status?run_id=${runId}`);
-        const data: { lifeCycleState: string; resultState: string; stateMessage: string } = await response.json();
+        const response = await fetch(
+          `${BASE_URL}/api/databricks/job-status?run_id=${runId}`,
+        );
+        const data: {
+          lifeCycleState: string;
+          resultState: string;
+          stateMessage: string;
+        } = await response.json();
 
-        setRuns((prev) => prev.map((r) =>
-          r.runId === runId
-            ? { ...r, state: data.lifeCycleState ?? '', resultState: data.resultState ?? '', message: data.stateMessage ?? '' }
-            : r,
-        ));
+        setRuns((prev) =>
+          prev.map((r) =>
+            r.runId === runId
+              ? {
+                  ...r,
+                  state: data.lifeCycleState ?? '',
+                  resultState: data.resultState ?? '',
+                  message: data.stateMessage ?? '',
+                }
+              : r,
+          ),
+        );
 
         const terminal = ['TERMINATED', 'SKIPPED', 'INTERNAL_ERROR'];
         if (terminal.includes(data.lifeCycleState)) {
@@ -329,7 +444,9 @@ function PipelinesSection({ backendAvailable }: { backendAvailable: boolean }) {
             clearInterval(timer);
             pollTimers.current.delete(runId);
           }
-          setRuns((prev) => prev.map((r) => r.runId === runId ? { ...r, polling: false } : r));
+          setRuns((prev) =>
+            prev.map((r) => (r.runId === runId ? { ...r, polling: false } : r)),
+          );
         }
       } catch {
         // keep polling
@@ -337,7 +454,9 @@ function PipelinesSection({ backendAvailable }: { backendAvailable: boolean }) {
     };
 
     void poll();
-    const timer = setInterval(() => { void poll(); }, 10_000);
+    const timer = setInterval(() => {
+      void poll();
+    }, 10_000);
     pollTimers.current.set(runId, timer);
   }, []);
 
@@ -355,16 +474,30 @@ function PipelinesSection({ backendAvailable }: { backendAvailable: boolean }) {
           return;
         }
 
-        const data: { runs: { jobId: string; runId: string; runName: string; lifeCycleState: string; resultState: string; stateMessage: string }[] } = await response.json();
+        const data: {
+          runs: {
+            jobId: string;
+            runId: string;
+            runName: string;
+            lifeCycleState: string;
+            resultState: string;
+            stateMessage: string;
+          }[];
+        } = await response.json();
 
         const activeRuns: JobRun[] = data.runs.map((r) => ({
           jobId: r.jobId,
           runId: r.runId,
-          name: r.runName || PIPELINES.find((p) => p.id === r.jobId)?.name || r.jobId,
+          name:
+            r.runName ||
+            PIPELINES.find((p) => p.id === r.jobId)?.name ||
+            r.jobId,
           state: r.lifeCycleState,
           resultState: r.resultState,
           message: r.stateMessage,
-          polling: !['TERMINATED', 'SKIPPED', 'INTERNAL_ERROR'].includes(r.lifeCycleState),
+          polling: !['TERMINATED', 'SKIPPED', 'INTERNAL_ERROR'].includes(
+            r.lifeCycleState,
+          ),
         }));
 
         setRuns(activeRuns);
@@ -408,29 +541,38 @@ function PipelinesSection({ backendAvailable }: { backendAvailable: boolean }) {
         pollStatus(runId);
       }
     } catch (error: unknown) {
-      setRuns((prev) => [{
-        jobId,
-        runId: null,
-        name,
-        state: 'ERROR',
-        resultState: '',
-        message: error instanceof Error ? error.message : String(error),
-        polling: false,
-      }, ...prev]);
+      setRuns((prev) => [
+        {
+          jobId,
+          runId: null,
+          name,
+          state: 'ERROR',
+          resultState: '',
+          message: error instanceof Error ? error.message : String(error),
+          polling: false,
+        },
+        ...prev,
+      ]);
     }
   }
 
   return (
     <section className={styles.card}>
-      <h2 className={styles.sectionTitle}><FiPlay aria-hidden /> Pipelines</h2>
-      <p className={styles.sectionText}>Trigger Databricks jobs and monitor their status.</p>
+      <h2 className={styles.sectionTitle}>
+        <FiPlay aria-hidden /> Pipelines
+      </h2>
+      <p className={styles.sectionText}>
+        Trigger Databricks jobs and monitor their status.
+      </p>
       <div className={styles.pipelineGrid}>
         {PIPELINES.map((p) => (
           <button
             key={p.id}
             type="button"
             className={styles.pipelineBtn}
-            onClick={() => { void handleRun(p.id, p.name); }}
+            onClick={() => {
+              void handleRun(p.id, p.name);
+            }}
             disabled={!backendAvailable}
           >
             <FiPlay aria-hidden />
@@ -441,19 +583,28 @@ function PipelinesSection({ backendAvailable }: { backendAvailable: boolean }) {
       {runs.length > 0 && (
         <div className={styles.runList}>
           {runs.map((run, i) => (
-            <div key={run.runId ?? `${run.jobId}-${String(i)}`} className={styles.runItem}>
+            <div
+              key={run.runId ?? `${run.jobId}-${String(i)}`}
+              className={styles.runItem}
+            >
               {run.polling ? (
                 <FiLoader aria-hidden className={styles.spin} />
               ) : run.resultState === 'SUCCESS' ? (
                 <FiCheckCircle aria-hidden style={{ color: '#a9e4a2' }} />
               ) : run.state === 'ERROR' || run.resultState === 'FAILED' ? (
-                <FiXCircle aria-hidden style={{ color: 'var(--color-danger)' }} />
+                <FiXCircle
+                  aria-hidden
+                  style={{ color: 'var(--color-danger)' }}
+                />
               ) : (
                 <FiCloud aria-hidden />
               )}
               <div className={styles.runInfo}>
                 <strong>{run.name}</strong>
-                <span>{run.state}{run.resultState ? ` / ${run.resultState}` : ''}</span>
+                <span>
+                  {run.state}
+                  {run.resultState ? ` / ${run.resultState}` : ''}
+                </span>
                 {run.message && <small>{run.message}</small>}
               </div>
             </div>
@@ -468,13 +619,19 @@ function PipelinesSection({ backendAvailable }: { backendAvailable: boolean }) {
 // Volume Browser Section
 // ---------------------------------------------------------------------------
 
-function VolumeBrowserSection({ backendAvailable }: { backendAvailable: boolean }) {
+function VolumeBrowserSection({
+  backendAvailable,
+}: {
+  backendAvailable: boolean;
+}) {
   const [volume, setVolume] = useState(VOLUMES[VOLUMES.length - 1]); // trained_models default
   const [pathStack, setPathStack] = useState<string[]>([]);
   const [files, setFiles] = useState<VolumeFile[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [downloadDst, setDownloadDst] = useState('/workspace/IsaacTools/downloads');
+  const [downloadDst, setDownloadDst] = useState(
+    '/workspace/IsaacTools/downloads',
+  );
   const [downloading, setDownloading] = useState<string | null>(null);
   const [downloadLog, setDownloadLog] = useState<string[]>([]);
 
@@ -488,7 +645,9 @@ function VolumeBrowserSection({ backendAvailable }: { backendAvailable: boolean 
       if (subPath) {
         params.set('path', subPath);
       }
-      const response = await fetch(`${BASE_URL}/api/databricks/volume-files?${params.toString()}`);
+      const response = await fetch(
+        `${BASE_URL}/api/databricks/volume-files?${params.toString()}`,
+      );
       if (!response.ok) {
         const body: { error?: string } = await response.json();
         throw new Error(body.error ?? `Status ${String(response.status)}`);
@@ -524,7 +683,9 @@ function VolumeBrowserSection({ backendAvailable }: { backendAvailable: boolean 
 
   async function handleDownload(fileName: string) {
     const volumeRoot = `dbfs:/Volumes/${volume.replaceAll('.', '/')}`;
-    const src = currentPath ? `${volumeRoot}/${currentPath}/${fileName}` : `${volumeRoot}/${fileName}`;
+    const src = currentPath
+      ? `${volumeRoot}/${currentPath}/${fileName}`
+      : `${volumeRoot}/${fileName}`;
     const dstPath = `${downloadDst.replace(/\/$/, '')}/${fileName}`;
 
     setDownloading(fileName);
@@ -532,7 +693,9 @@ function VolumeBrowserSection({ backendAvailable }: { backendAvailable: boolean 
 
     try {
       const params = new URLSearchParams({ src, dst: dstPath });
-      const response = await fetch(`${BASE_URL}/api/databricks/volume-download?${params.toString()}`);
+      const response = await fetch(
+        `${BASE_URL}/api/databricks/volume-download?${params.toString()}`,
+      );
       const reader = response.body?.getReader();
       if (!reader) {
         throw new Error('No stream');
@@ -558,7 +721,10 @@ function VolumeBrowserSection({ backendAvailable }: { backendAvailable: boolean 
           }
           try {
             const event: Record<string, unknown> = JSON.parse(trimmed.slice(6));
-            const line = (event.line ?? event.message ?? event.dst ?? event.type) as string;
+            const line = (event.line ??
+              event.message ??
+              event.dst ??
+              event.type) as string;
             setDownloadLog((prev) => [...prev, line]);
           } catch {
             // skip
@@ -566,7 +732,10 @@ function VolumeBrowserSection({ backendAvailable }: { backendAvailable: boolean 
         }
       }
     } catch (err: unknown) {
-      setDownloadLog((prev) => [...prev, `Error: ${err instanceof Error ? err.message : String(err)}`]);
+      setDownloadLog((prev) => [
+        ...prev,
+        `Error: ${err instanceof Error ? err.message : String(err)}`,
+      ]);
     } finally {
       setDownloading(null);
     }
@@ -574,25 +743,49 @@ function VolumeBrowserSection({ backendAvailable }: { backendAvailable: boolean 
 
   return (
     <section className={styles.card}>
-      <h2 className={styles.sectionTitle}><FiDownload aria-hidden /> Volume Browser</h2>
-      <p className={styles.sectionText}>Browse and download files from Databricks volumes.</p>
+      <h2 className={styles.sectionTitle}>
+        <FiDownload aria-hidden /> Volume Browser
+      </h2>
+      <p className={styles.sectionText}>
+        Browse and download files from Databricks volumes.
+      </p>
       <div className={styles.controlGrid}>
         <label className={styles.field}>
           <span className={styles.fieldLabel}>Volume</span>
-          <select className={styles.input} value={volume} onChange={(e) => { changeVolume(e.target.value); }}>
+          <select
+            className={styles.input}
+            value={volume}
+            onChange={(e) => {
+              changeVolume(e.target.value);
+            }}
+          >
             {VOLUMES.map((v) => (
-              <option key={v} value={v}>{v}</option>
+              <option key={v} value={v}>
+                {v}
+              </option>
             ))}
           </select>
         </label>
         <label className={styles.field}>
           <span className={styles.fieldLabel}>Download to</span>
-          <input className={styles.input} type="text" value={downloadDst} onChange={(e) => { setDownloadDst(e.target.value); }} />
+          <input
+            className={styles.input}
+            type="text"
+            value={downloadDst}
+            onChange={(e) => {
+              setDownloadDst(e.target.value);
+            }}
+          />
         </label>
       </div>
 
       <div className={styles.browserBar}>
-        <button type="button" className={styles.backBtn} onClick={navigateUp} disabled={pathStack.length === 0}>
+        <button
+          type="button"
+          className={styles.backBtn}
+          onClick={navigateUp}
+          disabled={pathStack.length === 0}
+        >
           <FiChevronLeft aria-hidden />
         </button>
         <code className={styles.breadcrumb}>
@@ -608,7 +801,13 @@ function VolumeBrowserSection({ backendAvailable }: { backendAvailable: boolean 
           {files.map((f) => (
             <div key={f.name} className={styles.fileRow}>
               {f.type === 'DIRECTORY' ? (
-                <button type="button" className={styles.fileLink} onClick={() => { navigateInto(f.name); }}>
+                <button
+                  type="button"
+                  className={styles.fileLink}
+                  onClick={() => {
+                    navigateInto(f.name);
+                  }}
+                >
                   <FiFolder aria-hidden />
                   <span>{f.name}</span>
                 </button>
@@ -627,10 +826,16 @@ function VolumeBrowserSection({ backendAvailable }: { backendAvailable: boolean 
                   <button
                     type="button"
                     className={styles.dlBtn}
-                    onClick={() => { void handleDownload(f.name); }}
+                    onClick={() => {
+                      void handleDownload(f.name);
+                    }}
                     disabled={Boolean(downloading) || !backendAvailable}
                   >
-                    {downloading === f.name ? <FiLoader aria-hidden className={styles.spin} /> : <FiDownload aria-hidden />}
+                    {downloading === f.name ? (
+                      <FiLoader aria-hidden className={styles.spin} />
+                    ) : (
+                      <FiDownload aria-hidden />
+                    )}
                   </button>
                 </>
               )}
@@ -639,7 +844,9 @@ function VolumeBrowserSection({ backendAvailable }: { backendAvailable: boolean 
         </div>
       )}
 
-      {!loading && files.length === 0 && !error && <p className={styles.infoText}>No files found.</p>}
+      {!loading && files.length === 0 && !error && (
+        <p className={styles.infoText}>No files found.</p>
+      )}
 
       {downloadLog.length > 0 && (
         <pre className={styles.logBox}>{downloadLog.join('\n')}</pre>
@@ -653,7 +860,11 @@ function VolumeBrowserSection({ backendAvailable }: { backendAvailable: boolean 
 // ---------------------------------------------------------------------------
 
 function DatabricksPage() {
-  const [backend, setBackend] = useState<PythonBackendStatus>({ available: false, rootDir: null, version: null });
+  const [backend, setBackend] = useState<PythonBackendStatus>({
+    available: false,
+    rootDir: null,
+    version: null,
+  });
 
   useEffect(() => {
     return pollBackendStatus(setBackend);
@@ -666,12 +877,14 @@ function DatabricksPage() {
           <p className={styles.eyebrow}>Databricks</p>
           <h1 className={styles.title}>Databricks</h1>
           <p className={styles.subtitle}>
-            Manage secrets, upload datasets, trigger pipelines, and download results.
+            Manage secrets, upload datasets, trigger pipelines, and download
+            results.
           </p>
         </div>
         {!backend.available && (
           <p className={styles.errorText}>
-            Python server not detected. Start with: <code>PYTHON_BACKEND_DIR=/path/to/data pnpm start</code>
+            Python server not detected. Start with:{' '}
+            <code>PYTHON_BACKEND_DIR=/path/to/data pnpm start</code>
           </p>
         )}
       </header>

@@ -37,25 +37,28 @@ function OpenedFiles() {
   const location = useLocation();
   const [searchParams] = useSearchParams();
   const fileUrl = searchParams.get('url');
-  const fileRoute = (
+  const fileRoute =
     location.pathname === '/pose-trace'
       ? '/pose-trace'
       : location.pathname === '/video-converter'
         ? '/video-converter'
         : location.pathname === '/dataset-processing'
           ? '/dataset-processing'
-          : location.pathname === '/dataset-attributes'
-            ? '/dataset-attributes'
-            : location.pathname === '/object-distribution'
-              ? '/object-distribution'
-              : '/view'
-  );
+          : location.pathname === '/dataset-comparison'
+            ? '/dataset-comparison'
+            : location.pathname === '/dataset-attributes'
+              ? '/dataset-attributes'
+              : location.pathname === '/object-distribution'
+                ? '/object-distribution'
+                : '/view';
 
   function removeFile(file: H5File, index: number, isActive: boolean) {
     if (isActive) {
       // Select next or previous file, or navigate back to homepage
       const nextIndex = index < opened.length - 1 ? index + 1 : index - 1;
-      navigate(nextIndex >= 0 ? getFileLink(fileRoute, opened[nextIndex].url) : '/');
+      navigate(
+        nextIndex >= 0 ? getFileLink(fileRoute, opened[nextIndex].url) : '/',
+      );
     }
 
     // Remove from store and evict from suspense cache
@@ -67,7 +70,9 @@ function OpenedFiles() {
     <section className={sidebarStyles.openedFiles}>
       <h2 className={sidebarStyles.heading}>Opened files</h2>
       {opened.length > 0 ? (
-        <ul className={`${sidebarStyles.navList} ${sidebarStyles.openedFilesList}`}>
+        <ul
+          className={`${sidebarStyles.navList} ${sidebarStyles.openedFilesList}`}
+        >
           {opened.map((file, index) => {
             const { url, name, service, resolvedUrl } = file;
             const isActive = url === fileUrl;

@@ -71,7 +71,9 @@ function AttributeTreeItem({
         >
           <FiFolder aria-hidden className={styles.treeBranchIcon} />
           <span className={styles.treeBranchName}>{node.name}</span>
-          {node.value && <small className={styles.treeMeta}>{node.value}</small>}
+          {node.value && (
+            <small className={styles.treeMeta}>{node.value}</small>
+          )}
         </div>
         {node.children.length > 0 && (
           <div className={styles.treeChildren}>
@@ -119,7 +121,10 @@ function AttributeTreeItem({
   );
 }
 
-function resolveActiveFile(opened: H5File[], fileUrl: string | null): H5File | null {
+function resolveActiveFile(
+  opened: H5File[],
+  fileUrl: string | null,
+): H5File | null {
   if (fileUrl) {
     return opened.find((file) => file.url === fileUrl) ?? null;
   }
@@ -138,7 +143,9 @@ function DatasetAttributesPage() {
     rootDir: null,
     version: null,
   });
-  const [attributes, setAttributes] = useState<DatasetAttributesResult | null>(null);
+  const [attributes, setAttributes] = useState<DatasetAttributesResult | null>(
+    null,
+  );
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -152,15 +159,17 @@ function DatasetAttributesPage() {
 
   useEffect(() => {
     let cancelled = false;
-    checkBackend().then((status) => {
-      if (!cancelled) {
-        setBackend(status);
-      }
-    }).catch(() => {
-      if (!cancelled) {
-        setBackend({ available: false, rootDir: null, version: null });
-      }
-    });
+    checkBackend()
+      .then((status) => {
+        if (!cancelled) {
+          setBackend(status);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setBackend({ available: false, rootDir: null, version: null });
+        }
+      });
 
     return () => {
       cancelled = true;
@@ -188,7 +197,11 @@ function DatasetAttributesPage() {
         const articulation = result.articulation ?? EMPTY_ARTICULATION;
         setAttributes(result);
         setRobotName(articulation.name);
-        setJointNumber(articulation.joint_number == null ? '' : String(articulation.joint_number));
+        setJointNumber(
+          articulation.joint_number == null
+            ? ''
+            : String(articulation.joint_number),
+        );
         setSegments(rowsFromArticulation(articulation));
         setEndEffectors(endEffectorRowsFromArticulation(articulation));
         setLoading(false);
@@ -199,7 +212,9 @@ function DatasetAttributesPage() {
         }
 
         setAttributes(null);
-        setError(loadError instanceof Error ? loadError.message : String(loadError));
+        setError(
+          loadError instanceof Error ? loadError.message : String(loadError),
+        );
         setLoading(false);
       });
 
@@ -240,13 +255,17 @@ function DatasetAttributesPage() {
 
   function updateSegment(id: string, patch: Partial<SegmentRow>) {
     setSegments((current) =>
-      current.map((segment) => (segment.id === id ? { ...segment, ...patch } : segment)),
+      current.map((segment) =>
+        segment.id === id ? { ...segment, ...patch } : segment,
+      ),
     );
   }
 
   function updateEndEffector(id: string, patch: Partial<EndEffectorRow>) {
     setEndEffectors((current) =>
-      current.map((endEffector) => (endEffector.id === id ? { ...endEffector, ...patch } : endEffector)),
+      current.map((endEffector) =>
+        endEffector.id === id ? { ...endEffector, ...patch } : endEffector,
+      ),
     );
   }
 
@@ -302,8 +321,9 @@ function DatasetAttributesPage() {
       return;
     }
 
-    const validationError = validateNamedRows(segments, 'segment')
-      ?? validateNamedRows(endEffectors, 'end-effector');
+    const validationError =
+      validateNamedRows(segments, 'segment') ??
+      validateNamedRows(endEffectors, 'end-effector');
     if (validationError) {
       setError(validationError);
       return;
@@ -321,12 +341,18 @@ function DatasetAttributesPage() {
       const articulation = result.articulation ?? EMPTY_ARTICULATION;
       setAttributes(result);
       setRobotName(articulation.name);
-      setJointNumber(articulation.joint_number == null ? '' : String(articulation.joint_number));
+      setJointNumber(
+        articulation.joint_number == null
+          ? ''
+          : String(articulation.joint_number),
+      );
       setSegments(rowsFromArticulation(articulation));
       setEndEffectors(endEffectorRowsFromArticulation(articulation));
       setSaveMessage('Articulation attributes saved.');
     } catch (saveError: unknown) {
-      setError(saveError instanceof Error ? saveError.message : String(saveError));
+      setError(
+        saveError instanceof Error ? saveError.message : String(saveError),
+      );
     } finally {
       setSaving(false);
     }
@@ -339,35 +365,48 @@ function DatasetAttributesPage() {
           <p className={styles.eyebrow}>Metadata</p>
           <h1 className={styles.title}>Dataset Attributes</h1>
           <p className={styles.subtitle}>
-            Inspect attributes stored on /data and edit the articulation metadata.
+            Inspect attributes stored on /data and edit the articulation
+            metadata.
           </p>
         </div>
       </header>
 
       {!file && (
         <section className={styles.panel}>
-          <p className={styles.statusText}>Open an HDF5 file before editing dataset attributes.</p>
+          <p className={styles.statusText}>
+            Open an HDF5 file before editing dataset attributes.
+          </p>
           <div className={styles.footerActions}>
-            <Link className={styles.button} to="/">Open HDF5</Link>
+            <Link className={styles.button} to="/">
+              Open HDF5
+            </Link>
           </div>
         </section>
       )}
 
       {file && file.service !== FileService.Local && (
         <section className={styles.panel}>
-          <p className={styles.errorText}>Dataset attribute editing is available for local Electron files.</p>
+          <p className={styles.errorText}>
+            Dataset attribute editing is available for local Electron files.
+          </p>
         </section>
       )}
 
       {file && file.service === FileService.Local && !datasetPath && (
         <section className={styles.panel}>
-          <p className={styles.errorText}>Reopen this file in the Electron app so the backend can access its filesystem path.</p>
+          <p className={styles.errorText}>
+            Reopen this file in the Electron app so the backend can access its
+            filesystem path.
+          </p>
         </section>
       )}
 
       {file && datasetPath && !backend.available && (
         <section className={styles.panel}>
-          <p className={styles.errorText}>Python backend is not available. Restart the Electron app to enable metadata editing.</p>
+          <p className={styles.errorText}>
+            Python backend is not available. Restart the Electron app to enable
+            metadata editing.
+          </p>
         </section>
       )}
 
@@ -390,8 +429,12 @@ function DatasetAttributesPage() {
             return (
               <section className={styles.panel} key={group.path}>
                 <div className={styles.panelHeader}>
-                  <h2 className={styles.panelTitle}>{formatGroupTitle(group.path)}</h2>
-                  <p className={styles.statusText} title={group.path}>{group.path}</p>
+                  <h2 className={styles.panelTitle}>
+                    {formatGroupTitle(group.path)}
+                  </h2>
+                  <p className={styles.statusText} title={group.path}>
+                    {group.path}
+                  </p>
                 </div>
                 <div className={styles.keyTree}>
                   {nodes.map((node) => (
@@ -406,9 +449,13 @@ function DatasetAttributesPage() {
             <div className={styles.panelHeader}>
               <div>
                 <h2 className={styles.panelTitle}>Articulation</h2>
-                <p className={styles.statusText}>Source: {attributes.articulationSource}</p>
+                <p className={styles.statusText}>
+                  Source: {attributes.articulationSource}
+                </p>
               </div>
-              {saveMessage && <p className={styles.successText}>{saveMessage}</p>}
+              {saveMessage && (
+                <p className={styles.successText}>{saveMessage}</p>
+              )}
             </div>
 
             <div className={styles.fieldGrid}>
@@ -439,215 +486,250 @@ function DatasetAttributesPage() {
           </section>
 
           {segments.length > 0 && (
-          <section className={styles.panel}>
-            <div className={styles.panelHeader}>
-              <h2 className={styles.panelTitle}>Segmentation Children</h2>
-              <p className={styles.statusText}>{segments.length} segment{segments.length === 1 ? '' : 's'}</p>
-            </div>
+            <section className={styles.panel}>
+              <div className={styles.panelHeader}>
+                <h2 className={styles.panelTitle}>Segmentation Children</h2>
+                <p className={styles.statusText}>
+                  {segments.length} segment{segments.length === 1 ? '' : 's'}
+                </p>
+              </div>
 
-            <div className={styles.addRow}>
-              <input
-                className={styles.input}
-                placeholder="segment_name"
-                value={newSegmentName}
-                onChange={(event) => {
-                  setNewSegmentName(event.target.value);
-                }}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') {
-                    event.preventDefault();
-                    addSegment();
-                  }
-                }}
-              />
-              <button className={styles.secondaryButton} type="button" onClick={addSegment}>
-                Add Segment
-              </button>
-            </div>
+              <div className={styles.addRow}>
+                <input
+                  className={styles.input}
+                  placeholder="segment_name"
+                  value={newSegmentName}
+                  onChange={(event) => {
+                    setNewSegmentName(event.target.value);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault();
+                      addSegment();
+                    }
+                  }}
+                />
+                <button
+                  className={styles.secondaryButton}
+                  type="button"
+                  onClick={addSegment}
+                >
+                  Add Segment
+                </button>
+              </div>
 
-            {segments.length > 0 ? (
-              <table className={styles.segmentTable}>
-                <thead>
-                  <tr>
-                    <th>Segment</th>
-                    <th>Target</th>
-                    <th>Obs</th>
-                    <th aria-label="Actions" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {segments.map((segment) => (
-                    <tr key={segment.id}>
-                      <td>
-                        <input
-                          className={styles.input}
-                          value={segment.name}
-                          onChange={(event) => {
-                            updateSegment(segment.id, { name: event.target.value });
-                          }}
-                        />
-                      </td>
-                      <td>
-                        <input
-                          className={styles.input}
-                          placeholder="[x:y]"
-                          value={segment.target}
-                          onChange={(event) => {
-                            updateSegment(segment.id, { target: event.target.value });
-                          }}
-                        />
-                      </td>
-                      <td>
-                        <input
-                          className={styles.input}
-                          placeholder="[x:y]"
-                          value={segment.obs}
-                          onChange={(event) => {
-                            updateSegment(segment.id, { obs: event.target.value });
-                          }}
-                        />
-                      </td>
-                      <td>
-                        <div className={styles.segmentActions}>
-                          <button
-                            className={styles.dangerButton}
-                            type="button"
-                            onClick={() => {
-                              setSegments((current) => current.filter((row) => row.id !== segment.id));
-                            }}
-                          >
-                            Remove
-                          </button>
-                        </div>
-                      </td>
+              {segments.length > 0 ? (
+                <table className={styles.segmentTable}>
+                  <thead>
+                    <tr>
+                      <th>Segment</th>
+                      <th>Target</th>
+                      <th>Obs</th>
+                      <th aria-label="Actions" />
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            ) : (
-              <p className={styles.statusText}>No segmentation children yet.</p>
-            )}
+                  </thead>
+                  <tbody>
+                    {segments.map((segment) => (
+                      <tr key={segment.id}>
+                        <td>
+                          <input
+                            className={styles.input}
+                            value={segment.name}
+                            onChange={(event) => {
+                              updateSegment(segment.id, {
+                                name: event.target.value,
+                              });
+                            }}
+                          />
+                        </td>
+                        <td>
+                          <input
+                            className={styles.input}
+                            placeholder="[x:y]"
+                            value={segment.target}
+                            onChange={(event) => {
+                              updateSegment(segment.id, {
+                                target: event.target.value,
+                              });
+                            }}
+                          />
+                        </td>
+                        <td>
+                          <input
+                            className={styles.input}
+                            placeholder="[x:y]"
+                            value={segment.obs}
+                            onChange={(event) => {
+                              updateSegment(segment.id, {
+                                obs: event.target.value,
+                              });
+                            }}
+                          />
+                        </td>
+                        <td>
+                          <div className={styles.segmentActions}>
+                            <button
+                              className={styles.dangerButton}
+                              type="button"
+                              onClick={() => {
+                                setSegments((current) =>
+                                  current.filter(
+                                    (row) => row.id !== segment.id,
+                                  ),
+                                );
+                              }}
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : (
+                <p className={styles.statusText}>
+                  No segmentation children yet.
+                </p>
+              )}
 
-            <div className={styles.footerActions}>
-              <button
-                className={styles.button}
-                type="button"
-                onClick={() => {
-                  void saveArticulation();
-                }}
-                disabled={saving}
-              >
-                {saving ? 'Saving...' : 'Save Articulation'}
-              </button>
-            </div>
-          </section>
+              <div className={styles.footerActions}>
+                <button
+                  className={styles.button}
+                  type="button"
+                  onClick={() => {
+                    void saveArticulation();
+                  }}
+                  disabled={saving}
+                >
+                  {saving ? 'Saving...' : 'Save Articulation'}
+                </button>
+              </div>
+            </section>
           )}
 
           {endEffectors.length > 0 && (
-          <section className={styles.panel}>
-            <div className={styles.panelHeader}>
-              <h2 className={styles.panelTitle}>End Effector Children</h2>
-              <p className={styles.statusText}>{endEffectors.length} end effector{endEffectors.length === 1 ? '' : 's'}</p>
-            </div>
+            <section className={styles.panel}>
+              <div className={styles.panelHeader}>
+                <h2 className={styles.panelTitle}>End Effector Children</h2>
+                <p className={styles.statusText}>
+                  {endEffectors.length} end effector
+                  {endEffectors.length === 1 ? '' : 's'}
+                </p>
+              </div>
 
-            <div className={styles.addRow}>
-              <input
-                className={styles.input}
-                placeholder="eef_name"
-                value={newEndEffectorName}
-                onChange={(event) => {
-                  setNewEndEffectorName(event.target.value);
-                }}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') {
-                    event.preventDefault();
-                    addEndEffector();
-                  }
-                }}
-              />
-              <button className={styles.secondaryButton} type="button" onClick={addEndEffector}>
-                Add End Effector
-              </button>
-            </div>
+              <div className={styles.addRow}>
+                <input
+                  className={styles.input}
+                  placeholder="eef_name"
+                  value={newEndEffectorName}
+                  onChange={(event) => {
+                    setNewEndEffectorName(event.target.value);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault();
+                      addEndEffector();
+                    }
+                  }}
+                />
+                <button
+                  className={styles.secondaryButton}
+                  type="button"
+                  onClick={addEndEffector}
+                >
+                  Add End Effector
+                </button>
+              </div>
 
-            {endEffectors.length > 0 ? (
-              <table className={styles.segmentTable}>
-                <thead>
-                  <tr>
-                    <th>End Effector</th>
-                    <th>Pose</th>
-                    <th>Gripper</th>
-                    <th aria-label="Actions" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {endEffectors.map((endEffector) => (
-                    <tr key={endEffector.id}>
-                      <td>
-                        <input
-                          className={styles.input}
-                          value={endEffector.name}
-                          onChange={(event) => {
-                            updateEndEffector(endEffector.id, { name: event.target.value });
-                          }}
-                        />
-                      </td>
-                      <td>
-                        <input
-                          className={styles.input}
-                          placeholder="[x:y]"
-                          value={endEffector.pose}
-                          onChange={(event) => {
-                            updateEndEffector(endEffector.id, { pose: event.target.value });
-                          }}
-                        />
-                      </td>
-                      <td>
-                        <input
-                          className={styles.input}
-                          placeholder="[x:y]"
-                          value={endEffector.gripper}
-                          onChange={(event) => {
-                            updateEndEffector(endEffector.id, { gripper: event.target.value });
-                          }}
-                        />
-                      </td>
-                      <td>
-                        <div className={styles.segmentActions}>
-                          <button
-                            className={styles.dangerButton}
-                            type="button"
-                            onClick={() => {
-                              setEndEffectors((current) =>
-                                current.filter((row) => row.id !== endEffector.id),
-                              );
-                            }}
-                          >
-                            Remove
-                          </button>
-                        </div>
-                      </td>
+              {endEffectors.length > 0 ? (
+                <table className={styles.segmentTable}>
+                  <thead>
+                    <tr>
+                      <th>End Effector</th>
+                      <th>Pose</th>
+                      <th>Gripper</th>
+                      <th aria-label="Actions" />
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            ) : (
-              <p className={styles.statusText}>No end-effector children yet.</p>
-            )}
+                  </thead>
+                  <tbody>
+                    {endEffectors.map((endEffector) => (
+                      <tr key={endEffector.id}>
+                        <td>
+                          <input
+                            className={styles.input}
+                            value={endEffector.name}
+                            onChange={(event) => {
+                              updateEndEffector(endEffector.id, {
+                                name: event.target.value,
+                              });
+                            }}
+                          />
+                        </td>
+                        <td>
+                          <input
+                            className={styles.input}
+                            placeholder="[x:y]"
+                            value={endEffector.pose}
+                            onChange={(event) => {
+                              updateEndEffector(endEffector.id, {
+                                pose: event.target.value,
+                              });
+                            }}
+                          />
+                        </td>
+                        <td>
+                          <input
+                            className={styles.input}
+                            placeholder="[x:y]"
+                            value={endEffector.gripper}
+                            onChange={(event) => {
+                              updateEndEffector(endEffector.id, {
+                                gripper: event.target.value,
+                              });
+                            }}
+                          />
+                        </td>
+                        <td>
+                          <div className={styles.segmentActions}>
+                            <button
+                              className={styles.dangerButton}
+                              type="button"
+                              onClick={() => {
+                                setEndEffectors((current) =>
+                                  current.filter(
+                                    (row) => row.id !== endEffector.id,
+                                  ),
+                                );
+                              }}
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : (
+                <p className={styles.statusText}>
+                  No end-effector children yet.
+                </p>
+              )}
 
-            <div className={styles.footerActions}>
-              <button
-                className={styles.button}
-                type="button"
-                onClick={() => {
-                  void saveArticulation();
-                }}
-                disabled={saving}
-              >
-                {saving ? 'Saving...' : 'Save Articulation'}
-              </button>
-            </div>
-          </section>
+              <div className={styles.footerActions}>
+                <button
+                  className={styles.button}
+                  type="button"
+                  onClick={() => {
+                    void saveArticulation();
+                  }}
+                  disabled={saving}
+                >
+                  {saving ? 'Saving...' : 'Save Articulation'}
+                </button>
+              </div>
+            </section>
           )}
         </ExpandedLeafContext.Provider>
       )}

@@ -1,4 +1,7 @@
-import type { ObjectDistributionPoint, ObjectDistributionResult } from './types';
+import type {
+  ObjectDistributionPoint,
+  ObjectDistributionResult,
+} from './types';
 
 const POSITION_BIN_COUNT = 20;
 const ROTATION_BIN_COUNT = 20;
@@ -131,10 +134,10 @@ function isFiniteNumber(value: number | null): value is number {
 
 function toResetPoint(point: ObjectDistributionPoint): ResetPoint | null {
   if (
-    !isFiniteNumber(point.initialX)
-    || !isFiniteNumber(point.initialY)
-    || !isFiniteNumber(point.initialRx)
-    || !isFiniteNumber(point.initialRy)
+    !isFiniteNumber(point.initialX) ||
+    !isFiniteNumber(point.initialY) ||
+    !isFiniteNumber(point.initialRx) ||
+    !isFiniteNumber(point.initialRy)
   ) {
     return null;
   }
@@ -171,31 +174,44 @@ function computeStd(values: number[], mean: number): number {
     return 0;
   }
 
-  const variance = values.reduce((sum, value) => sum + ((value - mean) ** 2), 0) / (values.length - 1);
+  const variance =
+    values.reduce((sum, value) => sum + (value - mean) ** 2, 0) /
+    (values.length - 1);
   return Math.sqrt(Math.max(variance, 0));
 }
 
-function computeBandwidth(values: number[], bounds: Bounds, binCount: number): number {
+function computeBandwidth(
+  values: number[],
+  bounds: Bounds,
+  binCount: number,
+): number {
   const span = Math.max(bounds.max - bounds.min, 1e-6);
   const mean = computeMean(values);
   const std = computeStd(values, mean);
-  const scott = std > 0 ? std * (values.length ** (-1 / 6)) : 0;
+  const scott = std > 0 ? std * values.length ** (-1 / 6) : 0;
   const grid = span / Math.max(binCount, 1);
   return Math.max(grid * 1.6, scott, span / 24, 1e-4);
 }
 
 function createEdges(bounds: Bounds, binCount: number): number[] {
   const step = (bounds.max - bounds.min) / binCount;
-  return Array.from({ length: binCount + 1 }, (_, index) => (
-    index === binCount ? bounds.max : bounds.min + step * index
-  ));
+  return Array.from({ length: binCount + 1 }, (_, index) =>
+    index === binCount ? bounds.max : bounds.min + step * index,
+  );
 }
 
 function createCenters(edges: number[]): number[] {
-  return Array.from({ length: edges.length - 1 }, (_, index) => (edges[index] + edges[index + 1]) / 2);
+  return Array.from(
+    { length: edges.length - 1 },
+    (_, index) => (edges[index] + edges[index + 1]) / 2,
+  );
 }
 
-function findBinIndex(value: number, bounds: Bounds, binCount: number): number | null {
+function findBinIndex(
+  value: number,
+  bounds: Bounds,
+  binCount: number,
+): number | null {
   if (value < bounds.min || value > bounds.max) {
     return null;
   }
@@ -222,10 +238,13 @@ function gaussianWeight(
 ): number {
   const dx = (x - centerX) / bandwidth.x;
   const dy = (y - centerY) / bandwidth.y;
-  return Math.exp(-0.5 * ((dx * dx) + (dy * dy)));
+  return Math.exp(-0.5 * (dx * dx + dy * dy));
 }
 
-function computePosteriorInterval(successSupport: number, failedSupport: number): {
+function computePosteriorInterval(
+  successSupport: number,
+  failedSupport: number,
+): {
   mean: number;
   lower: number;
   upper: number;
@@ -235,11 +254,13 @@ function computePosteriorInterval(successSupport: number, failedSupport: number)
   const beta = successSupport + 1;
   const total = alpha + beta;
   const mean = alpha / total;
-  const variance = (alpha * beta) / ((total ** 2) * (total + 1));
+  const variance = (alpha * beta) / (total ** 2 * (total + 1));
   const std = Math.sqrt(Math.max(variance, 0));
-  const lower = Math.max(0, mean - (CI_Z_SCORE * std));
-  const upper = Math.min(1, mean + (CI_Z_SCORE * std));
-  const confidenceScore = (successSupport + failedSupport) / ((successSupport + failedSupport) + CONFIDENCE_PRIOR);
+  const lower = Math.max(0, mean - CI_Z_SCORE * std);
+  const upper = Math.min(1, mean + CI_Z_SCORE * std);
+  const confidenceScore =
+    (successSupport + failedSupport) /
+    (successSupport + failedSupport + CONFIDENCE_PRIOR);
   return { mean, lower, upper, confidenceScore };
 }
 
@@ -257,22 +278,36 @@ function buildPlane(
   bandwidth: Bandwidth2D,
   forcedBounds?: { x: Bounds; y: Bounds },
 ): FailurePlane {
-  const xBounds = forcedBounds?.x ?? computeBounds(generatedPoints.map((point) => getAxisValue(point, axes.x)));
-  const yBounds = forcedBounds?.y ?? computeBounds(generatedPoints.map((point) => getAxisValue(point, axes.y)));
+  const xBounds =
+    forcedBounds?.x ??
+    computeBounds(generatedPoints.map((point) => getAxisValue(point, axes.x)));
+  const yBounds =
+    forcedBounds?.y ??
+    computeBounds(generatedPoints.map((point) => getAxisValue(point, axes.y)));
   const xEdges = createEdges(xBounds, binCounts.x);
   const yEdges = createEdges(yBounds, binCounts.y);
   const xCenters = createCenters(xEdges);
   const yCenters = createCenters(yEdges);
 
-  const rawCounts = Array.from({ length: binCounts.y }, () => Array.from({ length: binCounts.x }, () => ({
-    rawSuccessCount: 0,
-    rawFailedCount: 0,
-    rawTeleopCount: 0,
-  })));
+  const rawCounts = Array.from({ length: binCounts.y }, () =>
+    Array.from({ length: binCounts.x }, () => ({
+      rawSuccessCount: 0,
+      rawFailedCount: 0,
+      rawTeleopCount: 0,
+    })),
+  );
 
   for (const point of generatedPoints) {
-    const xIndex = findBinIndex(getAxisValue(point, axes.x), xBounds, binCounts.x);
-    const yIndex = findBinIndex(getAxisValue(point, axes.y), yBounds, binCounts.y);
+    const xIndex = findBinIndex(
+      getAxisValue(point, axes.x),
+      xBounds,
+      binCounts.x,
+    );
+    const yIndex = findBinIndex(
+      getAxisValue(point, axes.y),
+      yBounds,
+      binCounts.y,
+    );
     if (xIndex == null || yIndex == null) {
       continue;
     }
@@ -297,67 +332,76 @@ function buildPlane(
     return [{ x: xValue, y: yValue }];
   });
 
-  const bins = yCenters.map((centerY, yIndex) => xCenters.map((centerX, xIndex) => {
-    let smoothedSuccessSupport = 0;
-    let smoothedFailedSupport = 0;
-    let teleopDensity = 0;
+  const bins = yCenters.map((centerY, yIndex) =>
+    xCenters.map((centerX, xIndex) => {
+      let smoothedSuccessSupport = 0;
+      let smoothedFailedSupport = 0;
+      let teleopDensity = 0;
 
-    for (const point of generatedPoints) {
-      const weight = gaussianWeight(
-        getAxisValue(point, axes.x),
-        getAxisValue(point, axes.y),
-        centerX,
-        centerY,
-        bandwidth,
-      );
-      if (point.outcome === 'failed') {
-        smoothedFailedSupport += weight;
-      } else {
-        smoothedSuccessSupport += weight;
+      for (const point of generatedPoints) {
+        const weight = gaussianWeight(
+          getAxisValue(point, axes.x),
+          getAxisValue(point, axes.y),
+          centerX,
+          centerY,
+          bandwidth,
+        );
+        if (point.outcome === 'failed') {
+          smoothedFailedSupport += weight;
+        } else {
+          smoothedSuccessSupport += weight;
+        }
       }
-    }
 
-    for (const point of teleopPoints) {
-      teleopDensity += gaussianWeight(
-        getAxisValue(point, axes.x),
-        getAxisValue(point, axes.y),
-        centerX,
-        centerY,
-        bandwidth,
-      );
-    }
+      for (const point of teleopPoints) {
+        teleopDensity += gaussianWeight(
+          getAxisValue(point, axes.x),
+          getAxisValue(point, axes.y),
+          centerX,
+          centerY,
+          bandwidth,
+        );
+      }
 
-    const smoothedGeneratedSupport = smoothedSuccessSupport + smoothedFailedSupport;
-    const interval = smoothedGeneratedSupport > 0
-      ? computePosteriorInterval(smoothedSuccessSupport, smoothedFailedSupport)
-      : null;
-    const rawSuccessCount = rawCounts[yIndex][xIndex].rawSuccessCount;
-    const rawFailedCount = rawCounts[yIndex][xIndex].rawFailedCount;
-    const rawGeneratedCount = rawSuccessCount + rawFailedCount;
+      const smoothedGeneratedSupport =
+        smoothedSuccessSupport + smoothedFailedSupport;
+      const interval =
+        smoothedGeneratedSupport > 0
+          ? computePosteriorInterval(
+              smoothedSuccessSupport,
+              smoothedFailedSupport,
+            )
+          : null;
+      const rawSuccessCount = rawCounts[yIndex][xIndex].rawSuccessCount;
+      const rawFailedCount = rawCounts[yIndex][xIndex].rawFailedCount;
+      const rawGeneratedCount = rawSuccessCount + rawFailedCount;
 
-    return {
-      xStart: xEdges[xIndex],
-      xEnd: xEdges[xIndex + 1],
-      yStart: yEdges[yIndex],
-      yEnd: yEdges[yIndex + 1],
-      xCenter: centerX,
-      yCenter: centerY,
-      rawSuccessCount,
-      rawFailedCount,
-      rawGeneratedCount,
-      rawTeleopCount: rawCounts[yIndex][xIndex].rawTeleopCount,
-      smoothedSuccessSupport,
-      smoothedFailedSupport,
-      smoothedGeneratedSupport,
-      teleopDensity,
-      failureRate: interval?.mean ?? null,
-      confidenceLower: interval?.lower ?? null,
-      confidenceUpper: interval?.upper ?? null,
-      confidenceScore: interval?.confidenceScore ?? 0,
-      displayFailureRate: interval ? (0.5 + ((interval.mean - 0.5) * interval.confidenceScore)) : null,
-      masked: smoothedGeneratedSupport < minGeneratedSupport,
-    } satisfies FailureBin;
-  }));
+      return {
+        xStart: xEdges[xIndex],
+        xEnd: xEdges[xIndex + 1],
+        yStart: yEdges[yIndex],
+        yEnd: yEdges[yIndex + 1],
+        xCenter: centerX,
+        yCenter: centerY,
+        rawSuccessCount,
+        rawFailedCount,
+        rawGeneratedCount,
+        rawTeleopCount: rawCounts[yIndex][xIndex].rawTeleopCount,
+        smoothedSuccessSupport,
+        smoothedFailedSupport,
+        smoothedGeneratedSupport,
+        teleopDensity,
+        failureRate: interval?.mean ?? null,
+        confidenceLower: interval?.lower ?? null,
+        confidenceUpper: interval?.upper ?? null,
+        confidenceScore: interval?.confidenceScore ?? 0,
+        displayFailureRate: interval
+          ? 0.5 + (interval.mean - 0.5) * interval.confidenceScore
+          : null,
+        masked: smoothedGeneratedSupport < minGeneratedSupport,
+      } satisfies FailureBin;
+    }),
+  );
 
   return {
     xLabel: axes.xLabel,
@@ -370,17 +414,21 @@ function buildPlane(
   };
 }
 
-function shouldSeedRegion(bin: FailureBin, minGeneratedSupport: number): boolean {
+function shouldSeedRegion(
+  bin: FailureBin,
+  minGeneratedSupport: number,
+): boolean {
   if (bin.masked || bin.failureRate == null || bin.confidenceLower == null) {
     return false;
   }
 
-  const regionScore = Math.max(0, bin.confidenceLower - 0.5) * bin.smoothedGeneratedSupport;
+  const regionScore =
+    Math.max(0, bin.confidenceLower - 0.5) * bin.smoothedGeneratedSupport;
   return (
-    bin.smoothedGeneratedSupport >= minGeneratedSupport
-    && bin.failureRate >= REGION_FAILURE_THRESHOLD
-    && bin.confidenceScore >= REGION_CONFIDENCE_THRESHOLD
-    && regionScore >= REGION_MIN_SCORE
+    bin.smoothedGeneratedSupport >= minGeneratedSupport &&
+    bin.failureRate >= REGION_FAILURE_THRESHOLD &&
+    bin.confidenceScore >= REGION_CONFIDENCE_THRESHOLD &&
+    regionScore >= REGION_MIN_SCORE
   );
 }
 
@@ -390,20 +438,30 @@ function collectRecommendations(
 ): FailureRecommendation[] {
   const recommendations: FailureRecommendation[] = [];
   const neighbors = [
-    [-1, -1], [-1, 0], [-1, 1],
-    [0, -1], [0, 1],
-    [1, -1], [1, 0], [1, 1],
+    [-1, -1],
+    [-1, 0],
+    [-1, 1],
+    [0, -1],
+    [0, 1],
+    [1, -1],
+    [1, 0],
+    [1, 1],
   ];
 
   for (const slice of slices) {
     const height = slice.plane.bins.length;
     const width = slice.plane.bins[0]?.length ?? 0;
-    const visited = Array.from({ length: height }, () => Array.from({ length: width }, () => false));
+    const visited = Array.from({ length: height }, () =>
+      Array.from({ length: width }, () => false),
+    );
 
     for (let rowIndex = 0; rowIndex < height; rowIndex += 1) {
       for (let colIndex = 0; colIndex < width; colIndex += 1) {
         const startBin = slice.plane.bins[rowIndex][colIndex];
-        if (visited[rowIndex][colIndex] || !shouldSeedRegion(startBin, minGeneratedSupport)) {
+        if (
+          visited[rowIndex][colIndex] ||
+          !shouldSeedRegion(startBin, minGeneratedSupport)
+        ) {
           continue;
         }
 
@@ -420,11 +478,11 @@ function collectRecommendations(
             const nextRow = currentRow + rowDelta;
             const nextCol = currentCol + colDelta;
             if (
-              nextRow < 0
-              || nextCol < 0
-              || nextRow >= height
-              || nextCol >= width
-              || visited[nextRow][nextCol]
+              nextRow < 0 ||
+              nextCol < 0 ||
+              nextRow >= height ||
+              nextCol >= width ||
+              visited[nextRow][nextCol]
             ) {
               continue;
             }
@@ -439,16 +497,29 @@ function collectRecommendations(
           }
         }
 
-        const smoothedGeneratedSupport = regionBins.reduce((sum, bin) => sum + bin.smoothedGeneratedSupport, 0);
-        const smoothedFailedSupport = regionBins.reduce((sum, bin) => sum + bin.smoothedFailedSupport, 0);
-        const teleopDensity = regionBins.reduce((sum, bin) => sum + bin.teleopDensity, 0) / regionBins.length;
+        const smoothedGeneratedSupport = regionBins.reduce(
+          (sum, bin) => sum + bin.smoothedGeneratedSupport,
+          0,
+        );
+        const smoothedFailedSupport = regionBins.reduce(
+          (sum, bin) => sum + bin.smoothedFailedSupport,
+          0,
+        );
+        const teleopDensity =
+          regionBins.reduce((sum, bin) => sum + bin.teleopDensity, 0) /
+          regionBins.length;
         const interval = computePosteriorInterval(
           smoothedGeneratedSupport - smoothedFailedSupport,
           smoothedFailedSupport,
         );
-        const score = Math.max(0, interval.lower - 0.5) * smoothedGeneratedSupport / (1 + teleopDensity);
+        const score =
+          (Math.max(0, interval.lower - 0.5) * smoothedGeneratedSupport) /
+          (1 + teleopDensity);
 
-        if (regionBins.length < 2 && smoothedGeneratedSupport < (minGeneratedSupport * 1.8)) {
+        if (
+          regionBins.length < 2 &&
+          smoothedGeneratedSupport < minGeneratedSupport * 1.8
+        ) {
           continue;
         }
 
@@ -478,12 +549,13 @@ function collectRecommendations(
   }
 
   return recommendations
-    .sort((left, right) => (
-      right.score - left.score
-      || right.confidenceLower - left.confidenceLower
-      || right.smoothedFailedSupport - left.smoothedFailedSupport
-      || left.teleopDensity - right.teleopDensity
-    ))
+    .sort(
+      (left, right) =>
+        right.score - left.score ||
+        right.confidenceLower - left.confidenceLower ||
+        right.smoothedFailedSupport - left.smoothedFailedSupport ||
+        left.teleopDensity - right.teleopDensity,
+    )
     .slice(0, MAX_RECOMMENDATIONS);
 }
 
@@ -491,7 +563,10 @@ export function buildFailureAnalysis(
   result: ObjectDistributionResult,
   options: BuildFailureAnalysisOptions,
 ): FailureAnalysisResult | null {
-  const minGeneratedSupport = Math.max(1, Math.trunc(options.minGeneratedCount) || 1);
+  const minGeneratedSupport = Math.max(
+    1,
+    Math.trunc(options.minGeneratedCount) || 1,
+  );
   const successGeneratedPoints: GeneratedResetPoint[] = [];
   const failedGeneratedPoints: GeneratedResetPoint[] = [];
   const teleopPoints: ResetPoint[] = [];
@@ -537,12 +612,28 @@ export function buildFailureAnalysis(
     y: computeBounds(generatedPoints.map((point) => point.rotY)),
   };
   const positionBandwidth = {
-    x: computeBandwidth(generatedPoints.map((point) => point.x), positionBounds.x, POSITION_BIN_COUNT),
-    y: computeBandwidth(generatedPoints.map((point) => point.y), positionBounds.y, POSITION_BIN_COUNT),
+    x: computeBandwidth(
+      generatedPoints.map((point) => point.x),
+      positionBounds.x,
+      POSITION_BIN_COUNT,
+    ),
+    y: computeBandwidth(
+      generatedPoints.map((point) => point.y),
+      positionBounds.y,
+      POSITION_BIN_COUNT,
+    ),
   };
   const rotationBandwidth = {
-    x: computeBandwidth(generatedPoints.map((point) => point.rotX), rotationBounds.x, ROTATION_BIN_COUNT),
-    y: computeBandwidth(generatedPoints.map((point) => point.rotY), rotationBounds.y, ROTATION_BIN_COUNT),
+    x: computeBandwidth(
+      generatedPoints.map((point) => point.rotX),
+      rotationBounds.x,
+      ROTATION_BIN_COUNT,
+    ),
+    y: computeBandwidth(
+      generatedPoints.map((point) => point.rotY),
+      rotationBounds.y,
+      ROTATION_BIN_COUNT,
+    ),
   };
 
   const positionMap = buildPlane(
@@ -593,7 +684,7 @@ export function buildFailureAnalysis(
       continue;
     }
 
-    generatedSlices[(yIndex * SLICE_DIVISIONS) + xIndex].push(point);
+    generatedSlices[yIndex * SLICE_DIVISIONS + xIndex].push(point);
   }
 
   for (const point of teleopPoints) {
@@ -603,13 +694,13 @@ export function buildFailureAnalysis(
       continue;
     }
 
-    teleopSlices[(yIndex * SLICE_DIVISIONS) + xIndex].push(point);
+    teleopSlices[yIndex * SLICE_DIVISIONS + xIndex].push(point);
   }
 
   const slices: FailureSlice[] = [];
   for (let rowIndex = 0; rowIndex < SLICE_DIVISIONS; rowIndex += 1) {
     for (let colIndex = 0; colIndex < SLICE_DIVISIONS; colIndex += 1) {
-      const sliceIndex = (rowIndex * SLICE_DIVISIONS) + colIndex;
+      const sliceIndex = rowIndex * SLICE_DIVISIONS + colIndex;
       const sliceGeneratedPoints = generatedSlices[sliceIndex];
       const sliceTeleopPoints = teleopSlices[sliceIndex];
       const plane = buildPlane(
@@ -648,7 +739,10 @@ export function buildFailureAnalysis(
       analyzedSuccessCount: successGeneratedPoints.length,
       analyzedFailedCount: failedGeneratedPoints.length,
       analyzedGeneratedCount: generatedPoints.length,
-      skippedGeneratedCount: (result.successPoints.length + result.failedPoints.length) - generatedPoints.length,
+      skippedGeneratedCount:
+        result.successPoints.length +
+        result.failedPoints.length -
+        generatedPoints.length,
       teleopCount: result.teleopPoints.length,
       analyzedTeleopCount: teleopPoints.length,
       skippedTeleopCount: result.teleopPoints.length - teleopPoints.length,

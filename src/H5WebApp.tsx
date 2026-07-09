@@ -9,12 +9,7 @@ try {
 }
 
 function H5WebApp() {
-  return (
-    <App
-      initialPath="/data"
-      propagateErrors
-    />
-  );
+  return <App initialPath="/data" propagateErrors />;
 }
 
 export default H5WebApp;

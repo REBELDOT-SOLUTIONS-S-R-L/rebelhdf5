@@ -64,7 +64,6 @@ describe('Dropzone', () => {
       expect(opened[0]?.service).toBe(FileService.Local);
     });
   });
-
 });
 
 function PickerProbe() {
@@ -110,7 +109,9 @@ describe('Dropzone openFilePicker', () => {
   });
 
   it('uses the desktop launcher when window.rebelHdf5Desktop is present', async () => {
-    Object.assign(globalThis, { rebelHdf5Desktop: { getPathForFile: vi.fn() } });
+    Object.assign(globalThis, {
+      rebelHdf5Desktop: { getPathForFile: vi.fn() },
+    });
 
     renderWithPicker();
     const input = findFileInput();
@@ -143,9 +144,7 @@ describe('Dropzone openFilePicker', () => {
     Object.assign(globalThis, {
       showOpenFilePicker: vi
         .fn()
-        .mockRejectedValue(
-          new DOMException('User cancelled', 'AbortError'),
-        ),
+        .mockRejectedValue(new DOMException('User cancelled', 'AbortError')),
     });
 
     renderWithPicker();

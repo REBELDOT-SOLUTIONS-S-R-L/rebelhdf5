@@ -6,11 +6,24 @@ import react from '@vitejs/plugin-react';
 import { type Plugin, defineConfig } from 'vite';
 import { checker } from 'vite-plugin-checker';
 
-const backendServerPort = Number(process.env.PYTHON_BACKEND_PORT ?? process.env.MERGE_SERVER_PORT) || 4095;
-const backendServerDir = process.env.PYTHON_BACKEND_DIR ?? process.env.MERGE_SERVER_DIR ?? path.resolve(__dirname, '..');
-const lehomePython = path.resolve(__dirname, '..', 'ROBOTICS-lehome-challenge', '.venv', 'bin', 'python');
-const backendPython = process.env.PYTHON_BACKEND_PYTHON
-  ?? (fs.existsSync(lehomePython) ? lehomePython : 'python3');
+const backendServerPort =
+  Number(process.env.PYTHON_BACKEND_PORT ?? process.env.MERGE_SERVER_PORT) ||
+  4095;
+const backendServerDir =
+  process.env.PYTHON_BACKEND_DIR ??
+  process.env.MERGE_SERVER_DIR ??
+  path.resolve(__dirname, '..');
+const lehomePython = path.resolve(
+  __dirname,
+  '..',
+  'ROBOTICS-lehome-challenge',
+  '.venv',
+  'bin',
+  'python',
+);
+const backendPython =
+  process.env.PYTHON_BACKEND_PYTHON ??
+  (fs.existsSync(lehomePython) ? lehomePython : 'python3');
 
 /**
  * Vite plugin that starts scripts/backend_server.py alongside the dev server.
@@ -77,10 +90,14 @@ function backendServer(): Plugin {
     configureServer() {
       const script = path.resolve(__dirname, 'scripts/backend_server.py');
 
-      child = spawn(backendPython, [script, '--dir', dir, '--port', String(port)], {
-        stdio: ['ignore', 'pipe', 'pipe'],
-        env: { ...process.env, PYTHONUNBUFFERED: '1' },
-      });
+      child = spawn(
+        backendPython,
+        [script, '--dir', dir, '--port', String(port)],
+        {
+          stdio: ['ignore', 'pipe', 'pipe'],
+          env: { ...process.env, PYTHONUNBUFFERED: '1' },
+        },
+      );
 
       child.stdout?.on('data', (data: Buffer) => {
         const text = data.toString().trim();

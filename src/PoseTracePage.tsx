@@ -116,7 +116,8 @@ function useResolvedFile(fileUrl: string | null): ResolvedFileState {
           setState({
             file: null,
             loading: false,
-            error: 'This file cannot be reopened automatically. Open it again from the home page.',
+            error:
+              'This file cannot be reopened automatically. Open it again from the home page.',
           });
           return;
         }
@@ -216,7 +217,9 @@ function JointChartsSection({
 
   useEffect(() => {
     setSelectedJointIds((current) => {
-      const validCurrent = current.filter((id) => availableJointIds.includes(id));
+      const validCurrent = current.filter((id) =>
+        availableJointIds.includes(id),
+      );
       if (validCurrent.length > 0) {
         return validCurrent;
       }
@@ -229,11 +232,18 @@ function JointChartsSection({
   const displayedSpecs = showAllJoints
     ? specs
     : specs.filter((spec) => selectedSpecIds.has(jointSpecKey(spec)));
-  const addableSpecs = specs.filter((spec) => !selectedSpecIds.has(jointSpecKey(spec)));
-  const pendingJointValue = pendingJointId || jointSpecKey(addableSpecs[0] ?? specs[0] ?? {
-    segmentName: '',
-    jointIndex: 0,
-  });
+  const addableSpecs = specs.filter(
+    (spec) => !selectedSpecIds.has(jointSpecKey(spec)),
+  );
+  const pendingJointValue =
+    pendingJointId ||
+    jointSpecKey(
+      addableSpecs[0] ??
+        specs[0] ?? {
+          segmentName: '',
+          jointIndex: 0,
+        },
+    );
 
   if (specs.length === 0) {
     return null;
@@ -276,7 +286,9 @@ function JointChartsSection({
           }}
           disabled={showAllJoints || addableSpecs.length === 0}
         >
-          {addableSpecs.length === 0 && <option value="">All joints selected</option>}
+          {addableSpecs.length === 0 && (
+            <option value="">All joints selected</option>
+          )}
           {addableSpecs.map((spec) => (
             <option key={jointSpecKey(spec)} value={jointSpecKey(spec)}>
               {jointSpecLabel(spec)}
@@ -316,7 +328,9 @@ function JointChartsSection({
                 aria-label={`Remove ${jointSpecLabel(spec)}`}
                 onClick={() => {
                   const id = jointSpecKey(spec);
-                  setSelectedJointIds((current) => current.filter((entry) => entry !== id));
+                  setSelectedJointIds((current) =>
+                    current.filter((entry) => entry !== id),
+                  );
                 }}
               >
                 <FiX aria-hidden />
@@ -330,7 +344,9 @@ function JointChartsSection({
         <div className={styles.chartCard}>
           <Plot
             key={`${datasetName}-${demoName}-combined-joints-${themeKey}-${displayedSpecs.map(jointSpecKey).join('|')}`}
-            data={hasData ? buildCombinedJointChartData(rows, displayedSpecs) : []}
+            data={
+              hasData ? buildCombinedJointChartData(rows, displayedSpecs) : []
+            }
             layout={
               hasData
                 ? buildJointChartLayout(displayedSpecs)
@@ -390,9 +406,16 @@ function PoseTraceCharts({
   const currentStepRow = rows[currentStepIndex];
   const currentStepLabel = currentStepRow?.episode_step ?? currentStepIndex;
   const threeDimensionalChartKey = `${rows[0]?.dataset_name ?? 'dataset'}-${rows[0]?.demo_name ?? 'demo'}-3d-${themeKey}`;
-  const defaultHiddenTraceGroups = useMemo(() => getDefaultHidden3DTraceGroups(rows), [rows]);
+  const defaultHiddenTraceGroups = useMemo(
+    () => getDefaultHidden3DTraceGroups(rows),
+    [rows],
+  );
   const jointSpecs = useMemo(
-    () => getJointChartSpecs(articulation?.segmentation ?? [], articulation?.joints ?? []),
+    () =>
+      getJointChartSpecs(
+        articulation?.segmentation ?? [],
+        articulation?.joints ?? [],
+      ),
     [articulation],
   );
 
@@ -403,8 +426,21 @@ function PoseTraceCharts({
   }
 
   const threeDimensionalData = useMemo(
-    () => (hasData ? build3DDataForStep(rows, currentStepIndex, hiddenTraceGroupsRef.current) : []),
-    [currentStepIndex, hasData, hiddenTraceGroupsVersion, rows, threeDimensionalChartKey],
+    () =>
+      hasData
+        ? build3DDataForStep(
+            rows,
+            currentStepIndex,
+            hiddenTraceGroupsRef.current,
+          )
+        : [],
+    [
+      currentStepIndex,
+      hasData,
+      hiddenTraceGroupsVersion,
+      rows,
+      threeDimensionalChartKey,
+    ],
   );
 
   useEffect(() => {
@@ -423,14 +459,17 @@ function PoseTraceCharts({
               : buildEmptyLayout('3D Pose Trace', emptyMessage, true)
           }
           onUpdate={(figure) => {
-            const nextCamera = clonePlotSceneCamera(figure.layout?.scene?.camera);
+            const nextCamera = clonePlotSceneCamera(
+              figure.layout?.scene?.camera,
+            );
             if (nextCamera) {
               sceneCameraRef.current = nextCamera;
             }
           }}
           onLegendClick={(event) => {
             const clickEvent = event as PlotLegendClickEvent;
-            const clickedTrace = clickEvent.data?.[clickEvent.curveNumber ?? -1];
+            const clickedTrace =
+              clickEvent.data?.[clickEvent.curveNumber ?? -1];
             if (typeof clickedTrace?.legendgroup !== 'string') {
               return false;
             }
@@ -459,7 +498,10 @@ function PoseTraceCharts({
         {hasData && (
           <div className={styles.stepSliderBlock}>
             <div className={styles.stepSliderHeader}>
-              <label className={styles.stepSliderLabel} htmlFor="pose-trace-step-slider">
+              <label
+                className={styles.stepSliderLabel}
+                htmlFor="pose-trace-step-slider"
+              >
                 3D step
               </label>
               <span className={styles.stepSliderValue}>
@@ -489,7 +531,8 @@ function PoseTraceCharts({
       {jointSpecs.length === 0 && hasData && (
         <section className={styles.messageCard}>
           <p>
-            This dataset has no joint mapping attrs, so no per-joint charts can be shown.
+            This dataset has no joint mapping attrs, so no per-joint charts can
+            be shown.
           </p>
         </section>
       )}
@@ -504,23 +547,23 @@ function PoseTraceCharts({
   );
 }
 
-function EmptyState({
-  openedFileCount,
-}: {
-  openedFileCount: number;
-}) {
+function EmptyState({ openedFileCount }: { openedFileCount: number }) {
   return (
     <div className={styles.emptyState}>
       <h2 className={styles.emptyTitle}>Pose Trace</h2>
       <p className={styles.emptyText}>
-        Open an HDF5 file in myHDF5, then switch to this page to plot the pose-trace data.
+        Open an HDF5 file in myHDF5, then switch to this page to plot the
+        pose-trace data.
       </p>
       <div className={styles.emptyActions}>
         <Link className={styles.openBtn} to="/">
           Open HDF5
         </Link>
         {openedFileCount > 0 && (
-          <span>{openedFileCount} opened file{openedFileCount === 1 ? '' : 's'} available in the sidebar.</span>
+          <span>
+            {openedFileCount} opened file{openedFileCount === 1 ? '' : 's'}{' '}
+            available in the sidebar.
+          </span>
         )}
       </div>
     </div>
@@ -533,7 +576,11 @@ function PoseTracePage() {
   const opened = useStore((state) => state.opened);
   const prefersDarkMode = usePrefersDarkMode();
 
-  const { file, loading: fileLoading, error: fileError } = useResolvedFile(fileUrl);
+  const {
+    file,
+    loading: fileLoading,
+    error: fileError,
+  } = useResolvedFile(fileUrl);
   const {
     source,
     loading: sourceLoading,
@@ -554,7 +601,9 @@ function PoseTracePage() {
     }
 
     setSelectedDemo((current) =>
-      current && demos.some((demo) => demo.name === current) ? current : demos[0].name,
+      current && demos.some((demo) => demo.name === current)
+        ? current
+        : demos[0].name,
     );
   }, [demos]);
 
@@ -616,12 +665,15 @@ function PoseTracePage() {
           <p className={styles.eyebrow}>Analysis</p>
           <h1 className={styles.title}>Pose Trace</h1>
           <p className={styles.subtitle}>
-            Plot end-effector and object trajectories directly from the currently opened HDF5 file.
+            Plot end-effector and object trajectories directly from the
+            currently opened HDF5 file.
           </p>
         </div>
       </header>
 
-      {!fileUrl && !file && !fileLoading && <EmptyState openedFileCount={opened.length} />}
+      {!fileUrl && !file && !fileLoading && (
+        <EmptyState openedFileCount={opened.length} />
+      )}
 
       {fileError && (
         <section className={styles.messageCard}>
@@ -661,7 +713,9 @@ function PoseTracePage() {
                   }}
                   disabled={demos.length === 0}
                 >
-                  {demos.length === 0 && <option value="">No demos available</option>}
+                  {demos.length === 0 && (
+                    <option value="">No demos available</option>
+                  )}
                   {demos.map((demo) => (
                     <option key={demo.name} value={demo.name}>
                       {formatDemoOption(demo)}
@@ -678,16 +732,20 @@ function PoseTracePage() {
               {selectionText && (
                 <>
                   <div className={styles.statusItem}>
-                    <span className={styles.statusKey}>Selected:</span> {selectionText.demo}
+                    <span className={styles.statusKey}>Selected:</span>{' '}
+                    {selectionText.demo}
                   </div>
                   <div className={styles.statusItem}>
-                    <span className={styles.statusKey}>Samples:</span> {selectionText.samples}
+                    <span className={styles.statusKey}>Samples:</span>{' '}
+                    {selectionText.samples}
                   </div>
                   <div className={styles.statusItem}>
-                    <span className={styles.statusKey}>Source:</span> {selectionText.source}
+                    <span className={styles.statusKey}>Source:</span>{' '}
+                    {selectionText.source}
                   </div>
                   <div className={styles.statusItem}>
-                    <span className={styles.statusKey}>Success:</span> {selectionText.success}
+                    <span className={styles.statusKey}>Success:</span>{' '}
+                    {selectionText.success}
                   </div>
                 </>
               )}
@@ -709,25 +767,31 @@ function PoseTracePage() {
         </>
       )}
 
-      {!source && !fileLoading && !sourceLoading && !fileError && !sourceError && fileUrl && (
-        <section className={styles.messageCard}>
-          <p>
-            Select an opened file from the sidebar to render pose traces, or go back to the viewer.
-          </p>
-          <div className={styles.emptyActions}>
-            <Link
-              className={styles.openBtn}
-              to={`/pose-trace?${createSearchParams({ url: fileUrl }).toString()}`}
-            >
-              <FiActivity aria-hidden />
-              Retry
-            </Link>
-            <Link className={styles.openBtn} to="/">
-              Open HDF5
-            </Link>
-          </div>
-        </section>
-      )}
+      {!source &&
+        !fileLoading &&
+        !sourceLoading &&
+        !fileError &&
+        !sourceError &&
+        fileUrl && (
+          <section className={styles.messageCard}>
+            <p>
+              Select an opened file from the sidebar to render pose traces, or
+              go back to the viewer.
+            </p>
+            <div className={styles.emptyActions}>
+              <Link
+                className={styles.openBtn}
+                to={`/pose-trace?${createSearchParams({ url: fileUrl }).toString()}`}
+              >
+                <FiActivity aria-hidden />
+                Retry
+              </Link>
+              <Link className={styles.openBtn} to="/">
+                Open HDF5
+              </Link>
+            </div>
+          </section>
+        )}
     </div>
   );
 }

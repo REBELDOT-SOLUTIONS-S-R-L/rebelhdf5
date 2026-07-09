@@ -12,8 +12,10 @@ export type DemoVideoKey = string;
 
 export const OBJECT_DISTRIBUTION_ANCHORS = ['initial_pose'] as const;
 
-export type ObjectDistributionAnchor = (typeof OBJECT_DISTRIBUTION_ANCHORS)[number];
-export const DEFAULT_OBJECT_DISTRIBUTION_ANCHOR: ObjectDistributionAnchor = 'initial_pose';
+export type ObjectDistributionAnchor =
+  (typeof OBJECT_DISTRIBUTION_ANCHORS)[number];
+export const DEFAULT_OBJECT_DISTRIBUTION_ANCHOR: ObjectDistributionAnchor =
+  'initial_pose';
 
 export type ObjectDistributionCategory = 'success' | 'failed' | 'teleop';
 
@@ -103,6 +105,21 @@ export interface DatasetProcessingSourceInfo {
   keyPaths: DatasetProcessingKeyInfo[];
 }
 
+export interface DatasetComparisonValue {
+  keyPath: string;
+  status: 'ok' | 'missing' | 'error';
+  shape: number[] | null;
+  dtype: string | null;
+  selection: string | null;
+  value: unknown;
+  error?: string;
+}
+
+export interface DatasetComparisonValuesResult {
+  demoName: string;
+  values: DatasetComparisonValue[];
+}
+
 export interface DatasetProcessingCutRange {
   startDemoName: string;
   endDemoName: string;
@@ -117,7 +134,14 @@ export interface DatasetProcessingRequest {
 }
 
 export interface DatasetProcessingProgress {
-  phase: 'copying' | 'flushing' | 'streaming' | 'converting' | 'encoding' | 'stats' | 'metadata';
+  phase:
+    | 'copying'
+    | 'flushing'
+    | 'streaming'
+    | 'converting'
+    | 'encoding'
+    | 'stats'
+    | 'metadata';
   overallDemoIndex: number;
   overallDemoCount: number;
   currentSourceName: string;

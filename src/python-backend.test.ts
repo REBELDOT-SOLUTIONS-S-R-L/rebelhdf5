@@ -517,7 +517,9 @@ describe('runLeRobotConvert (SSE streaming)', () => {
     );
 
     const onProgress =
-      vi.fn<NonNullable<Parameters<typeof runLeRobotConvert>[1]['onProgress']>>();
+      vi.fn<
+        NonNullable<Parameters<typeof runLeRobotConvert>[1]['onProgress']>
+      >();
     const result = await runLeRobotConvert(basicRequest(), { onProgress });
 
     expect(onProgress).toHaveBeenCalledTimes(1);
