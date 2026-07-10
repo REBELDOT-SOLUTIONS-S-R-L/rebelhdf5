@@ -28,7 +28,9 @@
 }
 
 .sidebar[data-collapsed] .sidebarInner {
+  flex: none;
   align-items: flex-start;
+  width: auto;
 }
 
 .sidebarInner [data-reveal] {
@@ -98,6 +100,8 @@
 }
 
 .sidebar[data-collapsed] .navItems {
+  flex: none;
+  padding: 0;
   overflow: visible;
 }
 
@@ -133,6 +137,7 @@
 }
 
 .sidebar[data-collapsed] .mainNavItem {
+  width: auto;
   font-size: 1.375em;
   margin-top: 1rem;
 }
