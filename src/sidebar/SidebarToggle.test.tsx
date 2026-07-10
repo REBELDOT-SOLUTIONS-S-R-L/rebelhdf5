@@ -17,26 +17,21 @@ afterEach(() => {
 
 describe('SidebarToggle', () => {
   it('shows "Collapse" label when expanded', () => {
-    render(<SidebarToggle isCollapsed={false} isDisabled={false} />);
+    render(<SidebarToggle isCollapsed={false} />);
     expect(
       screen.getByRole('button', { name: 'Collapse sidebar' }),
     ).toBeInTheDocument();
   });
 
   it('shows "Expand" label when collapsed', () => {
-    render(<SidebarToggle isCollapsed isDisabled={false} />);
+    render(<SidebarToggle isCollapsed />);
     expect(
       screen.getByRole('button', { name: 'Expand sidebar' }),
     ).toBeInTheDocument();
   });
 
-  it('is disabled when isDisabled is true', () => {
-    render(<SidebarToggle isCollapsed={false} isDisabled />);
-    expect(screen.getByRole('button')).toBeDisabled();
-  });
-
   it('toggles the store flag on click', async () => {
-    render(<SidebarToggle isCollapsed={false} isDisabled={false} />);
+    render(<SidebarToggle isCollapsed={false} />);
     expect(useStore.getState().sidebarMayCollapse).toBe(false);
 
     await userEvent.click(screen.getByRole('button'));

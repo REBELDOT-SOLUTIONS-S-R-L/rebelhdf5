@@ -21,6 +21,7 @@
 .sidebarInner {
   flex: 1 1 0%;
   min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   width: 20vw;
@@ -76,6 +77,15 @@
   display: flex;
   flex-direction: column;
   margin-top: 2rem;
+  overflow: hidden;
+}
+
+.navItems {
+  flex: 1 1 0%;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: thin;
 }
 
 .sidebar[data-collapsed] .nav {
@@ -83,6 +93,11 @@
   flex-direction: column;
   align-items: flex-start;
   margin-top: 0;
+  overflow: visible;
+}
+
+.sidebar[data-collapsed] .navItems {
+  overflow: visible;
 }
 
 .navList {
@@ -236,6 +251,10 @@
   transition: opacity 0.1s ease-out;
 }
 
+.actionBtn:disabled {
+  opacity: 0;
+}
+
 .downloadBtn {
   composes: actionBtn;
   color: inherit;
@@ -268,11 +287,11 @@
 }
 
 .openedFiles {
-  flex: 1 1 auto;
+  flex: 1 1 0%;
   min-height: 0;
   display: flex;
   flex-direction: column;
-  margin-top: 2.25rem;
+  margin-top: 1rem;
 }
 
 .flyout .openedFiles {

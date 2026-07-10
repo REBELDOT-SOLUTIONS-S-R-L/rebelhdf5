@@ -30,6 +30,7 @@ import type {
   DemoVideoInfo,
   DemoVideoKey,
   ParsedArticulation,
+  SourceFeatureCapabilities,
 } from './types';
 
 type PoseSeries = number[][][];
@@ -55,6 +56,10 @@ type LoadDemoRowsPayload = {
 };
 
 type GetDatasetProcessingInfoPayload = {
+  sourceId: string;
+};
+
+type InspectSourceFeaturesPayload = {
   sourceId: string;
 };
 
@@ -93,6 +98,11 @@ type PoseTraceWorkerRequest =
     }
   | {
       id: number;
+      type: 'inspectSourceFeatures';
+      payload: InspectSourceFeaturesPayload;
+    }
+  | {
+      id: number;
       type: 'loadDatasetComparisonValues';
       payload: LoadDatasetComparisonValuesPayload;
     }
@@ -127,6 +137,7 @@ type PoseTraceWorkerResponse =
         | OpenSourceResultPayload
         | DemoRow[]
         | DatasetProcessingSourceInfo
+        | SourceFeatureCapabilities
         | DatasetComparisonValuesResult
         | ObjectDistributionResult
         | ProcessDatasetResult
@@ -149,6 +160,7 @@ interface WorkerSuccessResult {
     | OpenSourceResultPayload
     | DemoRow[]
     | DatasetProcessingSourceInfo
+    | SourceFeatureCapabilities
     | DatasetComparisonValuesResult
     | ObjectDistributionResult
     | ProcessDatasetResult
@@ -2296,6 +2308,77 @@ function listDatasetProcessingInfo(
   };
 }
 
+function demoHasPoseTraceData(entry: OpenSourceEntry, demoName: string) {
+  try {
+    return buildDemoRows(entry, demoName).length > 0;
+  } catch {
+    return false;
+  }
+}
+
+function demoHasObjectDistributionData(
+  entry: OpenSourceEntry,
+  demoName: string,
+) {
+  try {
+    const demoGroup = getDemoGroup(entry, demoName);
+    return (
+      readAnchorXY(demoGroup, 'initial_pose', null) !== null ||
+      readInitialPose(demoGroup, null) !== null
+    );
+  } catch {
+    return false;
+  }
+}
+
+function inspectSourceFeatures(
+  entry: OpenSourceEntry,
+): SourceFeatureCapabilities {
+  const info = listDatasetProcessingInfo(entry);
+  let poseTraceDemoCount = 0;
+  let videoDemoCount = 0;
+  let videoCount = 0;
+  let objectDistributionDemoCount = 0;
+
+  for (const demo of entry.demos) {
+    if (poseTraceDemoCount === 0 && demoHasPoseTraceData(entry, demo.name)) {
+      poseTraceDemoCount = 1;
+    }
+
+    if (
+      objectDistributionDemoCount === 0 &&
+      demoHasObjectDistributionData(entry, demo.name)
+    ) {
+      objectDistributionDemoCount = 1;
+    }
+
+    if (videoDemoCount === 0) {
+      const videos = listDemoVideoInfo(entry, demo.name);
+      if (videos.length > 0) {
+        videoDemoCount = 1;
+        videoCount = videos.length;
+      }
+    }
+
+    if (
+      poseTraceDemoCount > 0 &&
+      videoDemoCount > 0 &&
+      objectDistributionDemoCount > 0
+    ) {
+      break;
+    }
+  }
+
+  return {
+    demoCount: entry.demos.length,
+    keyCount: info.keyPaths.length,
+    poseTraceDemoCount,
+    videoDemoCount,
+    videoCount,
+    objectDistributionDemoCount,
+  };
+}
+
 function loadDatasetComparisonValues(
   entry: OpenSourceEntry,
   demoName: string,
@@ -3071,6 +3154,13 @@ async function handleRequest(
         throw new Error('Pose Trace source is no longer available.');
       }
       return { result: listDatasetProcessingInfo(entry) };
+    }
+    case 'inspectSourceFeatures': {
+      const entry = openSources.get(message.payload.sourceId);
+      if (!entry) {
+        throw new Error('Pose Trace source is no longer available.');
+      }
+      return { result: inspectSourceFeatures(entry) };
     }
     case 'loadDatasetComparisonValues': {
       const entry = openSources.get(message.payload.sourceId);

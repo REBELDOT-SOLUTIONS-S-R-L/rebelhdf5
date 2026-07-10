@@ -15,6 +15,7 @@ import type {
   DemoVideoKey,
   ParsedArticulation,
   PoseTraceSource,
+  SourceFeatureCapabilities,
 } from './types';
 
 type OpenLocalSourcePayload = {
@@ -32,6 +33,10 @@ type LoadDemoRowsPayload = {
 };
 
 type GetDatasetProcessingInfoPayload = {
+  sourceId: string;
+};
+
+type InspectSourceFeaturesPayload = {
   sourceId: string;
 };
 
@@ -81,6 +86,11 @@ type PoseTraceWorkerRequest =
     }
   | {
       id: number;
+      type: 'inspectSourceFeatures';
+      payload: InspectSourceFeaturesPayload;
+    }
+  | {
+      id: number;
       type: 'loadDatasetComparisonValues';
       payload: LoadDatasetComparisonValuesPayload;
     }
@@ -102,6 +112,7 @@ type PoseTraceWorkerResponse =
         | OpenSourceResult
         | DemoRow[]
         | DatasetProcessingSourceInfo
+        | SourceFeatureCapabilities
         | DatasetComparisonValuesResult
         | ObjectDistributionResult
         | DatasetProcessingResultMeta
@@ -278,6 +289,14 @@ export function getDatasetProcessingInfo(
   source: PoseTraceSource,
 ): Promise<DatasetProcessingSourceInfo> {
   return callWorker<DatasetProcessingSourceInfo>('getDatasetProcessingInfo', {
+    sourceId: source.sourceId,
+  });
+}
+
+export function inspectSourceFeatures(
+  source: PoseTraceSource,
+): Promise<SourceFeatureCapabilities> {
+  return callWorker<SourceFeatureCapabilities>('inspectSourceFeatures', {
     sourceId: source.sourceId,
   });
 }

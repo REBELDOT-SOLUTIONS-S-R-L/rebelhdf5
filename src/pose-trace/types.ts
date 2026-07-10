@@ -105,6 +105,15 @@ export interface DatasetProcessingSourceInfo {
   keyPaths: DatasetProcessingKeyInfo[];
 }
 
+export interface SourceFeatureCapabilities {
+  demoCount: number;
+  keyCount: number;
+  poseTraceDemoCount: number;
+  videoDemoCount: number;
+  videoCount: number;
+  objectDistributionDemoCount: number;
+}
+
 export interface DatasetComparisonValue {
   keyPath: string;
   status: 'ok' | 'missing' | 'error';
