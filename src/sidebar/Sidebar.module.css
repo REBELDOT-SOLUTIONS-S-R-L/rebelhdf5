@@ -83,6 +83,7 @@
 .navItems {
   flex: 1 1 0%;
   min-height: 0;
+  padding: 0 0.25rem;
   overflow-x: hidden;
   overflow-y: auto;
   scrollbar-width: thin;
@@ -114,7 +115,8 @@
   display: flex;
   align-items: center;
   justify-content: flex-start;
-  margin: 0.25rem -1rem;
+  width: 100%;
+  margin: 0.25rem 0;
   padding: calc(0.5rem + 1px) 1rem 0.5rem; /* tweak horizontal centering */
   color: inherit;
   border-radius: 1.5rem;
@@ -302,6 +304,7 @@
 .openedFilesList {
   flex: 1 1 auto;
   min-height: 0;
+  padding: 0 0.25rem;
   overflow-x: hidden;
   overflow-y: auto;
   scrollbar-width: thin;
