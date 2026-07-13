@@ -3,6 +3,10 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import {
+  type AvailabilityState,
+  type FileFeatureAvailability,
+} from '../feature-availability';
 import { FileService, type H5File, useStore } from '../stores';
 import OpenedFiles from './OpenedFiles';
 
@@ -17,12 +21,44 @@ function makeRemote(url: string, name = url): H5File {
   };
 }
 
+function makeLocal(name = 'local.h5'): H5File {
+  const file = new File([], name);
+  const url = `blob:fake-${name}`;
+  return {
+    url,
+    name,
+    service: FileService.Local,
+    resolvedUrl: url,
+    file,
+  };
+}
+
 function renderAt(initialEntry: string) {
   return render(
     <MemoryRouter initialEntries={[initialEntry]}>
-      <OpenedFiles />
+      <OpenedFiles availability={availabilityFor(useStore.getState().opened)} />
     </MemoryRouter>,
   );
+}
+
+function availableFeatures(): FileFeatureAvailability {
+  const available = { status: 'available', reason: '' } as const;
+  return {
+    poseTrace: available,
+    videoConverter: available,
+    datasetProcessing: available,
+    datasetComparison: available,
+    objectDistribution: available,
+  };
+}
+
+function availabilityFor(opened: H5File[]): AvailabilityState {
+  return {
+    byUrl: Object.fromEntries(
+      opened.map((file) => [file.url, availableFeatures()]),
+    ),
+    backendAvailable: true,
+  };
 }
 
 beforeEach(() => {
@@ -107,5 +143,80 @@ describe('OpenedFiles', () => {
     expect(link.getAttribute('href')).toContain(
       encodeURIComponent('https://x/a.h5'),
     );
+  });
+
+  it('disables entry navigation when the current route is unavailable', () => {
+    const file = makeRemote('https://x/a.h5', 'a.h5');
+    const unavailableFeatures = availableFeatures();
+    unavailableFeatures.poseTrace = {
+      status: 'unavailable',
+      reason: 'No usable pose data found.',
+    };
+    useStore.setState({ opened: [file] });
+
+    render(
+      <MemoryRouter initialEntries={['/pose-trace?url=https%3A%2F%2Fx%2Fa.h5']}>
+        <OpenedFiles
+          availability={{
+            byUrl: { [file.url]: unavailableFeatures },
+            backendAvailable: true,
+          }}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole('button', { name: 'a.h5' })).toBeDisabled();
+    expect(screen.queryByRole('link', { name: 'a.h5' })).toBeNull();
+  });
+
+  it('keeps dataset comparison row navigation enabled for unsupported schemas', () => {
+    const file = makeRemote('https://x/a.h5', 'a.h5');
+    const unavailableFeatures = availableFeatures();
+    unavailableFeatures.datasetComparison = {
+      status: 'unavailable',
+      reason: 'Unsupported HDF5 schema.',
+    };
+    useStore.setState({ opened: [file] });
+
+    render(
+      <MemoryRouter
+        initialEntries={['/dataset-comparison?url=https%3A%2F%2Fx%2Fa.h5']}
+      >
+        <OpenedFiles
+          availability={{
+            byUrl: { [file.url]: unavailableFeatures },
+            backendAvailable: true,
+          }}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole('link', { name: 'a.h5' })).toBeInTheDocument();
+  });
+
+  it('keeps remote files downloadable', () => {
+    useStore.setState({
+      opened: [makeRemote('https://x/a.h5', 'a.h5')],
+    });
+
+    renderAt('/view?url=https%3A%2F%2Fx%2Fa.h5');
+
+    const downloadLink = screen.getByRole('link', { name: 'Download file' });
+    expect(downloadLink).toHaveAttribute('href', 'https://x/a.h5');
+    expect(downloadLink).toHaveAttribute('download', 'a.h5');
+  });
+
+  it('disables downloads for local files', () => {
+    const local = makeLocal('local.h5');
+    useStore.setState({ opened: [local] });
+
+    renderAt(`/view?url=${encodeURIComponent(local.url)}`);
+
+    expect(
+      screen.getByRole('button', { name: 'Download file' }),
+    ).toBeDisabled();
+    expect(
+      screen.queryByRole('link', { name: 'Download file' }),
+    ).not.toBeInTheDocument();
   });
 });

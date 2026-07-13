@@ -15,19 +15,23 @@
 
 .sidebar[data-collapsed] {
   max-width: 4.5em;
+  padding: 1rem 0.75rem 0;
   overflow: visible;
 }
 
 .sidebarInner {
   flex: 1 1 0%;
   min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   width: 20vw;
 }
 
 .sidebar[data-collapsed] .sidebarInner {
+  flex: none;
   align-items: flex-start;
+  width: auto;
 }
 
 .sidebarInner [data-reveal] {
@@ -76,13 +80,30 @@
   display: flex;
   flex-direction: column;
   margin-top: 2rem;
+  overflow: hidden;
+}
+
+.navItems {
+  flex: 1 1 0%;
+  min-height: 0;
+  padding: 0 0.25rem;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: thin;
 }
 
 .sidebar[data-collapsed] .nav {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
+  align-items: center;
   margin-top: 0;
+  overflow: visible;
+}
+
+.sidebar[data-collapsed] .navItems {
+  flex: none;
+  padding: 0;
+  overflow: visible;
 }
 
 .navList {
@@ -99,7 +120,8 @@
   display: flex;
   align-items: center;
   justify-content: flex-start;
-  margin: 0.25rem -1rem;
+  width: 100%;
+  margin: 0.25rem 0;
   padding: calc(0.5rem + 1px) 1rem 0.5rem; /* tweak horizontal centering */
   color: inherit;
   border-radius: 1.5rem;
@@ -116,6 +138,7 @@
 }
 
 .sidebar[data-collapsed] .mainNavItem {
+  width: auto;
   font-size: 1.375em;
   margin-top: 1rem;
 }
@@ -236,6 +259,10 @@
   transition: opacity 0.1s ease-out;
 }
 
+.actionBtn:disabled {
+  opacity: 0;
+}
+
 .downloadBtn {
   composes: actionBtn;
   color: inherit;
@@ -268,11 +295,11 @@
 }
 
 .openedFiles {
-  flex: 1 1 auto;
+  flex: 1 1 0%;
   min-height: 0;
   display: flex;
   flex-direction: column;
-  margin-top: 2.25rem;
+  margin-top: 1rem;
 }
 
 .flyout .openedFiles {
@@ -283,6 +310,7 @@
 .openedFilesList {
   flex: 1 1 auto;
   min-height: 0;
+  padding: 0 0.25rem;
   overflow-x: hidden;
   overflow-y: auto;
   scrollbar-width: thin;

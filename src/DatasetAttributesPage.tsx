@@ -20,6 +20,10 @@ import {
   type PythonBackendStatus,
 } from './python-backend';
 import {
+  getDatasetFeatureAvailability,
+  useDatasetFeatureAvailability,
+} from './feature-availability';
+import {
   articulationFromRows,
   type AttributeTreeNode,
   buildSlashTree,
@@ -137,6 +141,13 @@ function DatasetAttributesPage() {
   const opened = useStore((state) => state.opened);
   const file = resolveActiveFile(opened, searchParams.get('url'));
   const datasetPath = file?.serverPath ?? null;
+  const availability = useDatasetFeatureAvailability(opened);
+  const attributesAvailability = getDatasetFeatureAvailability({
+    file,
+    feature: 'datasetAttributes',
+    opened,
+    availability,
+  });
 
   const [backend, setBackend] = useState<PythonBackendStatus>({
     available: false,
@@ -177,7 +188,11 @@ function DatasetAttributesPage() {
   }, []);
 
   useEffect(() => {
-    if (!datasetPath || !backend.available) {
+    if (
+      !datasetPath ||
+      !backend.available ||
+      attributesAvailability.status !== 'available'
+    ) {
       setAttributes(null);
       setLoading(false);
       return;
@@ -221,7 +236,7 @@ function DatasetAttributesPage() {
     return () => {
       cancelled = true;
     };
-  }, [backend.available, datasetPath]);
+  }, [attributesAvailability.status, backend.available, datasetPath]);
 
   const attributeGroups = useMemo<DatasetAttributeGroup[]>(() => {
     if (!attributes?.groups) {
@@ -409,6 +424,26 @@ function DatasetAttributesPage() {
           </p>
         </section>
       )}
+
+      {file &&
+        datasetPath &&
+        backend.available &&
+        attributesAvailability.status === 'pending' && (
+          <section className={styles.panel}>
+            <p className={styles.statusText}>
+              Inspecting dataset schema before loading attributes...
+            </p>
+          </section>
+        )}
+
+      {file &&
+        datasetPath &&
+        backend.available &&
+        attributesAvailability.status === 'unavailable' && (
+          <section className={styles.panel}>
+            <p className={styles.errorText}>{attributesAvailability.reason}</p>
+          </section>
+        )}
 
       {loading && (
         <section className={styles.panel}>

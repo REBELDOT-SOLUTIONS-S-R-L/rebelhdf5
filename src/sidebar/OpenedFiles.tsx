@@ -17,6 +17,11 @@ import {
 } from 'react-router-dom';
 import { clear } from 'suspend-react';
 
+import {
+  type AvailabilityState,
+  type DatasetFeature,
+  getDatasetFeatureAvailability,
+} from '../feature-availability';
 import { FileService, type H5File, useStore } from '../stores';
 import { getFileLink } from '../utils';
 import sidebarStyles from './Sidebar.module.css';
@@ -29,7 +34,35 @@ const ICONS: Record<FileService, ComponentType<{ className?: string }>> = {
   [FileService.Zenodo]: TbLetterZ,
 };
 
-function OpenedFiles() {
+interface Props {
+  availability: AvailabilityState;
+}
+
+function featureForPathname(pathname: string): DatasetFeature | null {
+  if (pathname === '/pose-trace') {
+    return 'poseTrace';
+  }
+  if (pathname === '/video-converter') {
+    return 'videoConverter';
+  }
+  if (pathname === '/dataset-processing') {
+    return 'datasetProcessing';
+  }
+  if (pathname === '/dataset-comparison') {
+    return 'datasetComparison';
+  }
+  if (pathname === '/dataset-attributes') {
+    return 'datasetAttributes';
+  }
+  if (pathname === '/object-distribution') {
+    return 'objectDistribution';
+  }
+
+  return null;
+}
+
+function OpenedFiles(props: Props) {
+  const { availability } = props;
   const opened = useStore((state) => state.opened);
   const removeFileAt = useStore((state) => state.removeFileAt);
 
@@ -51,6 +84,7 @@ function OpenedFiles() {
               : location.pathname === '/object-distribution'
                 ? '/object-distribution'
                 : '/view';
+  const currentFeature = featureForPathname(location.pathname);
 
   function removeFile(file: H5File, index: number, isActive: boolean) {
     if (isActive) {
@@ -77,39 +111,74 @@ function OpenedFiles() {
             const { url, name, service, resolvedUrl } = file;
             const isActive = url === fileUrl;
             const Icon = ICONS[service];
+            const routeAvailability = currentFeature
+              ? getDatasetFeatureAvailability({
+                  file,
+                  feature: currentFeature,
+                  opened,
+                  availability,
+                })
+              : null;
+            const canNavigate =
+              !routeAvailability || routeAvailability.status === 'available';
 
             return (
               <li key={url} className={sidebarStyles.navListItem}>
-                <Link
-                  key={url}
-                  className={sidebarStyles.navItem}
-                  to={`${fileRoute}?${createSearchParams({ url }).toString()}`}
-                  title={url}
-                  aria-current={isActive ? 'page' : undefined}
-                  onClick={(evt) => {
-                    // Remove focus so flyout can hide itself
-                    evt.currentTarget.blur();
-                  }}
-                >
-                  <Icon className={sidebarStyles.icon} />
-                  <span className={sidebarStyles.label}>{name}</span>
-                </Link>
-                <div className={sidebarStyles.actionBtnGroup}>
-                  <a
-                    className={sidebarStyles.downloadBtn}
-                    href={resolvedUrl}
-                    title={resolvedUrl}
-                    download={name}
-                    aria-label="Download file"
-                    target="_blank"
-                    rel="noreferrer"
+                {canNavigate ? (
+                  <Link
+                    key={url}
+                    className={sidebarStyles.navItem}
+                    to={`${fileRoute}?${createSearchParams({ url }).toString()}`}
+                    title={url}
+                    aria-current={isActive ? 'page' : undefined}
                     onClick={(evt) => {
-                      evt.stopPropagation();
+                      // Remove focus so flyout can hide itself
                       evt.currentTarget.blur();
                     }}
                   >
-                    <FiDownload />
-                  </a>
+                    <Icon className={sidebarStyles.icon} />
+                    <span className={sidebarStyles.label}>{name}</span>
+                  </Link>
+                ) : (
+                  <button
+                    className={sidebarStyles.navItem}
+                    type="button"
+                    title={routeAvailability.reason}
+                    aria-current={isActive ? 'page' : undefined}
+                    disabled
+                  >
+                    <Icon className={sidebarStyles.icon} />
+                    <span className={sidebarStyles.label}>{name}</span>
+                  </button>
+                )}
+                <div className={sidebarStyles.actionBtnGroup}>
+                  {service === FileService.Local ? (
+                    <button
+                      className={sidebarStyles.downloadBtn}
+                      type="button"
+                      title="Local files cannot be downloaded"
+                      aria-label="Download file"
+                      disabled
+                    >
+                      <FiDownload />
+                    </button>
+                  ) : (
+                    <a
+                      className={sidebarStyles.downloadBtn}
+                      href={resolvedUrl}
+                      title={resolvedUrl}
+                      download={name}
+                      aria-label="Download file"
+                      target="_blank"
+                      rel="noreferrer"
+                      onClick={(evt) => {
+                        evt.stopPropagation();
+                        evt.currentTarget.blur();
+                      }}
+                    >
+                      <FiDownload />
+                    </a>
+                  )}
                   <button
                     className={sidebarStyles.removeBtn}
                     type="button"

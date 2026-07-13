@@ -1,11 +1,53 @@
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import {
+  type DatasetFeature,
+  type FeatureAvailability,
+} from '../feature-availability';
 import { FileService, type H5File, useStore } from '../stores';
 import Sidebar from './Sidebar';
 
 const initialState = useStore.getState();
+let featureStatuses: Partial<Record<DatasetFeature, FeatureAvailability>> = {};
+
+vi.mock(import('../feature-availability'), async (importOriginal) => {
+  const actual = await importOriginal();
+  const available: FeatureAvailability = {
+    status: 'available',
+    reason: '',
+  };
+  const unavailable: FeatureAvailability = {
+    status: 'unavailable',
+    reason: 'Unavailable in test',
+  };
+
+  return {
+    ...actual,
+    useDatasetFeatureAvailability: () => ({
+      byUrl: {},
+      backendAvailable: true,
+    }),
+    getDatasetFeatureAvailability: ({
+      file,
+      feature,
+    }: {
+      file: H5File | null;
+      feature: DatasetFeature;
+    }) => {
+      if (!file) {
+        return unavailable;
+      }
+
+      if (feature === 'datasetComparison') {
+        return available;
+      }
+
+      return featureStatuses[feature] ?? available;
+    },
+  };
+});
 
 function makeRemote(url: string, name = url): H5File {
   return {
@@ -28,6 +70,7 @@ function renderSidebar(initialEntry = '/') {
 
 beforeEach(() => {
   globalThis.localStorage.clear();
+  featureStatuses = {};
 });
 
 afterEach(() => {
@@ -38,7 +81,7 @@ describe('Sidebar', () => {
   it('renders the brand link', () => {
     renderSidebar();
     expect(
-      screen.getByRole('link', { name: /rebelHDF5/i }),
+      screen.getByRole('link', { name: /rebelhdf5/i }),
     ).toBeInTheDocument();
   });
 
@@ -79,6 +122,49 @@ describe('Sidebar', () => {
     ).toBeInTheDocument();
   });
 
+  it('disables file-bound nav items while availability is pending', () => {
+    featureStatuses = {
+      poseTrace: {
+        status: 'pending',
+        reason: 'Inspecting dataset schema...',
+      },
+    };
+    useStore.setState({ opened: [makeRemote('https://x/a.h5', 'a.h5')] });
+    renderSidebar('/view?url=https%3A%2F%2Fx%2Fa.h5');
+
+    expect(screen.getByRole('button', { name: 'Pose Trace' })).toBeDisabled();
+    expect(screen.queryByRole('link', { name: 'Pose Trace' })).toBeNull();
+  });
+
+  it('disables unavailable file-bound nav items', () => {
+    featureStatuses = {
+      poseTrace: {
+        status: 'unavailable',
+        reason: 'No usable pose data found.',
+      },
+    };
+    useStore.setState({ opened: [makeRemote('https://x/a.h5', 'a.h5')] });
+    renderSidebar('/view?url=https%3A%2F%2Fx%2Fa.h5');
+
+    expect(screen.getByRole('button', { name: 'Pose Trace' })).toBeDisabled();
+    expect(screen.queryByRole('link', { name: 'Pose Trace' })).toBeNull();
+  });
+
+  it('keeps Dataset Comparison enabled even when schema inspection fails', () => {
+    featureStatuses = {
+      datasetComparison: {
+        status: 'unavailable',
+        reason: 'Unsupported HDF5 schema.',
+      },
+    };
+    useStore.setState({ opened: [makeRemote('https://x/a.h5', 'a.h5')] });
+    renderSidebar('/view?url=https%3A%2F%2Fx%2Fa.h5');
+
+    expect(
+      screen.getByRole('link', { name: 'Dataset Comparison' }),
+    ).toBeInTheDocument();
+  });
+
   it('always shows the Databricks nav link', () => {
     renderSidebar();
     expect(
@@ -86,17 +172,17 @@ describe('Sidebar', () => {
     ).toBeInTheDocument();
   });
 
-  it('disables the SidebarToggle when not viewing a file', () => {
+  it('enables the SidebarToggle outside the viewer page', () => {
     renderSidebar('/');
-    expect(screen.getByRole('button', { name: /sidebar/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /sidebar/i })).toBeEnabled();
   });
 
-  it('shows the OpenedFiles flyout shell when collapsed and viewing a file', () => {
+  it('shows the OpenedFiles flyout shell when collapsed', () => {
     useStore.setState({
       opened: [makeRemote('https://x/a.h5', 'a.h5')],
       sidebarMayCollapse: true,
     });
-    renderSidebar('/view?url=https%3A%2F%2Fx%2Fa.h5');
+    renderSidebar('/dataset-processing?url=https%3A%2F%2Fx%2Fa.h5');
 
     expect(
       screen.getByRole('button', { name: 'Opened files' }),

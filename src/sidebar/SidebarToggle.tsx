@@ -5,11 +5,10 @@ import sidebarStyles from './Sidebar.module.css';
 
 interface Props {
   isCollapsed: boolean;
-  isDisabled: boolean;
 }
 
 function SidebarToggle(props: Props) {
-  const { isCollapsed, isDisabled } = props;
+  const { isCollapsed } = props;
   const toggleSidebar = useStore((state) => state.toggleSidebar);
 
   return (
@@ -17,7 +16,6 @@ function SidebarToggle(props: Props) {
       className={sidebarStyles.navBtn}
       type="button"
       aria-label={`${isCollapsed ? 'Expand' : 'Collapse'} sidebar`}
-      disabled={isDisabled}
       onClick={() => toggleSidebar()}
     >
       {isCollapsed ? <FiChevronsRight /> : <FiChevronsLeft />}
