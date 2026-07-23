@@ -13,6 +13,7 @@ numpy>=1.24         # array handling
 databricks-sdk>=0.20    # WorkspaceClient + files mixin
 tqdm>=4.66              # download progress bars
 pyarrow>=14.0           # parquet read/write (backend/lerobot.py)
+pandas>=2.0,<3.0        # canonical indexed tasks.parquet metadata (LeRobot v3)
 
 # --- Tests only (scripts/tests/) ---
 # Run from scripts/:  pytest tests

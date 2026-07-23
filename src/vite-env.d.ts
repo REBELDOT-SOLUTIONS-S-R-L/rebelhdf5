@@ -2,8 +2,16 @@
 
 declare const __PYTHON_BACKEND_PORT__: number;
 
+interface RebelHdf5OutputDirectorySelection {
+  path: string;
+  authorization: string;
+}
+
 interface RebelHdf5DesktopRuntime {
   backendPort?: number;
+  chooseDirectory?: (
+    defaultPath?: string,
+  ) => Promise<RebelHdf5OutputDirectorySelection | undefined>;
   getPathForFile?: (file: File) => string | undefined;
   readFile?: (path: string) => Promise<ArrayBuffer>;
 }

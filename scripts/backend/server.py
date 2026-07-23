@@ -2,12 +2,19 @@
 
 from __future__ import annotations
 
+import os
+import re
 import threading
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
 from .http import BackendHandler
+
+_OUTPUT_AUTHORIZATION_TOKEN = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+    re.IGNORECASE,
+)
 
 
 class BackendServer(ThreadingHTTPServer):
@@ -25,8 +32,14 @@ class BackendServer(ThreadingHTTPServer):
         self.root_dirs: list[str] = [str(Path(d).expanduser().resolve()) for d in root_dirs]
         # Backwards-compat: keep a single root_dir attribute pointing at the first.
         self.root_dir: str = self.root_dirs[0]
-        self.output_dir = output_dir
+        self._default_output_directory = Path(output_dir).expanduser().resolve(strict=True)
+        if not self._default_output_directory.is_dir():
+            raise ValueError(f"Output location is not a directory: {output_dir}")
+        if not os.access(self._default_output_directory, os.W_OK | os.X_OK):
+            raise ValueError(f"Output directory is not writable: {output_dir}")
+        self.output_dir = str(self._default_output_directory)
         self._outputs: dict[str, Path] = {}
+        self._authorized_output_directories: dict[str, Path] = {}
         self._lock = threading.Lock()
         super().__init__(("0.0.0.0", port), BackendHandler)
 
@@ -95,3 +108,30 @@ class BackendServer(ThreadingHTTPServer):
     def get_output(self, filename: str) -> Path | None:
         with self._lock:
             return self._outputs.get(filename)
+
+    def authorize_output_directory(self, token: str, path: str) -> Path:
+        """Register a folder selected through the desktop app's private IPC channel."""
+        if not _OUTPUT_AUTHORIZATION_TOKEN.fullmatch(token):
+            raise ValueError("Invalid output-directory authorization token.")
+
+        try:
+            output_directory = Path(path).expanduser().resolve(strict=True)
+        except (OSError, RuntimeError, ValueError) as exc:
+            raise ValueError(f"Output directory does not exist: {path}") from exc
+        if not output_directory.is_dir():
+            raise ValueError(f"Output location is not a directory: {path}")
+        if not os.access(output_directory, os.W_OK | os.X_OK):
+            raise ValueError(f"Output directory is not writable: {path}")
+
+        with self._lock:
+            self._authorized_output_directories[token] = output_directory
+        return output_directory
+
+    def resolve_output_directory(self, token: str | None) -> Path | None:
+        """Resolve an opaque desktop authorization, or the configured default."""
+        if token is None:
+            return self._default_output_directory
+        if not _OUTPUT_AUTHORIZATION_TOKEN.fullmatch(token):
+            return None
+        with self._lock:
+            return self._authorized_output_directories.get(token)

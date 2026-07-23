@@ -19,8 +19,11 @@ Optional: pip install 'databricks-sdk>=0.72.0' for faster single-file volume dow
 from __future__ import annotations
 
 import argparse
+import json
 import sys
+import threading
 from pathlib import Path
+from typing import TextIO
 
 # Make the sibling `backend` package importable when this script is invoked
 # directly (e.g. `python scripts/backend_server.py`).
@@ -31,12 +34,52 @@ if str(_SCRIPT_DIR) not in sys.path:
 from backend.server import BackendServer
 
 DEFAULT_PORT = 4095
+OUTPUT_AUTHORIZATION_RESPONSE_PREFIX = "REBELHDF5_IPC "
 
 # Directories that are added on top of the cwd when no --dir flag is supplied.
 # Each entry is silently dropped when the path does not exist on this machine.
 DEFAULT_EXTRA_DIRS = (
     "/media/alexluci/480eeb06-1ed9-4099-af71-85b9cc90b82b/synthetic_data_garment",
 )
+
+
+def listen_for_output_directory_authorizations(
+    server: BackendServer,
+    input_stream: TextIO,
+    response_stream: TextIO,
+) -> None:
+    """Accept native folder-picker grants over the desktop process's private stdin."""
+    for line in input_stream:
+        token: object = None
+        try:
+            message = json.loads(line)
+            if not isinstance(message, dict) or message.get("type") != "authorize-output-directory":
+                raise ValueError("Unsupported desktop IPC message.")
+
+            token = message.get("token")
+            path = message.get("path")
+            if not isinstance(token, str) or not isinstance(path, str):
+                raise ValueError("Authorization token and path must be strings.")
+
+            authorized_path = server.authorize_output_directory(token, path)
+            response = {
+                "type": "output-directory-authorization",
+                "token": token,
+                "path": str(authorized_path),
+                "ok": True,
+            }
+        except (json.JSONDecodeError, ValueError) as exc:
+            response = {
+                "type": "output-directory-authorization",
+                "token": token if isinstance(token, str) else None,
+                "ok": False,
+                "error": str(exc),
+            }
+
+        response_stream.write(
+            f"{OUTPUT_AUTHORIZATION_RESPONSE_PREFIX}{json.dumps(response)}\n",
+        )
+        response_stream.flush()
 
 
 def main() -> None:
@@ -54,6 +97,11 @@ def main() -> None:
         "--port", type=int, default=DEFAULT_PORT,
         help=f"Port (default: {DEFAULT_PORT})",
     )
+    parser.add_argument(
+        "--output-authorization-stdin",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
 
     args = parser.parse_args()
     if args.dir:
@@ -69,6 +117,13 @@ def main() -> None:
     Path(output_dir).mkdir(parents=True, exist_ok=True)
 
     server = BackendServer(args.port, root_dirs, output_dir)
+    if args.output_authorization_stdin:
+        threading.Thread(
+            target=listen_for_output_directory_authorizations,
+            args=(server, sys.stdin, sys.stdout),
+            name="desktop-output-directory-authorizations",
+            daemon=True,
+        ).start()
     print(f"rebelHDF5 Backend Server", flush=True)
     for i, d in enumerate(root_dirs):
         prefix = "  Root dirs: " if i == 0 else "             "
@@ -83,8 +138,6 @@ def main() -> None:
     # backgrounded children, which would otherwise silently swallow Ctrl+C.
     import os
     import signal
-    import threading
-
     def _hard_exit(_signum, _frame):
         # User got impatient and signaled twice — exit immediately.
         os._exit(130)

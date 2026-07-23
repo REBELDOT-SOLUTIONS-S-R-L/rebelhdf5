@@ -132,6 +132,65 @@ class TestOutputRegistry:
     def test_get_unknown_returns_none(self, stopped_server: BackendServer) -> None:
         assert stopped_server.get_output("never-registered.h5") is None
 
+
+class TestOutputDirectoryAuthorizations:
+    TOKEN = "770d3b1f-0fa4-4cfc-8dfb-edc586ca800b"
+
+    def test_uses_configured_output_directory_by_default(
+        self,
+        stopped_server: BackendServer,
+    ) -> None:
+        assert stopped_server.resolve_output_directory(None) == Path(
+            stopped_server.output_dir,
+        ).resolve()
+
+    def test_authorizes_and_resolves_desktop_selection(
+        self,
+        stopped_server: BackendServer,
+        tmp_path: Path,
+    ) -> None:
+        selected = tmp_path / "selected"
+        selected.mkdir()
+
+        authorized = stopped_server.authorize_output_directory(
+            self.TOKEN,
+            str(selected),
+        )
+
+        assert authorized == selected.resolve()
+        assert stopped_server.resolve_output_directory(self.TOKEN) == selected.resolve()
+
+    def test_rejects_invalid_token(
+        self,
+        stopped_server: BackendServer,
+        tmp_path: Path,
+    ) -> None:
+        with pytest.raises(ValueError, match="authorization token"):
+            stopped_server.authorize_output_directory("not-a-token", str(tmp_path))
+
+    def test_rejects_missing_directory(
+        self,
+        stopped_server: BackendServer,
+        tmp_path: Path,
+    ) -> None:
+        with pytest.raises(ValueError, match="does not exist"):
+            stopped_server.authorize_output_directory(
+                self.TOKEN,
+                str(tmp_path / "missing"),
+            )
+
+    def test_does_not_resolve_unknown_or_malformed_token(
+        self,
+        stopped_server: BackendServer,
+    ) -> None:
+        assert (
+            stopped_server.resolve_output_directory(
+                "42523f06-63fb-43b4-8015-3dbd83f75cd0",
+            )
+            is None
+        )
+        assert stopped_server.resolve_output_directory("../escape") is None
+
     def test_register_overwrites_same_name(
         self, stopped_server: BackendServer, tmp_path: Path,
     ) -> None:

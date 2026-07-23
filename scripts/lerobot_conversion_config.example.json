@@ -2,6 +2,8 @@
   "fps": 30,
   "robot_type": "so101_bimanual",
   "chunk_size": 1000,
+  "data_files_size_in_mb": 100,
+  "video_files_size_in_mb": 200,
   "exclude_name_substrings": ["_failed"],
   "state_sources": {
     "observation.state": [

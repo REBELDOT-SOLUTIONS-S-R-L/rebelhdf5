@@ -2,7 +2,10 @@ import {
   type DatasetProcessingKeyInfo,
   type DatasetProcessingOperation,
 } from './pose-trace/types';
-import { type PythonScanResult } from './python-backend';
+import {
+  type LeRobotOutputVersion,
+  type PythonScanResult,
+} from './python-backend';
 
 export interface KeyTreeNode {
   name: string;
@@ -14,7 +17,7 @@ export interface KeyTreeNode {
 
 /** Strip a trailing `.h5`/`.hdf5` extension (case-insensitive) from a name. */
 export function stripExtension(filename: string): string {
-  return filename.replace(/\.(h5|hdf5)$/iu, '');
+  return filename.replace(/\.(?:h5|hdf5)$/iu, '');
 }
 
 /**
@@ -23,7 +26,7 @@ export function stripExtension(filename: string): string {
  */
 export function parseTaskRulesJson(
   text: string,
-): Array<Record<string, unknown>> | undefined {
+): Record<string, unknown>[] | undefined {
   const trimmed = text.trim();
   if (trimmed.length === 0) {
     return undefined;
@@ -39,7 +42,7 @@ export function parseTaskRulesJson(
     throw new Error('Task rules must be a JSON array of objects.');
   }
 
-  return parsed as Array<Record<string, unknown>>;
+  return parsed as Record<string, unknown>[];
 }
 
 /** Build the default output name suggested for a given processing operation. */
@@ -47,13 +50,15 @@ export function buildDefaultOutputName(
   operation: DatasetProcessingOperation,
   sourceFiles: { name: string }[],
   cutDemoNames: string[],
+  lerobotOutputVersion: LeRobotOutputVersion = 'v3.0',
 ): string {
   if (operation === 'lerobot') {
+    const suffix = lerobotOutputVersion === 'v2.1' ? 'v21' : 'v3';
     if (sourceFiles.length === 1) {
-      return `${stripExtension(sourceFiles[0].name)}-lerobot-v21`;
+      return `${stripExtension(sourceFiles[0].name)}-lerobot-${suffix}`;
     }
 
-    return `lerobot-v21-${sourceFiles.length}-datasets`;
+    return `lerobot-${suffix}-${sourceFiles.length}-datasets`;
   }
 
   if (operation === 'cut') {

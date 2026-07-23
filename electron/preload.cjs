@@ -2,7 +2,7 @@
 
 const fsp = require('node:fs/promises');
 
-const { contextBridge, webUtils } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 function readNumberArg(name) {
   const prefix = `--${name}=`;
@@ -15,6 +15,12 @@ function readNumberArg(name) {
 
 contextBridge.exposeInMainWorld('rebelHdf5Desktop', {
   backendPort: readNumberArg('backend-port'),
+  chooseDirectory(defaultPath) {
+    return ipcRenderer.invoke(
+      'rebelhdf5:choose-directory',
+      typeof defaultPath === 'string' ? defaultPath : undefined,
+    );
+  },
   getPathForFile(file) {
     if (!file || typeof webUtils.getPathForFile !== 'function') {
       return undefined;

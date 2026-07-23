@@ -61,9 +61,9 @@ describe('parseTaskRulesJson', () => {
 });
 
 describe('buildDefaultOutputName', () => {
-  it('names a single-source lerobot output without an extension', () => {
+  it('defaults a single-source lerobot output to v3 without an extension', () => {
     expect(buildDefaultOutputName('lerobot', [{ name: 'run.hdf5' }], [])).toBe(
-      'run-lerobot-v21',
+      'run-lerobot-v3',
     );
   });
 
@@ -74,7 +74,13 @@ describe('buildDefaultOutputName', () => {
         [{ name: 'a.h5' }, { name: 'b.h5' }],
         [],
       ),
-    ).toBe('lerobot-v21-2-datasets');
+    ).toBe('lerobot-v3-2-datasets');
+  });
+
+  it('uses the legacy suffix when v2.1 is selected', () => {
+    expect(
+      buildDefaultOutputName('lerobot', [{ name: 'run.hdf5' }], [], 'v2.1'),
+    ).toBe('run-lerobot-v21');
   });
 
   it('names a cut output using first/last demo and strips the extension', () => {
