@@ -503,14 +503,14 @@ class TestLeRobotConvertValidation:
         assert status == 400
         assert "modalityjson" in json.loads(body)["error"].lower()
 
-    def test_rejects_missing_output_directory(
+    def test_rejects_unauthorized_output_directory(
         self,
         server_url: str,
         running_server: BackendServer,
         make_h5_demo_file: Any,
     ) -> None:
         source = make_h5_demo_file(
-            "missing-output-dir.h5",
+            "unauthorized-output-dir.h5",
             target_dir=Path(running_server.root_dirs[0]),
             demo_count=1,
         )
@@ -522,11 +522,11 @@ class TestLeRobotConvertValidation:
             body={
                 "paths": [str(source)],
                 "modalityJson": str(modality),
-                "outputDirectory": str(Path(running_server.root_dir) / "missing"),
+                "outputDirectory": str(Path(running_server.root_dir)),
             },
         )
         assert status == 400
-        assert "output directory does not exist" in json.loads(body)["error"].lower()
+        assert "must be selected" in json.loads(body)["error"].lower()
 
     def test_writes_to_requested_output_directory(
         self,
@@ -544,6 +544,8 @@ class TestLeRobotConvertValidation:
         modality.write_text("{}", encoding="utf-8")
         destination = Path(running_server.root_dir).parent / "chosen-destination"
         destination.mkdir()
+        authorization = "a9c15a5c-f5ce-4c89-a8c8-df34ef8867ad"
+        running_server.authorize_output_directory(authorization, str(destination))
         captured: dict[str, Any] = {}
 
         def fake_convert(*args: Any, **_kwargs: Any):
@@ -564,12 +566,72 @@ class TestLeRobotConvertValidation:
                 "paths": [str(source)],
                 "modalityJson": str(modality),
                 "outputDirectory": str(destination),
+                "outputDirectoryAuthorization": authorization,
                 "outputName": "my-lerobot-dataset",
             },
         )
         assert status == 200
         assert b'"type": "done"' in body
         assert captured["output_path"] == destination / "my-lerobot-dataset"
+
+    def test_rejects_unknown_output_directory_authorization(
+        self,
+        server_url: str,
+        running_server: BackendServer,
+        make_h5_demo_file: Any,
+    ) -> None:
+        source = make_h5_demo_file(
+            "unknown-output-authorization.h5",
+            target_dir=Path(running_server.root_dirs[0]),
+            demo_count=1,
+        )
+        modality = Path(running_server.root_dirs[0]) / "modality.json"
+        modality.write_text("{}", encoding="utf-8")
+        status, _headers, body = _request(
+            f"{server_url}/api/convert/lerobot",
+            method="POST",
+            body={
+                "paths": [str(source)],
+                "modalityJson": str(modality),
+                "outputDirectory": str(Path(running_server.root_dir)),
+                "outputDirectoryAuthorization": (
+                    "d899b58b-b850-47d7-a722-5d3152400aac"
+                ),
+            },
+        )
+        assert status == 400
+        assert "invalid or expired" in json.loads(body)["error"].lower()
+
+    def test_rejects_output_directory_authorization_path_mismatch(
+        self,
+        server_url: str,
+        running_server: BackendServer,
+        make_h5_demo_file: Any,
+    ) -> None:
+        source = make_h5_demo_file(
+            "mismatched-output-authorization.h5",
+            target_dir=Path(running_server.root_dirs[0]),
+            demo_count=1,
+        )
+        modality = Path(running_server.root_dirs[0]) / "modality.json"
+        modality.write_text("{}", encoding="utf-8")
+        destination = Path(running_server.root_dir).parent / "authorized-destination"
+        destination.mkdir()
+        authorization = "021b81e8-df3a-4e0c-b593-54b6cd6d11af"
+        running_server.authorize_output_directory(authorization, str(destination))
+
+        status, _headers, body = _request(
+            f"{server_url}/api/convert/lerobot",
+            method="POST",
+            body={
+                "paths": [str(source)],
+                "modalityJson": str(modality),
+                "outputDirectory": running_server.root_dir,
+                "outputDirectoryAuthorization": authorization,
+            },
+        )
+        assert status == 400
+        assert "does not match" in json.loads(body)["error"].lower()
 
     @pytest.mark.parametrize(
         ("field", "value"),

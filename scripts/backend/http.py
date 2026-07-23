@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import gzip
 import json
-import os
 import traceback
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler
@@ -212,20 +211,39 @@ class BackendHandler(BaseHTTPRequestHandler):
             return None, f"{label} not found or ambiguous: {raw_path}"
         return resolved, None
 
-    def _resolve_output_directory(self, raw_path: Any) -> tuple[Path | None, str | None]:
-        if raw_path is None or raw_path == "":
-            raw_path = self.server.output_dir
-        if not isinstance(raw_path, str):
+    def _resolve_output_directory(
+        self,
+        raw_path: Any,
+        raw_authorization: Any,
+    ) -> tuple[Path | None, str | None]:
+        if raw_path is not None and not isinstance(raw_path, str):
             return None, "outputDirectory must be a path string."
-        try:
-            output_dir = Path(raw_path).expanduser().resolve(strict=True)
-        except (OSError, RuntimeError, ValueError):
-            return None, f"Output directory does not exist: {raw_path}"
-        if not output_dir.is_dir():
-            return None, f"Output location is not a directory: {raw_path}"
-        if not os.access(output_dir, os.W_OK | os.X_OK):
-            return None, f"Output directory is not writable: {raw_path}"
-        return output_dir, None
+        if raw_authorization is not None and not isinstance(raw_authorization, str):
+            return None, "outputDirectoryAuthorization must be a string."
+
+        authorization = raw_authorization or None
+        output_directory = self.server.resolve_output_directory(authorization)
+        if output_directory is None:
+            return None, (
+                "The output folder authorization is invalid or expired. "
+                "Choose the folder again."
+            )
+
+        requested_path = raw_path or self.server.output_dir
+        if requested_path != str(output_directory):
+            if authorization is not None:
+                return None, (
+                    "The output folder does not match its authorization. "
+                    "Choose the folder again."
+                )
+            return None, (
+                "Custom output folders must be selected with the desktop Browse button. "
+                "For the standalone backend, configure --output-dir when starting it."
+            )
+
+        if not output_directory.is_dir():
+            return None, f"Output directory no longer exists: {output_directory}"
+        return output_directory, None
 
     def _handle_files(self, directories: list[str], *, recursive: bool = False) -> None:
         try:
@@ -483,6 +501,7 @@ class BackendHandler(BaseHTTPRequestHandler):
             )
             output_dir, output_dir_error = self._resolve_output_directory(
                 body.get("outputDirectory"),
+                body.get("outputDirectoryAuthorization"),
             )
             default_task = body.get("defaultTask")
             if default_task is not None and not isinstance(default_task, str):

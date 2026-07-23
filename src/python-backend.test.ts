@@ -491,6 +491,7 @@ describe('runLeRobotConvert (SSE streaming)', () => {
       paths: ['/a.h5'],
       outputName: 'out',
       outputDirectory: '/chosen-output',
+      outputDirectoryAuthorization: 'output-authorization',
       skipFailed: false,
       defaultTask: 'task',
       taskRules: [],
@@ -540,6 +541,9 @@ describe('runLeRobotConvert (SSE streaming)', () => {
     expect(requestBody.outputVersion).toBe('v3.0');
     expect(requestBody.videoCodec).toBe('h264');
     expect(requestBody.outputDirectory).toBe('/chosen-output');
+    expect(requestBody.outputDirectoryAuthorization).toBe(
+      'output-authorization',
+    );
   });
 
   it('forwards nonfatal warning events', async () => {

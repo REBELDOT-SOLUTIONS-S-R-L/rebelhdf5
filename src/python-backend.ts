@@ -118,6 +118,7 @@ export interface PythonLeRobotConvertRequest {
   paths: string[];
   outputName: string;
   outputDirectory?: string;
+  outputDirectoryAuthorization?: string;
   skipFailed: boolean;
   modalityJson?: string;
   conversionConfigJson?: string;
@@ -499,6 +500,7 @@ export async function runLeRobotConvert(
       paths: request.paths,
       outputName: request.outputName,
       outputDirectory: request.outputDirectory,
+      outputDirectoryAuthorization: request.outputDirectoryAuthorization,
       skipFailed: request.skipFailed,
       modalityJson: request.modalityJson,
       conversionConfigJson: request.conversionConfigJson,

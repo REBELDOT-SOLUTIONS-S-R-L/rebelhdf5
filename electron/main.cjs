@@ -1,6 +1,7 @@
 'use strict';
 
 const { spawn } = require('node:child_process');
+const { randomUUID } = require('node:crypto');
 const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const http = require('node:http');
@@ -57,6 +58,8 @@ const backendPython =
       ? lehomePython
       : 'python3');
 const smokeTest = process.argv.includes('--smoke-test');
+const backendIpcPrefix = 'REBELHDF5_IPC ';
+const outputAuthorizationTimeoutMs = 5000;
 
 app.setName('rebelHDF5');
 if (process.platform === 'linux' && typeof app.setDesktopName === 'function') {
@@ -67,6 +70,102 @@ let backendProcess = null;
 let staticServer = null;
 let mainWindow = null;
 let quitting = false;
+let backendStdoutBuffer = '';
+const pendingOutputAuthorizations = new Map();
+
+function rejectPendingOutputAuthorizations(message) {
+  for (const { reject, timeout } of pendingOutputAuthorizations.values()) {
+    clearTimeout(timeout);
+    reject(new Error(message));
+  }
+  pendingOutputAuthorizations.clear();
+}
+
+function handleBackendStdout(data) {
+  backendStdoutBuffer += data.toString();
+  const lines = backendStdoutBuffer.split('\n');
+  backendStdoutBuffer = lines.pop() ?? '';
+
+  for (const line of lines) {
+    if (!line.startsWith(backendIpcPrefix)) {
+      if (line.trim()) {
+        console.log(`[backend-server] ${line}`);
+      }
+      continue;
+    }
+
+    try {
+      const response = JSON.parse(line.slice(backendIpcPrefix.length));
+      const pending = pendingOutputAuthorizations.get(response.token);
+      if (!pending) {
+        continue;
+      }
+
+      clearTimeout(pending.timeout);
+      pendingOutputAuthorizations.delete(response.token);
+      if (
+        response.ok === true &&
+        typeof response.path === 'string' &&
+        response.path.length > 0
+      ) {
+        pending.resolve({
+          path: response.path,
+          authorization: response.token,
+        });
+      } else {
+        pending.reject(
+          new Error(
+            typeof response.error === 'string'
+              ? response.error
+              : 'The backend rejected the selected output folder.',
+          ),
+        );
+      }
+    } catch (error) {
+      console.error(
+        `[backend-server] Invalid desktop IPC response: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+  }
+}
+
+function authorizeOutputDirectory(selectedPath) {
+  const runningBackend = backendProcess;
+  if (!runningBackend?.stdin?.writable) {
+    return Promise.reject(new Error('The Python backend is not running.'));
+  }
+
+  const token = randomUUID();
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      pendingOutputAuthorizations.delete(token);
+      reject(new Error('Timed out while authorizing the output folder.'));
+    }, outputAuthorizationTimeoutMs);
+
+    pendingOutputAuthorizations.set(token, { resolve, reject, timeout });
+    runningBackend.stdin.write(
+      `${JSON.stringify({
+        type: 'authorize-output-directory',
+        token,
+        path: selectedPath,
+      })}\n`,
+      (error) => {
+        if (!error) {
+          return;
+        }
+        const pending = pendingOutputAuthorizations.get(token);
+        if (!pending) {
+          return;
+        }
+        clearTimeout(pending.timeout);
+        pendingOutputAuthorizations.delete(token);
+        pending.reject(error);
+      },
+    );
+  });
+}
 
 ipcMain.handle('rebelhdf5:choose-directory', async (event, defaultPath) => {
   if (!mainWindow || event.sender.id !== mainWindow.webContents.id) {
@@ -80,7 +179,10 @@ ipcMain.handle('rebelhdf5:choose-directory', async (event, defaultPath) => {
         : undefined,
     properties: ['openDirectory', 'createDirectory'],
   });
-  return result.canceled ? undefined : result.filePaths[0];
+  if (result.canceled) {
+    return undefined;
+  }
+  return authorizeOutputDirectory(result.filePaths[0]);
 });
 
 function configureFileSystemAccess() {
@@ -143,19 +245,27 @@ async function startStaticServer(port) {
 function startBackend(port) {
   backendProcess = spawn(
     backendPython,
-    [backendScript, '--dir', backendDir, '--port', String(port)],
+    [
+      backendScript,
+      '--dir',
+      backendDir,
+      '--port',
+      String(port),
+      '--output-authorization-stdin',
+    ],
     {
       cwd: projectRoot,
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: ['pipe', 'pipe', 'pipe'],
       env: { ...process.env, PYTHONUNBUFFERED: '1' },
     },
   );
 
-  backendProcess.stdout?.on('data', (data) => {
-    const text = data.toString().trim();
-    if (text) {
-      console.log(`[backend-server] ${text}`);
-    }
+  backendStdoutBuffer = '';
+  backendProcess.stdout?.on('data', handleBackendStdout);
+  backendProcess.stdin?.on('error', (error) => {
+    rejectPendingOutputAuthorizations(
+      `Could not authorize the output folder: ${error.message}`,
+    );
   });
 
   backendProcess.stderr?.on('data', (data) => {
@@ -171,11 +281,13 @@ function startBackend(port) {
     } else if (signal) {
       console.error(`[backend-server] exited with signal ${signal}`);
     }
+    rejectPendingOutputAuthorizations('The Python backend stopped.');
     backendProcess = null;
   });
 
   backendProcess.on('error', (error) => {
     console.error(`[backend-server] failed to start: ${error.message}`);
+    rejectPendingOutputAuthorizations('The Python backend failed to start.');
     backendProcess = null;
   });
 }
@@ -185,6 +297,7 @@ function stopBackend() {
   if (!runningBackend) {
     return Promise.resolve();
   }
+  rejectPendingOutputAuthorizations('The Python backend is shutting down.');
 
   return new Promise((resolve) => {
     let closed = false;

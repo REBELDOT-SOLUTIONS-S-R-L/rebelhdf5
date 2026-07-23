@@ -158,7 +158,12 @@ describe('DatasetProcessingPage', () => {
 
   it('sends the selected format and displays conversion warnings', async () => {
     const user = userEvent.setup();
-    mockBackend({ available: true, rootDir: '/data', version: 10 });
+    mockBackend({
+      available: true,
+      rootDir: '/data',
+      version: 10,
+      outputDir: '/configured-output',
+    });
     useStore.setState({ opened: [remoteFile('run.hdf5')] }, false);
     mocks.scanFiles.mockResolvedValue({
       files: [
@@ -189,10 +194,6 @@ describe('DatasetProcessingPage', () => {
       screen.getByLabelText('Modality JSON'),
       '/tmp/modality.json',
     );
-    await user.type(
-      screen.getByLabelText('Output Parent Folder'),
-      '/chosen-output',
-    );
     await waitFor(() => {
       expect(screen.getByRole('button', { name: 'Convert' })).toBeEnabled();
     });
@@ -205,7 +206,7 @@ describe('DatasetProcessingPage', () => {
       expect.objectContaining({
         outputVersion: 'v3.0',
         videoCodec: 'h264',
-        outputDirectory: '/chosen-output',
+        outputDirectory: '/configured-output',
       }),
       expect.objectContaining({
         onProgress: expect.any(Function),
@@ -216,7 +217,10 @@ describe('DatasetProcessingPage', () => {
 
   it('chooses a LeRobot output folder with the desktop picker', async () => {
     const user = userEvent.setup();
-    const chooseDirectory = vi.fn().mockResolvedValue('/picked-output');
+    const chooseDirectory = vi.fn().mockResolvedValue({
+      path: '/picked-output',
+      authorization: 'output-authorization',
+    });
     globalThis.rebelHdf5Desktop = { chooseDirectory };
     mockBackend({
       available: true,
@@ -225,6 +229,25 @@ describe('DatasetProcessingPage', () => {
       outputDir: '/default-output',
     });
     useStore.setState({ opened: [remoteFile('run.hdf5')] }, false);
+    mocks.scanFiles.mockResolvedValue({
+      files: [
+        {
+          name: 'run.hdf5',
+          path: 'run.hdf5',
+          demoCount: 1,
+          demoNames: ['demo_0'],
+          keys: [],
+        },
+      ],
+      commonKeys: [],
+    });
+    mocks.runLeRobotConvert.mockResolvedValue({
+      fileName: 'run-lerobot-v3',
+      demoCount: 1,
+      selectedKeyCount: 0,
+      fileSize: 1,
+      outputType: 'directory',
+    });
     renderPage();
 
     await user.selectOptions(screen.getByLabelText('Operation'), 'lerobot');
@@ -233,6 +256,24 @@ describe('DatasetProcessingPage', () => {
     expect(chooseDirectory).toHaveBeenCalledWith('/default-output');
     expect(screen.getByLabelText('Output Parent Folder')).toHaveValue(
       '/picked-output',
+    );
+    expect(screen.getByLabelText('Output Parent Folder')).toHaveAttribute(
+      'readonly',
+    );
+    await user.type(
+      screen.getByLabelText('Modality JSON'),
+      '/tmp/modality.json',
+    );
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Convert' })).toBeEnabled();
+    });
+    await user.click(screen.getByRole('button', { name: 'Convert' }));
+    expect(mocks.runLeRobotConvert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        outputDirectory: '/picked-output',
+        outputDirectoryAuthorization: 'output-authorization',
+      }),
+      expect.any(Object),
     );
   });
 });

@@ -259,6 +259,10 @@ function DatasetProcessingPage() {
   const [lerobotVideoCodec, setLerobotVideoCodec] =
     useState<LeRobotVideoCodec>('h264');
   const [lerobotOutputDirectory, setLerobotOutputDirectory] = useState('');
+  const [
+    lerobotOutputDirectoryAuthorization,
+    setLerobotOutputDirectoryAuthorization,
+  ] = useState('');
   const [lerobotModalityJsonPath, setLerobotModalityJsonPath] = useState('');
   const [lerobotConversionConfigPath, setLerobotConversionConfigPath] =
     useState('');
@@ -844,6 +848,7 @@ function DatasetProcessingPage() {
         lerobotOutputVersion,
         lerobotVideoCodec,
         lerobotOutputDirectory,
+        lerobotOutputDirectoryAuthorization,
         lerobotModalityJsonPath,
         lerobotConversionConfigPath,
         lerobotModalityPythonPath,
@@ -862,6 +867,7 @@ function DatasetProcessingPage() {
       lerobotModalityJsonPath,
       lerobotModalityPythonPath,
       lerobotOutputDirectory,
+      lerobotOutputDirectoryAuthorization,
       lerobotOutputVersion,
       lerobotSourceUrls,
       lerobotTaskRulesText,
@@ -892,7 +898,8 @@ function DatasetProcessingPage() {
         lerobotOutputDirectory.trim() || backend.outputDir,
       );
       if (selectedDirectory) {
-        setLerobotOutputDirectory(selectedDirectory);
+        setLerobotOutputDirectory(selectedDirectory.path);
+        setLerobotOutputDirectoryAuthorization(selectedDirectory.authorization);
       }
     } catch (error) {
       setProcessingError(
@@ -932,6 +939,8 @@ function DatasetProcessingPage() {
               outputName: defaultOutputName,
               outputDirectory:
                 lerobotOutputDirectory.trim() || backend.outputDir || undefined,
+              outputDirectoryAuthorization:
+                lerobotOutputDirectoryAuthorization || undefined,
               skipFailed: skipFailedDemos,
               modalityJson: lerobotModalityJsonPath.trim() || undefined,
               conversionConfigJson:
@@ -1435,11 +1444,11 @@ function DatasetProcessingPage() {
                       <input
                         id="lerobot-output-directory"
                         className={styles.select}
-                        placeholder={backend.outputDir ?? 'Choose a folder'}
-                        value={lerobotOutputDirectory}
-                        onChange={(event) => {
-                          setLerobotOutputDirectory(event.target.value);
-                        }}
+                        placeholder="Choose a folder"
+                        value={
+                          lerobotOutputDirectory || backend.outputDir || ''
+                        }
+                        readOnly
                       />
                       {globalThis.rebelHdf5Desktop?.chooseDirectory && (
                         <button
