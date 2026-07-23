@@ -156,6 +156,112 @@ async function parseErrorResponse(response: Response): Promise<string> {
   }
 }
 
+type SseEvent = Record<string, unknown>;
+
+function requireFinalResult<T>(result: T | null, message: string): T {
+  if (result === null) {
+    throw new Error(message);
+  }
+  return result;
+}
+
+function parseSseEvent(part: string): SseEvent | null {
+  const trimmed = part.trim();
+  if (!trimmed.startsWith('data: ')) {
+    return null;
+  }
+
+  try {
+    const parsed: unknown = JSON.parse(trimmed.slice(6));
+    if (
+      typeof parsed !== 'object' ||
+      parsed === null ||
+      Array.isArray(parsed)
+    ) {
+      return null;
+    }
+    return parsed as SseEvent;
+  } catch {
+    return null;
+  }
+}
+
+async function consumeSseEvents(
+  response: Response,
+  onEvent: (event: SseEvent) => void,
+): Promise<void> {
+  const reader = response.body?.getReader();
+  if (!reader) {
+    throw new Error('Server did not return a readable stream.');
+  }
+  const streamReader = reader;
+
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  function consumeChunk(value: Uint8Array): void {
+    buffer += decoder.decode(value, { stream: true });
+    const parts = buffer.split('\n\n');
+    buffer = parts.pop() ?? '';
+
+    for (const part of parts) {
+      const event = parseSseEvent(part);
+      if (event) {
+        onEvent(event);
+      }
+    }
+  }
+
+  async function readNext(): Promise<void> {
+    const { done, value } = await streamReader.read();
+    if (done) {
+      return;
+    }
+    consumeChunk(value);
+    await readNext();
+  }
+
+  await readNext();
+}
+
+async function postProcessRequest(
+  endpoint: string,
+  payload: string,
+): Promise<Response> {
+  return fetch(`${BASE_URL}${endpoint}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: payload,
+  });
+}
+
+async function startProcessRequest(
+  request: PythonProcessRequest,
+  payload: string,
+): Promise<Response> {
+  const response = await postProcessRequest('/api/process', payload);
+  if (response.ok) {
+    return response;
+  }
+
+  const error = await parseErrorResponse(response);
+  if (response.status !== 404) {
+    throw new Error(error);
+  }
+
+  if (request.operation !== 'merge') {
+    throw new Error(
+      'Your Python backend is outdated and does not support this operation. Restart `scripts/backend_server.py` to load the current API.',
+    );
+  }
+
+  const fallback = await postProcessRequest('/api/merge', payload);
+  if (!fallback.ok) {
+    throw new Error(await parseErrorResponse(fallback));
+  }
+  return fallback;
+}
+
 /** Check whether the Python server is running. */
 export async function checkBackend(
   timeoutMs = HEALTH_TIMEOUT_MS,
@@ -374,118 +480,44 @@ export async function runProcess(
     cutRange: request.cutRange,
   });
 
-  const endpoints =
-    request.operation === 'merge'
-      ? ['/api/process', '/api/merge']
-      : ['/api/process'];
-
-  let response: Response | null = null;
-  let lastError: string | null = null;
-
-  for (const endpoint of endpoints) {
-    response = await fetch(`${BASE_URL}${endpoint}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: payload,
-    });
-
-    if (response.ok) {
-      break;
-    }
-
-    lastError = await parseErrorResponse(response);
-
-    if (
-      response.status === 404 &&
-      endpoint === '/api/process' &&
-      request.operation === 'merge'
-    ) {
-      continue;
-    }
-
-    if (response.status === 404 && endpoint === '/api/process') {
-      throw new Error(
-        'Your Python backend is outdated and does not support this operation. Restart `scripts/backend_server.py` to load the current API.',
-      );
-    }
-
-    throw new Error(lastError);
-  }
-
-  if (!response?.ok) {
-    throw new Error(lastError ?? 'Failed to start dataset processing.');
-  }
-
-  const reader = response.body?.getReader();
-  if (!reader) {
-    throw new Error('Server did not return a readable stream.');
-  }
-
-  const decoder = new TextDecoder();
-  let buffer = '';
+  const response = await startProcessRequest(request, payload);
   let finalResult: PythonProcessResult | null = null;
 
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) {
-      break;
+  await consumeSseEvents(response, (event) => {
+    switch (event.type) {
+      case 'progress':
+        callbacks.onProgress?.({
+          phase: event.phase as DatasetProcessingProgress['phase'],
+          overallDemoIndex: event.overallDemoIndex as number,
+          overallDemoCount: event.overallDemoCount as number,
+          currentSourceName: event.currentSourceName as string,
+          currentDemoName: event.currentDemoName as string,
+        });
+        break;
+
+      case 'done': {
+        const fileName = event.fileName as string;
+        finalResult = {
+          fileName,
+          demoCount: event.demoCount as number,
+          selectedKeyCount: event.selectedKeyCount as number,
+          fileSize: event.fileSize as number,
+          downloadUrl: `${BASE_URL}/api/download/${encodeURIComponent(fileName)}`,
+        };
+        break;
+      }
+
+      case 'error':
+        throw new Error(event.message as string);
+
+      // No default
     }
+  });
 
-    buffer += decoder.decode(value, { stream: true });
-
-    const parts = buffer.split('\n\n');
-    buffer = parts.pop() ?? '';
-
-    for (const part of parts) {
-      const trimmed = part.trim();
-      if (!trimmed.startsWith('data: ')) {
-        continue;
-      }
-
-      let event: Record<string, unknown>;
-      try {
-        event = JSON.parse(trimmed.slice(6));
-      } catch {
-        continue;
-      }
-
-      switch (event.type) {
-        case 'progress':
-          callbacks.onProgress?.({
-            phase: event.phase as DatasetProcessingProgress['phase'],
-            overallDemoIndex: event.overallDemoIndex as number,
-            overallDemoCount: event.overallDemoCount as number,
-            currentSourceName: event.currentSourceName as string,
-            currentDemoName: event.currentDemoName as string,
-          });
-
-          break;
-
-        case 'done': {
-          const fileName = event.fileName as string;
-          finalResult = {
-            fileName,
-            demoCount: event.demoCount as number,
-            selectedKeyCount: event.selectedKeyCount as number,
-            fileSize: event.fileSize as number,
-            downloadUrl: `${BASE_URL}/api/download/${encodeURIComponent(fileName)}`,
-          };
-
-          break;
-        }
-        case 'error':
-          throw new Error(event.message as string);
-
-        // No default
-      }
-    }
-  }
-
-  if (!finalResult) {
-    throw new Error('Processing stream ended without a completion event.');
-  }
-
-  return finalResult;
+  return requireFinalResult<PythonProcessResult>(
+    finalResult,
+    'Processing stream ended without a completion event.',
+  );
 }
 
 /** Convert selected HDF5 files to a LeRobot v2.1 or v3.0 dataset directory. */
@@ -517,82 +549,47 @@ export async function runLeRobotConvert(
     throw new Error(await parseErrorResponse(response));
   }
 
-  const reader = response.body?.getReader();
-  if (!reader) {
-    throw new Error('Server did not return a readable stream.');
-  }
-
-  const decoder = new TextDecoder();
-  let buffer = '';
   let finalResult: PythonLeRobotConvertResult | null = null;
 
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) {
-      break;
+  await consumeSseEvents(response, (event) => {
+    switch (event.type) {
+      case 'progress':
+        callbacks.onProgress?.({
+          phase: event.phase as DatasetProcessingProgress['phase'],
+          overallDemoIndex: event.overallDemoIndex as number,
+          overallDemoCount: event.overallDemoCount as number,
+          currentSourceName: event.currentSourceName as string,
+          currentDemoName: event.currentDemoName as string,
+        });
+        break;
+
+      case 'done':
+        finalResult = {
+          fileName: event.fileName as string,
+          demoCount: event.demoCount as number,
+          selectedKeyCount: event.selectedKeyCount as number,
+          fileSize: event.fileSize as number,
+          outputPath: event.outputPath as string | undefined,
+          outputType: event.outputType as 'file' | 'directory' | undefined,
+          skippedDemoCount: event.skippedDemoCount as number | undefined,
+          totalFrames: event.totalFrames as number | undefined,
+          taskCount: event.taskCount as number | undefined,
+        };
+        break;
+
+      case 'warning':
+        callbacks.onWarning?.(event.message as string);
+        break;
+
+      case 'error':
+        throw new Error(event.message as string);
+
+      // No default
     }
+  });
 
-    buffer += decoder.decode(value, { stream: true });
-
-    const parts = buffer.split('\n\n');
-    buffer = parts.pop() ?? '';
-
-    for (const part of parts) {
-      const trimmed = part.trim();
-      if (!trimmed.startsWith('data: ')) {
-        continue;
-      }
-
-      let event: Record<string, unknown>;
-      try {
-        event = JSON.parse(trimmed.slice(6));
-      } catch {
-        continue;
-      }
-
-      switch (event.type) {
-        case 'progress':
-          callbacks.onProgress?.({
-            phase: event.phase as DatasetProcessingProgress['phase'],
-            overallDemoIndex: event.overallDemoIndex as number,
-            overallDemoCount: event.overallDemoCount as number,
-            currentSourceName: event.currentSourceName as string,
-            currentDemoName: event.currentDemoName as string,
-          });
-
-          break;
-
-        case 'done':
-          finalResult = {
-            fileName: event.fileName as string,
-            demoCount: event.demoCount as number,
-            selectedKeyCount: event.selectedKeyCount as number,
-            fileSize: event.fileSize as number,
-            outputPath: event.outputPath as string | undefined,
-            outputType: event.outputType as 'file' | 'directory' | undefined,
-            skippedDemoCount: event.skippedDemoCount as number | undefined,
-            totalFrames: event.totalFrames as number | undefined,
-            taskCount: event.taskCount as number | undefined,
-          };
-
-          break;
-
-        case 'warning':
-          callbacks.onWarning?.(event.message as string);
-
-          break;
-
-        case 'error':
-          throw new Error(event.message as string);
-
-        // No default
-      }
-    }
-  }
-
-  if (!finalResult) {
-    throw new Error('Conversion stream ended without a completion event.');
-  }
-
-  return finalResult;
+  return requireFinalResult<PythonLeRobotConvertResult>(
+    finalResult,
+    'Conversion stream ended without a completion event.',
+  );
 }

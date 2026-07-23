@@ -4,7 +4,7 @@ import {
   type JointChartSpec,
   type PlotSceneCamera,
 } from './pose-trace/plotConfig';
-import type { DemoInfo } from './pose-trace/types';
+import { type DemoInfo } from './pose-trace/types';
 import {
   clonePlotSceneCamera,
   formatDemoOption,

@@ -4,23 +4,29 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import DatasetAttributesPage from './DatasetAttributesPage';
-import { FileService, type H5File, useStore } from './stores';
-import type {
-  AvailabilityState,
-  FileFeatureAvailability,
+import {
+  type AvailabilityState,
+  type FileFeatureAvailability,
 } from './feature-availability';
+import {
+  type checkBackend,
+  type DatasetAttributesResult,
+  type getDatasetAttributes,
+  type updateDatasetArticulation,
+} from './python-backend';
+import { FileService, type H5File, useStore } from './stores';
 
 const mocks = vi.hoisted(() => ({
-  checkBackend: vi.fn(),
-  getDatasetAttributes: vi.fn(),
-  updateDatasetArticulation: vi.fn(),
+  checkBackend: vi.fn<typeof checkBackend>(),
+  getDatasetAttributes: vi.fn<typeof getDatasetAttributes>(),
+  updateDatasetArticulation: vi.fn<typeof updateDatasetArticulation>(),
 }));
 let availabilityState: AvailabilityState = {
   byUrl: {},
   backendAvailable: true,
 };
 
-vi.mock('./python-backend', () => ({
+vi.mock(import('./python-backend'), () => ({
   checkBackend: mocks.checkBackend,
   getDatasetAttributes: mocks.getDatasetAttributes,
   updateDatasetArticulation: mocks.updateDatasetArticulation,
@@ -45,7 +51,7 @@ function localFile(serverPath?: string): H5File {
   };
 }
 
-const attributesResult = {
+const attributesResult: DatasetAttributesResult = {
   path: '/data/attrs.hdf5',
   attrs: { total: 12 },
   articulation: {
@@ -135,9 +141,9 @@ describe('DatasetAttributesPage', () => {
     useStore.setState({ opened: [file] }, false);
     renderPage();
 
-    expect(
-      await screen.findByText(/Python backend is not available/u),
-    ).toBeInTheDocument();
+    await expect(
+      screen.findByText(/Python backend is not available/u),
+    ).resolves.toBeInTheDocument();
     expect(mocks.getDatasetAttributes).not.toHaveBeenCalled();
   });
 
@@ -148,7 +154,7 @@ describe('DatasetAttributesPage', () => {
     renderPage();
 
     // Group attribute panel renders with its slash-nested title.
-    expect(await screen.findByText('data.attrs')).toBeInTheDocument();
+    await expect(screen.findByText('data.attrs')).resolves.toBeInTheDocument();
     expect(mocks.getDatasetAttributes).toHaveBeenCalledWith('/data/attrs.hdf5');
 
     // Articulation fields are populated from the backend payload.
@@ -164,7 +170,9 @@ describe('DatasetAttributesPage', () => {
     useStore.setState({ opened: [file] }, false);
     renderPage();
 
-    await screen.findByDisplayValue('robot');
+    await expect(
+      screen.findByDisplayValue('robot'),
+    ).resolves.toBeInTheDocument();
     const [saveButton] = screen.getAllByRole('button', {
       name: 'Save Articulation',
     });
@@ -181,9 +189,9 @@ describe('DatasetAttributesPage', () => {
         },
       );
     });
-    expect(
-      await screen.findByText('Articulation attributes saved.'),
-    ).toBeInTheDocument();
+    await expect(
+      screen.findByText('Articulation attributes saved.'),
+    ).resolves.toBeInTheDocument();
   });
 
   it('does not load attributes for unsupported schemas', async () => {
@@ -192,11 +200,9 @@ describe('DatasetAttributesPage', () => {
     useStore.setState({ opened: [file] }, false);
     renderPage();
 
-    expect(
-      await screen.findByText(
-        'Dataset attributes require a standard demo dataset.',
-      ),
-    ).toBeInTheDocument();
+    await expect(
+      screen.findByText('Dataset attributes require a standard demo dataset.'),
+    ).resolves.toBeInTheDocument();
     expect(mocks.getDatasetAttributes).not.toHaveBeenCalled();
   });
 });

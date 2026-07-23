@@ -4,21 +4,27 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import ObjectDistributionPage from './ObjectDistributionPage';
+import {
+  type loadObjectDistribution,
+  type openPoseTraceSource,
+} from './pose-trace/hdf5';
 import { FileService, type H5File, useStore } from './stores';
 
 const mocks = vi.hoisted(() => ({
-  loadObjectDistribution: vi.fn(),
-  openPoseTraceSource: vi.fn(),
+  loadObjectDistribution: vi.fn<typeof loadObjectDistribution>(),
+  openPoseTraceSource: vi.fn<typeof openPoseTraceSource>(),
 }));
 
-vi.mock('./pose-trace/hdf5', () => ({
+vi.mock(import('./pose-trace/hdf5'), () => ({
   loadObjectDistribution: mocks.loadObjectDistribution,
   openPoseTraceSource: mocks.openPoseTraceSource,
 }));
 
-vi.mock('./pose-trace/PlotlyChart', () => ({ default: () => null }));
+vi.mock(import('./pose-trace/PlotlyChart'), () => ({
+  default: () => <div />,
+}));
 
-vi.mock('./pose-trace/plotConfig', () => ({
+vi.mock(import('./pose-trace/plotConfig'), () => ({
   buildObjectDistributionData: () => [],
   buildObjectDistributionLayout: () => ({}),
   buildEmptyLayout: () => ({}),
@@ -28,7 +34,7 @@ vi.mock('./pose-trace/plotConfig', () => ({
   buildFailureSliceLayout: () => ({}),
 }));
 
-vi.mock('./pose-trace/failureAnalysis', () => ({
+vi.mock(import('./pose-trace/failureAnalysis'), () => ({
   buildFailureAnalysis: () => null,
 }));
 
@@ -60,15 +66,15 @@ beforeEach(() => {
     datasetName: 'ds',
     demos: [],
     articulation: null,
-    cleanup: vi.fn(),
+    cleanup: vi.fn<() => void>(),
   });
   mocks.loadObjectDistribution.mockResolvedValue({
-    anchor: 'initial',
+    anchor: 'initial_pose',
     successPoints: [],
     failedPoints: [],
     teleopPoints: [],
     teleopDiagnostics: null,
-    objectNames: [],
+    availableObjects: [],
   });
 });
 

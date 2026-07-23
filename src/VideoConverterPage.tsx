@@ -1,21 +1,23 @@
 import { startTransition, useEffect, useMemo, useRef, useState } from 'react';
 import { FiDownload } from 'react-icons/fi';
-import { Link, createSearchParams, useSearchParams } from 'react-router-dom';
+import { createSearchParams, Link, useSearchParams } from 'react-router-dom';
 
+import { formatUnknownError } from './error-utils';
 import {
   listDemoVideos,
   loadDemoVideoFrames,
   openPoseTraceSource,
 } from './pose-trace/hdf5';
-import type {
-  DemoVideoFrames,
-  DemoVideoInfo,
-  DemoVideoKey,
-  PoseTraceSource,
+import {
+  type DemoVideoFrames,
+  type DemoVideoInfo,
+  type DemoVideoKey,
+  type PoseTraceSource,
 } from './pose-trace/types';
 import { type H5File, useStore } from './stores';
-import styles from './VideoConverterPage.module.css';
 import { resolveFileUrl } from './utils';
+import { VideoConverterEmptyState } from './VideoConverterEmptyState';
+import styles from './VideoConverterPage.module.css';
 import {
   buildDownloadFilename,
   createFrameRenderer,
@@ -42,10 +44,14 @@ interface CachedDownload {
   url: string;
 }
 
-function wait(milliseconds: number): Promise<void> {
+async function wait(milliseconds: number): Promise<void> {
   return new Promise((resolve) => {
-    window.setTimeout(resolve, milliseconds);
+    globalThis.setTimeout(resolve, milliseconds);
   });
+}
+
+function noop(): void {
+  return undefined;
 }
 
 function triggerDownload(url: string, filename: string) {
@@ -68,20 +74,22 @@ function useResolvedFile(fileUrl: string | null): ResolvedFileState {
   useEffect(() => {
     if (!fileUrl) {
       setState({ file: null, loading: false, error: null });
-      return;
+      return undefined;
     }
 
     const openedFile = opened.find((file) => file.url === fileUrl);
     if (openedFile) {
       setState({ file: openedFile, loading: false, error: null });
-      return;
+      return undefined;
     }
 
     let cancelled = false;
+    const resolvedFileUrl = fileUrl;
     setState({ file: null, loading: true, error: null });
 
-    resolveFileUrl(fileUrl)
-      .then((resolvedFile) => {
+    async function resolveFile() {
+      try {
+        const resolvedFile = await resolveFileUrl(resolvedFileUrl);
         if (cancelled) {
           return;
         }
@@ -98,8 +106,7 @@ function useResolvedFile(fileUrl: string | null): ResolvedFileState {
 
         openFiles([resolvedFile]);
         setState({ file: resolvedFile, loading: false, error: null });
-      })
-      .catch((error: unknown) => {
+      } catch (error: unknown) {
         if (cancelled) {
           return;
         }
@@ -107,9 +114,12 @@ function useResolvedFile(fileUrl: string | null): ResolvedFileState {
         setState({
           file: null,
           loading: false,
-          error: error instanceof Error ? error.message : String(error),
+          error: formatUnknownError(error),
         });
-      });
+      }
+    }
+
+    void resolveFile();
 
     return () => {
       cancelled = true;
@@ -128,7 +138,7 @@ function usePoseTraceSource(file: H5File | null): SourceState {
 
   useEffect(() => {
     let cancelled = false;
-    let cleanup = () => {};
+    let cleanup = noop;
 
     if (!file) {
       setState({ source: null, loading: false, error: null });
@@ -137,19 +147,20 @@ function usePoseTraceSource(file: H5File | null): SourceState {
       };
     }
 
+    const resolvedFile = file;
     setState({ source: null, loading: true, error: null });
 
-    openPoseTraceSource(file)
-      .then((source) => {
+    async function openSource() {
+      try {
+        const source = await openPoseTraceSource(resolvedFile);
         if (cancelled) {
           source.cleanup();
           return;
         }
 
-        cleanup = source.cleanup;
+        ({ cleanup } = source);
         setState({ source, loading: false, error: null });
-      })
-      .catch((error: unknown) => {
+      } catch (error: unknown) {
         if (cancelled) {
           return;
         }
@@ -157,9 +168,12 @@ function usePoseTraceSource(file: H5File | null): SourceState {
         setState({
           source: null,
           loading: false,
-          error: error instanceof Error ? error.message : String(error),
+          error: formatUnknownError(error),
         });
-      });
+      }
+    }
+
+    void openSource();
 
     return () => {
       cancelled = true;
@@ -194,63 +208,48 @@ async function encodeVideoToBlob(
   const chunks: BlobPart[] = [];
 
   const stopPromise = new Promise<Blob>((resolve, reject) => {
-    recorder.ondataavailable = (event) => {
+    recorder.addEventListener('dataavailable', (event) => {
       if (event.data.size > 0) {
         chunks.push(event.data);
       }
-    };
-    recorder.onerror = () => {
+    });
+    recorder.addEventListener('error', () => {
       reject(new Error('Video encoding failed.'));
-    };
-    recorder.onstop = () => {
+    });
+    recorder.addEventListener('stop', () => {
       resolve(new Blob(chunks, { type: mimeType }));
-    };
+    });
   });
 
   recorder.start();
 
   const [track] = stream.getVideoTracks();
-  const requestFrame =
-    typeof (track as CanvasCaptureMediaStreamTrack).requestFrame === 'function'
-      ? () => (track as CanvasCaptureMediaStreamTrack).requestFrame()
-      : null;
+  const canvasTrack = track as CanvasCaptureMediaStreamTrack;
+  const supportsManualFrames = typeof canvasTrack.requestFrame === 'function';
   const frameDuration = 1000 / PREVIEW_FPS;
 
-  for (let frameIndex = 0; frameIndex < video.frameCount; frameIndex += 1) {
+  async function renderFrames(frameIndex: number): Promise<void> {
+    if (frameIndex >= video.frameCount) {
+      return;
+    }
+
     renderFrame(video.frames, frameIndex);
-    requestFrame?.();
+    if (supportsManualFrames) {
+      canvasTrack.requestFrame();
+    }
     await wait(frameDuration);
+    await renderFrames(frameIndex + 1);
   }
 
+  await renderFrames(0);
   await wait(frameDuration);
   recorder.stop();
 
   const blob = await stopPromise;
-  stream.getTracks().forEach((mediaTrack) => mediaTrack.stop());
+  for (const mediaTrack of stream.getTracks()) {
+    mediaTrack.stop();
+  }
   return blob;
-}
-
-function EmptyState({ openedFileCount }: { openedFileCount: number }) {
-  return (
-    <div className={styles.emptyState}>
-      <h2 className={styles.emptyTitle}>Video Converter</h2>
-      <p className={styles.emptyText}>
-        Open an HDF5 file in rebelHDF5, then switch to this page to preview and
-        save demo videos.
-      </p>
-      <div className={styles.emptyActions}>
-        <Link className={styles.openBtn} to="/">
-          Open HDF5
-        </Link>
-        {openedFileCount > 0 && (
-          <span>
-            {openedFileCount} opened file{openedFileCount === 1 ? '' : 's'}{' '}
-            available in the sidebar.
-          </span>
-        )}
-      </div>
-    </div>
-  );
 }
 
 function VideoConverterPage() {
@@ -290,7 +289,7 @@ function VideoConverterPage() {
   const cachedDownloadRef = useRef<CachedDownload | null>(null);
   const supportedMimeType = useMemo(() => getSupportedMimeType(), []);
 
-  const demos = source?.demos ?? [];
+  const demos = useMemo(() => source?.demos ?? [], [source]);
 
   useEffect(() => {
     if (demos.length === 0) {
@@ -313,7 +312,7 @@ function VideoConverterPage() {
       setVideoError(null);
       setVideoOptionsLoading(false);
       setVideoOptionsError(null);
-      return;
+      return undefined;
     }
 
     let cancelled = false;
@@ -324,8 +323,12 @@ function VideoConverterPage() {
     setVideoOptionsLoading(true);
     setVideoOptionsError(null);
 
-    listDemoVideos(source, selectedDemo)
-      .then((nextVideos) => {
+    const resolvedSource = source;
+    const resolvedDemo = selectedDemo;
+
+    async function loadVideos() {
+      try {
+        const nextVideos = await listDemoVideos(resolvedSource, resolvedDemo);
         if (cancelled) {
           return;
         }
@@ -337,15 +340,14 @@ function VideoConverterPage() {
           }
           // Prefer a third-person/overview camera when available, otherwise the first one.
           const preferred = nextVideos.find((video) =>
-            /(?:^|_)(?:top|overview|third_person|external|front|scene)(?:_|$)/iu.test(
+            /(?:^|_)(?:external|front|overview|scene|third_person|top)(?:_|$)/iu.test(
               video.key,
             ),
           );
-          return preferred?.key ?? nextVideos[0]?.key ?? null;
+          return preferred ? preferred.key : (nextVideos.at(0)?.key ?? null);
         });
         setVideoOptionsLoading(false);
-      })
-      .catch((error: unknown) => {
+      } catch (error: unknown) {
         if (cancelled) {
           return;
         }
@@ -353,10 +355,11 @@ function VideoConverterPage() {
         setVideoOptions([]);
         setSelectedVideoKey(null);
         setVideoOptionsLoading(false);
-        setVideoOptionsError(
-          error instanceof Error ? error.message : String(error),
-        );
-      });
+        setVideoOptionsError(formatUnknownError(error));
+      }
+    }
+
+    void loadVideos();
 
     return () => {
       cancelled = true;
@@ -368,7 +371,7 @@ function VideoConverterPage() {
       setVideoData(null);
       setVideoLoading(false);
       setVideoError(null);
-      return;
+      return undefined;
     }
 
     let cancelled = false;
@@ -377,24 +380,35 @@ function VideoConverterPage() {
     setVideoError(null);
     setSaveError(null);
 
-    loadDemoVideoFrames(source, selectedDemo, selectedVideoKey)
-      .then((nextVideo) => {
+    const resolvedSource = source;
+    const resolvedDemo = selectedDemo;
+    const resolvedVideoKey = selectedVideoKey;
+
+    async function loadVideo() {
+      try {
+        const nextVideo = await loadDemoVideoFrames(
+          resolvedSource,
+          resolvedDemo,
+          resolvedVideoKey,
+        );
         if (cancelled) {
           return;
         }
 
         setVideoData(nextVideo);
         setVideoLoading(false);
-      })
-      .catch((error: unknown) => {
+      } catch (error: unknown) {
         if (cancelled) {
           return;
         }
 
         setVideoData(null);
         setVideoLoading(false);
-        setVideoError(error instanceof Error ? error.message : String(error));
-      });
+        setVideoError(formatUnknownError(error));
+      }
+    }
+
+    void loadVideo();
 
     return () => {
       cancelled = true;
@@ -418,7 +432,7 @@ function VideoConverterPage() {
       demo: selectedDemo,
       samples: demo?.num_samples ?? 'n/a',
       source: demo?.source_episode_index ?? 'n/a',
-      success: demo?.success != null ? Number(demo.success) : 'n/a',
+      success: demo && demo.success !== null ? Number(demo.success) : 'n/a',
     };
   }, [demos, selectedDemo]);
 
@@ -479,31 +493,30 @@ function VideoConverterPage() {
 
   useEffect(() => {
     if (!videoData || !isPlaying || videoData.frameCount <= 1) {
-      return;
+      return undefined;
     }
 
     let animationFrameId = 0;
     let lastTimestamp = performance.now();
     const frameDuration = 1000 / PREVIEW_FPS;
+    const { frameCount } = videoData;
 
-    const tick = (timestamp: number) => {
+    function tick(timestamp: number) {
       const elapsed = timestamp - lastTimestamp;
 
       if (elapsed >= frameDuration) {
         const advance = Math.floor(elapsed / frameDuration);
         lastTimestamp += advance * frameDuration;
-        setCurrentFrameIndex(
-          (current) => (current + advance) % videoData.frameCount,
-        );
+        setCurrentFrameIndex((current) => (current + advance) % frameCount);
       }
 
-      animationFrameId = window.requestAnimationFrame(tick);
-    };
+      animationFrameId = globalThis.requestAnimationFrame(tick);
+    }
 
-    animationFrameId = window.requestAnimationFrame(tick);
+    animationFrameId = globalThis.requestAnimationFrame(tick);
 
     return () => {
-      window.cancelAnimationFrame(animationFrameId);
+      globalThis.cancelAnimationFrame(animationFrameId);
     };
   }, [isPlaying, videoData]);
 
@@ -544,285 +557,328 @@ function VideoConverterPage() {
       };
       triggerDownload(url, filename);
     } catch (error: unknown) {
-      setSaveError(error instanceof Error ? error.message : String(error));
+      setSaveError(formatUnknownError(error));
     } finally {
       setIsSaving(false);
     }
   }
 
-  return (
-    <div className={styles.root}>
-      <header className={styles.header}>
-        <div>
-          <p className={styles.eyebrow}>Analysis</p>
-          <h1 className={styles.title}>Video Converter</h1>
-          <p className={styles.subtitle}>
-            Preview RGB demo videos stored in the current HDF5 file and save
-            them to disk only when needed.
-          </p>
+  function renderPreviewContent() {
+    if (
+      videoOptions.length === 0 &&
+      !videoOptionsLoading &&
+      !videoOptionsError
+    ) {
+      return (
+        <p className={styles.infoText}>
+          No supported video datasets were found. Expected one or more (T, H, W,
+          C) datasets under `obs/cameras/` or directly under `obs/`.
+        </p>
+      );
+    }
+
+    if (videoLoading) {
+      return <p className={styles.infoText}>Loading video frames…</p>;
+    }
+
+    if (videoError) {
+      return <p className={styles.errorText}>{videoError}</p>;
+    }
+
+    if (!videoData) {
+      return <p className={styles.infoText}>Select a video to preview it.</p>;
+    }
+
+    return (
+      <div className={styles.previewSurface}>
+        <div className={styles.previewViewport}>
+          <canvas
+            ref={previewCanvasRef}
+            className={styles.previewCanvas}
+            aria-label="Video frame preview"
+          />
         </div>
-      </header>
-
-      {!fileUrl && !file && !fileLoading && (
-        <EmptyState openedFileCount={opened.length} />
-      )}
-
-      {fileError && (
-        <section className={styles.messageCard}>
-          <p className={styles.errorText}>{fileError}</p>
-        </section>
-      )}
-
-      {(fileLoading || sourceLoading) && (
-        <section className={styles.messageCard}>
-          <p>Loading video-converter data…</p>
-        </section>
-      )}
-
-      {sourceError && (
-        <section className={styles.messageCard}>
-          <p className={styles.errorText}>{sourceError}</p>
-        </section>
-      )}
-
-      {source && (
-        <>
-          <section className={styles.controlsCard}>
-            <div className={styles.controlGrid}>
-              <div className={styles.field}>
-                <label
-                  className={styles.fieldLabel}
-                  htmlFor="video-demo-select"
-                >
-                  Demo
-                </label>
-                <select
-                  id="video-demo-select"
-                  className={styles.select}
-                  value={selectedDemo ?? ''}
-                  onChange={(event) => {
-                    const nextDemo = event.target.value;
-                    startTransition(() => {
-                      setSelectedDemo(nextDemo);
-                    });
-                  }}
-                  disabled={demos.length === 0}
-                >
-                  {demos.length === 0 && (
-                    <option value="">No demos available</option>
-                  )}
-                  {demos.map((demo) => (
-                    <option key={demo.name} value={demo.name}>
-                      {formatDemoOption(demo)}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className={styles.field}>
-                <label
-                  className={styles.fieldLabel}
-                  htmlFor="video-stream-select"
-                >
-                  Video
-                </label>
-                <select
-                  id="video-stream-select"
-                  className={styles.select}
-                  value={selectedVideoKey ?? ''}
-                  onChange={(event) => {
-                    const nextVideo = event.target.value as DemoVideoKey;
-                    startTransition(() => {
-                      setSelectedVideoKey(nextVideo || null);
-                    });
-                  }}
-                  disabled={videoOptionsLoading || videoOptions.length === 0}
-                >
-                  {videoOptions.length === 0 && (
-                    <option value="">
-                      {videoOptionsLoading
-                        ? 'Loading videos…'
-                        : 'No supported videos found'}
-                    </option>
-                  )}
-                  {videoOptions.map((video) => (
-                    <option key={video.key} value={video.key}>
-                      {video.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
+        <div className={styles.playerControls}>
+          <div className={styles.sliderBlock}>
+            <input
+              className={styles.timelineSlider}
+              type="range"
+              aria-label="Video timeline"
+              min={0}
+              max={Math.max(videoData.frameCount - 1, 0)}
+              step={1}
+              value={currentFrameIndex}
+              onChange={(event) => {
+                setCurrentFrameIndex(Number(event.target.value));
+              }}
+              disabled={videoData.frameCount <= 1}
+            />
+            <div className={styles.sliderMeta}>
+              <span>
+                Frame {currentFrameLabel}/{videoData.frameCount}
+              </span>
+              <span>
+                {currentTimeSeconds.toFixed(2)}s / {totalTimeSeconds.toFixed(2)}
+                s
+              </span>
             </div>
+          </div>
+          <button
+            type="button"
+            className={styles.playBtn}
+            onClick={() => {
+              setIsPlaying((current) => !current);
+            }}
+            disabled={videoData.frameCount <= 1}
+          >
+            {isPlaying ? 'Pause' : 'Play'}
+          </button>
+        </div>
+      </div>
+    );
+  }
 
-            <div className={styles.statusRow}>
-              <div className={styles.statusItem}>
-                <span className={styles.statusKey}>Demos:</span> {demos.length}
-              </div>
-              {selectionText && (
-                <>
-                  <div className={styles.statusItem}>
-                    <span className={styles.statusKey}>Selected:</span>{' '}
-                    {selectionText.demo}
-                  </div>
-                  <div className={styles.statusItem}>
-                    <span className={styles.statusKey}>Samples:</span>{' '}
-                    {selectionText.samples}
-                  </div>
-                  <div className={styles.statusItem}>
-                    <span className={styles.statusKey}>Source:</span>{' '}
-                    {selectionText.source}
-                  </div>
-                  <div className={styles.statusItem}>
-                    <span className={styles.statusKey}>Success:</span>{' '}
-                    {selectionText.success}
-                  </div>
-                </>
-              )}
-              {selectedVideoInfo && (
-                <>
-                  <div className={styles.statusItem}>
-                    <span className={styles.statusKey}>Frames:</span>{' '}
-                    {selectedVideoInfo.frameCount}
-                  </div>
-                  <div className={styles.statusItem}>
-                    <span className={styles.statusKey}>Resolution:</span>{' '}
-                    {selectedVideoInfo.width}×{selectedVideoInfo.height}
-                  </div>
-                </>
-              )}
-            </div>
-          </section>
+  function renderInitialEmptyState() {
+    if (fileUrl || file || fileLoading) {
+      return null;
+    }
 
-          {videoOptionsError && (
-            <section className={styles.messageCard}>
-              <p className={styles.errorText}>{videoOptionsError}</p>
-            </section>
-          )}
+    return <VideoConverterEmptyState openedFileCount={opened.length} />;
+  }
 
-          <section className={styles.previewCard}>
-            <div className={styles.previewHeader}>
-              <div>
-                <h2 className={styles.previewTitle}>
-                  {selectedVideoInfo
-                    ? `${selectedVideoInfo.label} Preview`
-                    : 'Video Preview'}
-                </h2>
-                <p className={styles.previewMeta}>
-                  {selectedVideoInfo
-                    ? `${selectedVideoInfo.path} · ${PREVIEW_FPS} FPS preview`
-                    : 'Choose a demo video to preview it.'}
-                </p>
-              </div>
-              <button
-                type="button"
-                className={styles.saveBtn}
-                onClick={() => {
-                  void handleSaveVideo();
-                }}
-                disabled={!videoData || isSaving || !supportedMimeType}
-              >
-                <FiDownload aria-hidden />
-                <span>{isSaving ? 'Saving…' : 'Save Video'}</span>
-              </button>
-            </div>
+  function renderNoSourceState() {
+    if (
+      source ||
+      fileLoading ||
+      sourceLoading ||
+      fileError ||
+      sourceError ||
+      !fileUrl
+    ) {
+      return null;
+    }
 
-            {!supportedMimeType && (
-              <p className={styles.hintText}>
-                Saving is unavailable in this browser because WebM recording is
-                not supported.
-              </p>
-            )}
+    return (
+      <section className={styles.messageCard}>
+        <p>
+          Select an opened file from the sidebar to inspect demo videos, or go
+          back to the viewer.
+        </p>
+        <div className={styles.emptyActions}>
+          <Link
+            className={styles.openBtn}
+            to={`/video-converter?${createSearchParams({ url: fileUrl }).toString()}`}
+          >
+            Retry
+          </Link>
+          <Link className={styles.openBtn} to="/">
+            Open HDF5
+          </Link>
+        </div>
+      </section>
+    );
+  }
 
-            {saveError && <p className={styles.errorText}>{saveError}</p>}
+  function renderErrorMessage(error: string | null) {
+    if (!error) {
+      return null;
+    }
 
-            {videoOptions.length === 0 &&
-            !videoOptionsLoading &&
-            !videoOptionsError ? (
-              <p className={styles.infoText}>
-                No supported video datasets were found. Expected one or more (T,
-                H, W, C) datasets under `obs/cameras/` or directly under `obs/`.
-              </p>
-            ) : videoLoading ? (
-              <p className={styles.infoText}>Loading video frames…</p>
-            ) : videoError ? (
-              <p className={styles.errorText}>{videoError}</p>
-            ) : videoData ? (
-              <div className={styles.previewSurface}>
-                <div className={styles.previewViewport}>
-                  <canvas
-                    ref={previewCanvasRef}
-                    className={styles.previewCanvas}
-                  />
-                </div>
-                <div className={styles.playerControls}>
-                  <div className={styles.sliderBlock}>
-                    <input
-                      className={styles.timelineSlider}
-                      type="range"
-                      min={0}
-                      max={Math.max(videoData.frameCount - 1, 0)}
-                      step={1}
-                      value={currentFrameIndex}
-                      onChange={(event) => {
-                        setCurrentFrameIndex(Number(event.target.value));
-                      }}
-                      disabled={videoData.frameCount <= 1}
-                    />
-                    <div className={styles.sliderMeta}>
-                      <span>
-                        Frame {currentFrameLabel}/{videoData.frameCount}
-                      </span>
-                      <span>
-                        {currentTimeSeconds.toFixed(2)}s /{' '}
-                        {totalTimeSeconds.toFixed(2)}s
-                      </span>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    className={styles.playBtn}
-                    onClick={() => {
-                      setIsPlaying((current) => !current);
-                    }}
-                    disabled={videoData.frameCount <= 1}
-                  >
-                    {isPlaying ? 'Pause' : 'Play'}
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <p className={styles.infoText}>Select a video to preview it.</p>
-            )}
-          </section>
-        </>
-      )}
+    return (
+      <section className={styles.messageCard}>
+        <p className={styles.errorText}>{error}</p>
+      </section>
+    );
+  }
 
-      {!source &&
-        !fileLoading &&
-        !sourceLoading &&
-        !fileError &&
-        !sourceError &&
-        fileUrl && (
-          <section className={styles.messageCard}>
-            <p>
-              Select an opened file from the sidebar to inspect demo videos, or
-              go back to the viewer.
+  function renderPage() {
+    return (
+      <div className={styles.root}>
+        <header className={styles.header}>
+          <div>
+            <p className={styles.eyebrow}>Analysis</p>
+            <h1 className={styles.title}>Video Converter</h1>
+            <p className={styles.subtitle}>
+              Preview RGB demo videos stored in the current HDF5 file and save
+              them to disk only when needed.
             </p>
-            <div className={styles.emptyActions}>
-              <Link
-                className={styles.openBtn}
-                to={`/video-converter?${createSearchParams({ url: fileUrl }).toString()}`}
-              >
-                Retry
-              </Link>
-              <Link className={styles.openBtn} to="/">
-                Open HDF5
-              </Link>
-            </div>
+          </div>
+        </header>
+
+        {renderInitialEmptyState()}
+
+        {renderErrorMessage(fileError)}
+
+        {(fileLoading || sourceLoading) && (
+          <section className={styles.messageCard}>
+            <p>Loading video-converter data…</p>
           </section>
         )}
-    </div>
-  );
+
+        {renderErrorMessage(sourceError)}
+
+        {source && (
+          <>
+            <section className={styles.controlsCard}>
+              <div className={styles.controlGrid}>
+                <div className={styles.field}>
+                  <label
+                    className={styles.fieldLabel}
+                    htmlFor="video-demo-select"
+                  >
+                    Demo
+                  </label>
+                  <select
+                    id="video-demo-select"
+                    className={styles.select}
+                    value={selectedDemo ?? ''}
+                    onChange={(event) => {
+                      const nextDemo = event.target.value;
+                      startTransition(() => {
+                        setSelectedDemo(nextDemo);
+                      });
+                    }}
+                    disabled={demos.length === 0}
+                  >
+                    {demos.length === 0 && (
+                      <option value="">No demos available</option>
+                    )}
+                    {demos.map((demo) => (
+                      <option key={demo.name} value={demo.name}>
+                        {formatDemoOption(demo)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className={styles.field}>
+                  <label
+                    className={styles.fieldLabel}
+                    htmlFor="video-stream-select"
+                  >
+                    Video
+                  </label>
+                  <select
+                    id="video-stream-select"
+                    className={styles.select}
+                    value={selectedVideoKey ?? ''}
+                    onChange={(event) => {
+                      const nextVideo = event.target.value;
+                      startTransition(() => {
+                        setSelectedVideoKey(nextVideo || null);
+                      });
+                    }}
+                    disabled={videoOptionsLoading || videoOptions.length === 0}
+                  >
+                    {videoOptions.length === 0 && (
+                      <option value="">
+                        {videoOptionsLoading
+                          ? 'Loading videos…'
+                          : 'No supported videos found'}
+                      </option>
+                    )}
+                    {videoOptions.map((video) => (
+                      <option key={video.key} value={video.key}>
+                        {video.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className={styles.statusRow}>
+                <div className={styles.statusItem} aria-label="Demo count">
+                  <span className={styles.statusKey}>Demos:</span>{' '}
+                  {demos.length}
+                </div>
+                {selectionText && (
+                  <>
+                    <div className={styles.statusItem}>
+                      <span className={styles.statusKey}>Selected:</span>{' '}
+                      {selectionText.demo}
+                    </div>
+                    <div className={styles.statusItem}>
+                      <span className={styles.statusKey}>Samples:</span>{' '}
+                      {selectionText.samples}
+                    </div>
+                    <div className={styles.statusItem}>
+                      <span className={styles.statusKey}>Source:</span>{' '}
+                      {selectionText.source}
+                    </div>
+                    <div className={styles.statusItem}>
+                      <span className={styles.statusKey}>Success:</span>{' '}
+                      {selectionText.success}
+                    </div>
+                  </>
+                )}
+                {selectedVideoInfo && (
+                  <>
+                    <div className={styles.statusItem}>
+                      <span className={styles.statusKey}>Frames:</span>{' '}
+                      {selectedVideoInfo.frameCount}
+                    </div>
+                    <div className={styles.statusItem}>
+                      <span className={styles.statusKey}>Resolution:</span>{' '}
+                      {selectedVideoInfo.width}×{selectedVideoInfo.height}
+                    </div>
+                  </>
+                )}
+              </div>
+            </section>
+
+            {videoOptionsError && (
+              <section className={styles.messageCard}>
+                <p className={styles.errorText}>{videoOptionsError}</p>
+              </section>
+            )}
+
+            <section className={styles.previewCard}>
+              <div className={styles.previewHeader}>
+                <div>
+                  <h2 className={styles.previewTitle}>
+                    {selectedVideoInfo
+                      ? `${selectedVideoInfo.label} Preview`
+                      : 'Video Preview'}
+                  </h2>
+                  <p className={styles.previewMeta}>
+                    {selectedVideoInfo
+                      ? `${selectedVideoInfo.path} · ${PREVIEW_FPS} FPS preview`
+                      : 'Choose a demo video to preview it.'}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className={styles.saveBtn}
+                  onClick={() => {
+                    void handleSaveVideo();
+                  }}
+                  disabled={!videoData || isSaving || !supportedMimeType}
+                >
+                  <FiDownload aria-hidden />
+                  <span>{isSaving ? 'Saving…' : 'Save Video'}</span>
+                </button>
+              </div>
+
+              {!supportedMimeType && (
+                <p className={styles.hintText}>
+                  Saving is unavailable in this browser because WebM recording
+                  is not supported.
+                </p>
+              )}
+
+              {saveError && <p className={styles.errorText}>{saveError}</p>}
+
+              {renderPreviewContent()}
+            </section>
+          </>
+        )}
+
+        {renderNoSourceState()}
+      </div>
+    );
+  }
+
+  return renderPage();
 }
 
 export default VideoConverterPage;

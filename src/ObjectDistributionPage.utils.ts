@@ -15,10 +15,10 @@ export interface DatasetGroupSelection {
 }
 
 export interface PlotClickEvent {
-  points?: Array<{
+  points?: {
     pointIndex?: number;
     data?: { name?: string };
-  }>;
+  }[];
 }
 
 // File-name convention for a dataset pack (all three share the same base name):
@@ -84,8 +84,11 @@ export function selectDatasetGroup(
 
   const packFiles =
     targetBase === null ? files : (groups.get(targetBase) ?? []);
-  const pick = (role: DatasetRole): string | null =>
-    packFiles.find((file) => classifyDataset(file) === role)?.url ?? null;
+  function pick(role: DatasetRole): string | null {
+    return (
+      packFiles.find((file) => classifyDataset(file) === role)?.url ?? null
+    );
+  }
 
   return {
     successUrl: pick('success'),
@@ -118,13 +121,11 @@ export function formatRange(start: number, end: number, unit: string): string {
   return `${start.toFixed(2)} to ${end.toFixed(2)} ${unit}`;
 }
 
-export function hashRevisionKey(
-  parts: Array<string | number | boolean>,
-): number {
+export function hashRevisionKey(parts: (string | number | boolean)[]): number {
   const key = parts.join(':');
   let hash = 0;
   for (let index = 0; index < key.length; index += 1) {
-    hash = (hash * 31 + key.charCodeAt(index)) >>> 0;
+    hash = (hash * 31 + key.charCodeAt(index)) % 4_294_967_296;
   }
 
   return hash;

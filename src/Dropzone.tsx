@@ -12,7 +12,7 @@ import { FileService, type LocalFile, useStore } from './stores';
 import { getViewerLink } from './utils';
 
 interface DropzoneContextValue {
-  openFilePicker: () => void;
+  openFilePicker: () => Promise<void>;
 }
 
 const DropzoneContext = createContext({} as DropzoneContextValue);
@@ -127,7 +127,7 @@ function Dropzone(props: PropsWithChildren<Props>) {
 
   return (
     <div {...getRootProps({ className: styles.zone })}>
-      <input {...getInputProps()} />
+      <input {...getInputProps({ 'aria-label': 'HDF5 file input' })} />
       {isDragActive && (
         <div className={styles.dropIt}>
           <p>Drop it!</p>

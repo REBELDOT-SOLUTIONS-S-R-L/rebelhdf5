@@ -1,6 +1,6 @@
-import type {
-  ObjectDistributionPoint,
-  ObjectDistributionResult,
+import {
+  type ObjectDistributionPoint,
+  type ObjectDistributionResult,
 } from './types';
 
 const POSITION_BIN_COUNT = 20;
@@ -67,7 +67,7 @@ export interface FailurePlane {
   yBounds: Bounds;
   bandwidth: Bandwidth2D;
   bins: FailureBin[][];
-  overlayPoints: Array<{ x: number; y: number }>;
+  overlayPoints: { x: number; y: number }[];
 }
 
 export interface FailureSlice {
@@ -308,7 +308,7 @@ function buildPlane(
       yBounds,
       binCounts.y,
     );
-    if (xIndex == null || yIndex == null) {
+    if (xIndex === null || yIndex === null) {
       continue;
     }
 
@@ -324,7 +324,7 @@ function buildPlane(
     const yValue = getAxisValue(point, axes.y);
     const xIndex = findBinIndex(xValue, xBounds, binCounts.x);
     const yIndex = findBinIndex(yValue, yBounds, binCounts.y);
-    if (xIndex == null || yIndex == null) {
+    if (xIndex === null || yIndex === null) {
       return [];
     }
 
@@ -372,8 +372,8 @@ function buildPlane(
               smoothedFailedSupport,
             )
           : null;
-      const rawSuccessCount = rawCounts[yIndex][xIndex].rawSuccessCount;
-      const rawFailedCount = rawCounts[yIndex][xIndex].rawFailedCount;
+      const { rawSuccessCount } = rawCounts[yIndex][xIndex];
+      const { rawFailedCount } = rawCounts[yIndex][xIndex];
       const rawGeneratedCount = rawSuccessCount + rawFailedCount;
 
       return {
@@ -418,7 +418,7 @@ function shouldSeedRegion(
   bin: FailureBin,
   minGeneratedSupport: number,
 ): boolean {
-  if (bin.masked || bin.failureRate == null || bin.confidenceLower == null) {
+  if (bin.masked || bin.failureRate === null || bin.confidenceLower === null) {
     return false;
   }
 
@@ -430,6 +430,51 @@ function shouldSeedRegion(
     bin.confidenceScore >= REGION_CONFIDENCE_THRESHOLD &&
     regionScore >= REGION_MIN_SCORE
   );
+}
+
+function collectRegionBins(
+  slice: FailureSlice,
+  startRow: number,
+  startCol: number,
+  visited: boolean[][],
+  neighbors: number[][],
+  minGeneratedSupport: number,
+): FailureBin[] {
+  const visitedBins = visited;
+  const height = slice.plane.bins.length;
+  const width = slice.plane.bins[0]?.length ?? 0;
+  const queue: [number, number][] = [[startRow, startCol]];
+  const regionBins: FailureBin[] = [];
+  visitedBins[startRow][startCol] = true;
+
+  while (queue.length > 0) {
+    const position = queue.shift();
+    if (!position) {
+      break;
+    }
+    const [currentRow, currentCol] = position;
+    regionBins.push(slice.plane.bins[currentRow][currentCol]);
+
+    for (const [rowDelta, colDelta] of neighbors) {
+      const nextRow = currentRow + rowDelta;
+      const nextCol = currentCol + colDelta;
+      const outsidePlane =
+        nextRow < 0 || nextCol < 0 || nextRow >= height || nextCol >= width;
+      if (outsidePlane || visitedBins[nextRow][nextCol]) {
+        continue;
+      }
+
+      const nextBin = slice.plane.bins[nextRow][nextCol];
+      if (!shouldSeedRegion(nextBin, minGeneratedSupport)) {
+        continue;
+      }
+
+      visitedBins[nextRow][nextCol] = true;
+      queue.push([nextRow, nextCol]);
+    }
+  }
+
+  return regionBins;
 }
 
 function collectRecommendations(
@@ -465,37 +510,14 @@ function collectRecommendations(
           continue;
         }
 
-        const queue: Array<[number, number]> = [[rowIndex, colIndex]];
-        const regionBins: FailureBin[] = [];
-        visited[rowIndex][colIndex] = true;
-
-        while (queue.length > 0) {
-          const [currentRow, currentCol] = queue.shift()!;
-          const currentBin = slice.plane.bins[currentRow][currentCol];
-          regionBins.push(currentBin);
-
-          for (const [rowDelta, colDelta] of neighbors) {
-            const nextRow = currentRow + rowDelta;
-            const nextCol = currentCol + colDelta;
-            if (
-              nextRow < 0 ||
-              nextCol < 0 ||
-              nextRow >= height ||
-              nextCol >= width ||
-              visited[nextRow][nextCol]
-            ) {
-              continue;
-            }
-
-            const nextBin = slice.plane.bins[nextRow][nextCol];
-            if (!shouldSeedRegion(nextBin, minGeneratedSupport)) {
-              continue;
-            }
-
-            visited[nextRow][nextCol] = true;
-            queue.push([nextRow, nextCol]);
-          }
-        }
+        const regionBins = collectRegionBins(
+          slice,
+          rowIndex,
+          colIndex,
+          visited,
+          neighbors,
+          minGeneratedSupport,
+        );
 
         const smoothedGeneratedSupport = regionBins.reduce(
           (sum, bin) => sum + bin.smoothedGeneratedSupport,
@@ -670,17 +692,17 @@ export function buildFailureAnalysis(
   const sliceYEdges = createEdges(rotationBounds.y, SLICE_DIVISIONS);
   const generatedSlices = Array.from(
     { length: SLICE_DIVISIONS * SLICE_DIVISIONS },
-    () => [] as GeneratedResetPoint[],
+    (): GeneratedResetPoint[] => [],
   );
   const teleopSlices = Array.from(
     { length: SLICE_DIVISIONS * SLICE_DIVISIONS },
-    () => [] as ResetPoint[],
+    (): ResetPoint[] => [],
   );
 
   for (const point of generatedPoints) {
     const xIndex = findBinIndex(point.rotX, rotationBounds.x, SLICE_DIVISIONS);
     const yIndex = findBinIndex(point.rotY, rotationBounds.y, SLICE_DIVISIONS);
-    if (xIndex == null || yIndex == null) {
+    if (xIndex === null || yIndex === null) {
       continue;
     }
 
@@ -690,7 +712,7 @@ export function buildFailureAnalysis(
   for (const point of teleopPoints) {
     const xIndex = findBinIndex(point.rotX, rotationBounds.x, SLICE_DIVISIONS);
     const yIndex = findBinIndex(point.rotY, rotationBounds.y, SLICE_DIVISIONS);
-    if (xIndex == null || yIndex == null) {
+    if (xIndex === null || yIndex === null) {
       continue;
     }
 

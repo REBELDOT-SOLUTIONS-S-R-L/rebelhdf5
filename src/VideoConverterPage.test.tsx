@@ -2,16 +2,21 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import {
+  type listDemoVideos,
+  type loadDemoVideoFrames,
+  type openPoseTraceSource,
+} from './pose-trace/hdf5';
 import { FileService, type H5File, useStore } from './stores';
 import VideoConverterPage from './VideoConverterPage';
 
 const mocks = vi.hoisted(() => ({
-  listDemoVideos: vi.fn(),
-  loadDemoVideoFrames: vi.fn(),
-  openPoseTraceSource: vi.fn(),
+  listDemoVideos: vi.fn<typeof listDemoVideos>(),
+  loadDemoVideoFrames: vi.fn<typeof loadDemoVideoFrames>(),
+  openPoseTraceSource: vi.fn<typeof openPoseTraceSource>(),
 }));
 
-vi.mock('./pose-trace/hdf5', () => ({
+vi.mock(import('./pose-trace/hdf5'), () => ({
   listDemoVideos: mocks.listDemoVideos,
   loadDemoVideoFrames: mocks.loadDemoVideoFrames,
   openPoseTraceSource: mocks.openPoseTraceSource,
@@ -50,7 +55,7 @@ beforeEach(() => {
       },
     ],
     articulation: null,
-    cleanup: vi.fn(),
+    cleanup: vi.fn<() => void>(),
   });
   mocks.listDemoVideos.mockResolvedValue([]);
 });
@@ -81,11 +86,11 @@ describe('VideoConverterPage', () => {
 
     // Status row reflects the single demo.
     await waitFor(() => {
-      expect(screen.getByText('Demos:').parentElement).toHaveTextContent('1');
+      expect(screen.getByLabelText('Demo count')).toHaveTextContent('1');
     });
     // With no videos, the video selector shows the empty message.
-    expect(
-      await screen.findByText('No supported videos found'),
-    ).toBeInTheDocument();
+    await expect(
+      screen.findByText('No supported videos found'),
+    ).resolves.toBeInTheDocument();
   });
 });

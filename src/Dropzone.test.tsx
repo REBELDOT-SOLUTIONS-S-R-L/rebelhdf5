@@ -27,10 +27,8 @@ function renderDropzone() {
   );
 }
 
-// react-dropzone does not expose its file input via role/label, so a direct
-// DOM query is the only way to reach it from tests.
-function findFileInput(): HTMLInputElement | null {
-  return document.querySelector<HTMLInputElement>('input[type="file"]');
+function getFileInput(): HTMLInputElement {
+  return screen.getByLabelText<HTMLInputElement>('HDF5 file input');
 }
 
 describe('Dropzone', () => {
@@ -46,11 +44,7 @@ describe('Dropzone', () => {
 
   it('adds files chosen via the hidden input to the store', async () => {
     renderDropzone();
-    const input = findFileInput();
-    // eslint-disable-next-line vitest/no-conditional-in-test -- runtime narrow needed because querySelector is typed as nullable.
-    if (!input) {
-      throw new Error('Dropzone did not render its file input.');
-    }
+    const input = getFileInput();
 
     const file = new File(['contents'], 'demo.h5', {
       type: 'application/x-hdf5',
@@ -98,37 +92,38 @@ describe('Dropzone openFilePicker', () => {
 
   it('falls back to the hidden input when no native picker is available', async () => {
     renderWithPicker();
-    const input = findFileInput();
-    if (!input) {
-      throw new Error('Dropzone did not render its file input.');
-    }
+    const input = getFileInput();
     const inputClick = vi.spyOn(input, 'click');
 
     await userEvent.click(screen.getByRole('button', { name: 'Pick' }));
-    expect(inputClick).toHaveBeenCalledTimes(1);
+    expect(inputClick).toHaveBeenCalledOnce();
   });
 
   it('uses the desktop launcher when window.rebelHdf5Desktop is present', async () => {
     Object.assign(globalThis, {
-      rebelHdf5Desktop: { getPathForFile: vi.fn() },
+      rebelHdf5Desktop: {
+        getPathForFile:
+          vi.fn<NonNullable<RebelHdf5DesktopRuntime['getPathForFile']>>(),
+      },
     });
 
     renderWithPicker();
-    const input = findFileInput();
-    if (!input) {
-      throw new Error('Dropzone did not render its file input.');
-    }
+    const input = getFileInput();
     const inputClick = vi.spyOn(input, 'click');
 
     await userEvent.click(screen.getByRole('button', { name: 'Pick' }));
-    expect(inputClick).toHaveBeenCalledTimes(1);
+    expect(inputClick).toHaveBeenCalledOnce();
   });
 
   it('opens via showOpenFilePicker when supported and adds returned files', async () => {
     const file = new File(['x'], 'fsa.h5', { type: 'application/x-hdf5' });
-    const handle = { getFile: vi.fn().mockResolvedValue(file) };
+    const handle = {
+      getFile: vi.fn<FileSystemFileHandle['getFile']>().mockResolvedValue(file),
+    };
     Object.assign(globalThis, {
-      showOpenFilePicker: vi.fn().mockResolvedValue([handle]),
+      showOpenFilePicker: vi
+        .fn<NonNullable<typeof globalThis.showOpenFilePicker>>()
+        .mockResolvedValue([handle as unknown as FileSystemFileHandle]),
     });
 
     renderWithPicker();
@@ -143,7 +138,7 @@ describe('Dropzone openFilePicker', () => {
   it('silently returns when the user aborts showOpenFilePicker', async () => {
     Object.assign(globalThis, {
       showOpenFilePicker: vi
-        .fn()
+        .fn<NonNullable<typeof globalThis.showOpenFilePicker>>()
         .mockRejectedValue(new DOMException('User cancelled', 'AbortError')),
     });
 
@@ -155,17 +150,16 @@ describe('Dropzone openFilePicker', () => {
 
   it('falls through to the hidden input when showOpenFilePicker fails for any other reason', async () => {
     Object.assign(globalThis, {
-      showOpenFilePicker: vi.fn().mockRejectedValue(new Error('boom')),
+      showOpenFilePicker: vi
+        .fn<NonNullable<typeof globalThis.showOpenFilePicker>>()
+        .mockRejectedValue(new Error('boom')),
     });
 
     renderWithPicker();
-    const input = findFileInput();
-    if (!input) {
-      throw new Error('Dropzone did not render its file input.');
-    }
+    const input = getFileInput();
     const inputClick = vi.spyOn(input, 'click');
 
     await userEvent.click(screen.getByRole('button', { name: 'Pick' }));
-    expect(inputClick).toHaveBeenCalledTimes(1);
+    expect(inputClick).toHaveBeenCalledOnce();
   });
 });

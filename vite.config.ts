@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import react from '@vitejs/plugin-react';
-import { type Plugin, defineConfig } from 'vite';
+import { defineConfig, type Plugin } from 'vite';
 import { checker } from 'vite-plugin-checker';
 
 const backendServerPort =
@@ -12,9 +12,9 @@ const backendServerPort =
 const backendServerDir =
   process.env.PYTHON_BACKEND_DIR ??
   process.env.MERGE_SERVER_DIR ??
-  path.resolve(__dirname, '..');
+  path.resolve(import.meta.dirname, '..');
 const lehomePython = path.resolve(
-  __dirname,
+  import.meta.dirname,
   '..',
   'ROBOTICS-lehome-challenge',
   '.venv',
@@ -39,30 +39,28 @@ function backendServer(): Plugin {
   const port = backendServerPort;
   const dir = backendServerDir;
 
-  function kill() {
+  async function kill(): Promise<void> {
     const runningChild = child;
-    if (!runningChild) {
-      return Promise.resolve();
-    }
+    if (runningChild) {
+      await new Promise<void>((resolve) => {
+        let closed = false;
+        const timeout = setTimeout(() => {
+          if (!closed) {
+            runningChild.kill('SIGKILL');
+          }
+          resolve();
+        }, 2500);
 
-    return new Promise<void>((resolve) => {
-      let closed = false;
-      const timeout = setTimeout(() => {
-        if (!closed) {
-          runningChild.kill('SIGKILL');
-        }
-        resolve();
-      }, 2500);
+        runningChild.once('close', () => {
+          closed = true;
+          clearTimeout(timeout);
+          resolve();
+        });
 
-      runningChild.once('close', () => {
-        closed = true;
-        clearTimeout(timeout);
-        resolve();
+        runningChild.kill('SIGTERM');
+        child = null;
       });
-
-      runningChild.kill('SIGTERM');
-      child = null;
-    });
+    }
   }
 
   function killSync() {
@@ -72,23 +70,26 @@ function backendServer(): Plugin {
     }
   }
 
-  function shutdown(exitCode: number) {
+  async function shutdown(signal: NodeJS.Signals): Promise<void> {
     if (stopping) {
-      process.exit(exitCode);
+      return;
     }
 
     stopping = true;
-    void kill().finally(() => {
-      process.exit(exitCode);
-    });
+    await kill();
+    process.removeAllListeners(signal);
+    process.kill(process.pid, signal);
   }
 
   return {
     name: 'backend-server',
     apply: 'serve',
 
-    configureServer() {
-      const script = path.resolve(__dirname, 'scripts/backend_server.py');
+    configureServer(server) {
+      const script = path.resolve(
+        import.meta.dirname,
+        'scripts/backend_server.py',
+      );
 
       child = spawn(
         backendPython,
@@ -102,39 +103,49 @@ function backendServer(): Plugin {
       child.stdout?.on('data', (data: Buffer) => {
         const text = data.toString().trim();
         if (text) {
-          console.log(`  [backend-server] ${text}`);
+          server.config.logger.info(`  [backend-server] ${text}`);
         }
       });
 
       child.stderr?.on('data', (data: Buffer) => {
         const text = data.toString().trim();
         if (text) {
-          console.error(`  [backend-server] ${text}`);
+          server.config.logger.error(`  [backend-server] ${text}`);
         }
       });
 
       child.on('exit', (code) => {
         if (code !== null && code !== 0) {
-          console.error(`  [backend-server] exited with code ${String(code)}`);
+          server.config.logger.error(
+            `  [backend-server] exited with code ${String(code)}`,
+          );
         }
         child = null;
       });
 
       child.on('error', (error) => {
-        console.error(`  [backend-server] failed to start: ${error.message}`);
+        server.config.logger.error(
+          `  [backend-server] failed to start: ${error.message}`,
+        );
         child = null;
       });
 
       // Clean up on Vite shutdown. Signal listeners must explicitly exit,
       // otherwise Ctrl+C only stops the child backend and leaves Vite alive.
       process.on('exit', killSync);
-      process.once('SIGINT', () => shutdown(130));
-      process.once('SIGTERM', () => shutdown(143));
-      process.once('SIGHUP', () => shutdown(129));
+      process.once('SIGINT', () => {
+        void shutdown('SIGINT');
+      });
+      process.once('SIGTERM', () => {
+        void shutdown('SIGTERM');
+      });
+      process.once('SIGHUP', () => {
+        void shutdown('SIGHUP');
+      });
     },
 
-    closeBundle() {
-      void kill();
+    async closeBundle() {
+      await kill();
     },
   };
 }

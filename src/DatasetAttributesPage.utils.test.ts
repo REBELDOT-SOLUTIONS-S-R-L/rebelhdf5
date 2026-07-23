@@ -71,14 +71,14 @@ describe('buildSlashTree', () => {
     // Top level sorted alphabetically: `articulation` then `total`.
     expect(tree.map((node) => node.name)).toEqual(['articulation', 'total']);
 
-    const articulation = tree[0];
-    expect(articulation.children?.map((child) => child.name)).toEqual([
+    const [articulationNode] = tree;
+    expect(articulationNode.children?.map((child) => child.name)).toEqual([
       'joint_number',
       'name',
     ]);
     // Leaf paths embed the group path and the dotted attribute name.
-    expect(articulation.path).toBe('/data#articulation');
-    const nameLeaf = articulation.children?.find(
+    expect(articulationNode.path).toBe('/data#articulation');
+    const nameLeaf = articulationNode.children?.find(
       (child) => child.name === 'name',
     );
     expect(nameLeaf?.value).toBe('robot');

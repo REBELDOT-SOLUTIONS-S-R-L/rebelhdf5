@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
 import { buildFailureAnalysis } from './failureAnalysis';
-import type {
-  ObjectDistributionCategory,
-  ObjectDistributionPoint,
-  ObjectDistributionResult,
+import {
+  type ObjectDistributionCategory,
+  type ObjectDistributionPoint,
+  type ObjectDistributionResult,
 } from './types';
 
 function makePoint(
@@ -47,6 +47,16 @@ function makeResult(
   };
 }
 
+function requireAnalysis(
+  result: ReturnType<typeof buildFailureAnalysis>,
+): NonNullable<ReturnType<typeof buildFailureAnalysis>> {
+  expect(result).not.toBeNull();
+  if (!result) {
+    throw new Error('Expected failure analysis results.');
+  }
+  return result;
+}
+
 describe('buildFailureAnalysis', () => {
   it('returns null when no generated points have valid reset coordinates', () => {
     const broken: ObjectDistributionPoint = {
@@ -78,13 +88,11 @@ describe('buildFailureAnalysis', () => {
       makePoint('teleop', i * 0.2, i * 0.2, i * 7, i * 7),
     );
 
-    const result = buildFailureAnalysis(makeResult(success, failed, teleop), {
-      minGeneratedCount: 1,
-    });
-    expect(result).not.toBeNull();
-    if (!result) {
-      return;
-    }
+    const result = requireAnalysis(
+      buildFailureAnalysis(makeResult(success, failed, teleop), {
+        minGeneratedCount: 1,
+      }),
+    );
 
     expect(result.stats.successGeneratedCount).toBe(8);
     expect(result.stats.failedGeneratedCount).toBe(8);
@@ -107,36 +115,33 @@ describe('buildFailureAnalysis', () => {
     for (let xi = 0; xi < 10; xi += 1) {
       for (let yi = 0; yi < 10; yi += 1) {
         success.push(makePoint('success', xi * 0.1, yi * 0.1, xi * 3, yi * 3));
-        failed.push(makePoint('failed', xi * 0.1, yi * 0.1, xi * 3, yi * 3));
-        failed.push(makePoint('failed', xi * 0.1, yi * 0.1, xi * 3, yi * 3));
+        failed.push(
+          makePoint('failed', xi * 0.1, yi * 0.1, xi * 3, yi * 3),
+          makePoint('failed', xi * 0.1, yi * 0.1, xi * 3, yi * 3),
+        );
       }
     }
 
-    const result = buildFailureAnalysis(makeResult(success, failed), {
-      minGeneratedCount: 1,
-    });
-    expect(result).not.toBeNull();
-    if (!result) {
-      return;
-    }
+    const result = requireAnalysis(
+      buildFailureAnalysis(makeResult(success, failed), {
+        minGeneratedCount: 1,
+      }),
+    );
     expect(result.recommendations.length).toBeLessThanOrEqual(10);
   });
 
   it('counts skipped points whose reset coords are null', () => {
     const goodSuccess = makePoint('success', 0.1, 0.1, 0, 0);
-    const skippedFailed = {
+    const skippedFailed: ObjectDistributionPoint = {
       ...makePoint('failed', 0, 0, 0, 0),
       initialX: null,
-    } as ObjectDistributionPoint;
+    };
 
-    const result = buildFailureAnalysis(
-      makeResult([goodSuccess], [skippedFailed]),
-      { minGeneratedCount: 1 },
+    const result = requireAnalysis(
+      buildFailureAnalysis(makeResult([goodSuccess], [skippedFailed]), {
+        minGeneratedCount: 1,
+      }),
     );
-    expect(result).not.toBeNull();
-    if (!result) {
-      return;
-    }
     expect(result.stats.skippedGeneratedCount).toBe(1);
     expect(result.stats.analyzedFailedCount).toBe(0);
   });

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   FiCheckCircle,
   FiChevronLeft,
@@ -12,13 +12,14 @@ import {
   FiXCircle,
 } from 'react-icons/fi';
 
+import styles from './DatabricksPage.module.css';
+import { formatUnknownError } from './error-utils';
 import {
-  PYTHON_BACKEND_BASE_URL,
   pollBackendStatus,
+  PYTHON_BACKEND_BASE_URL,
   type PythonBackendStatus,
 } from './python-backend';
 import { useStore } from './stores';
-import styles from './DatabricksPage.module.css';
 
 const BASE_URL = PYTHON_BACKEND_BASE_URL;
 
@@ -58,11 +59,55 @@ interface VolumeFile {
   size: number;
 }
 
+type SseEvent = Record<string, unknown>;
+
+function parseSseEvent(part: string): SseEvent | null {
+  const trimmed = part.trim();
+  if (!trimmed.startsWith('data: ')) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(trimmed.slice(6)) as SseEvent;
+  } catch {
+    return null;
+  }
+}
+
+async function consumeSseStream(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  onEvent: (event: SseEvent) => void,
+): Promise<void> {
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  async function readNext(): Promise<void> {
+    const { done, value } = await reader.read();
+    if (done) {
+      return;
+    }
+
+    buffer += decoder.decode(value, { stream: true });
+    const parts = buffer.split('\n\n');
+    buffer = parts.pop() ?? '';
+    for (const part of parts) {
+      const event = parseSseEvent(part);
+      if (event) {
+        onEvent(event);
+      }
+    }
+
+    await readNext();
+  }
+
+  await readNext();
+}
+
 // ---------------------------------------------------------------------------
 // Secrets Section
 // ---------------------------------------------------------------------------
 
-function SecretsSection({ backendAvailable }: { backendAvailable: boolean }) {
+function useSecretsSection(backendAvailable: boolean) {
   const [maxSteps, setMaxSteps] = useState('');
   const [saveSteps, setSaveSteps] = useState('');
   const [brevToken, setBrevToken] = useState('');
@@ -113,11 +158,11 @@ function SecretsSection({ backendAvailable }: { backendAvailable: boolean }) {
       } else {
         const failed = data.results
           .filter((r) => !r.ok)
-          .map((r) => `${r.key}: ${String(r.error)}`);
+          .map((r) => `${r.key}: ${r.error ?? 'Unknown error'}`);
         setResult(`Some secrets failed: ${failed.join(', ')}`);
       }
     } catch (error: unknown) {
-      setResult(error instanceof Error ? error.message : String(error));
+      setResult(formatUnknownError(error));
     } finally {
       setSaving(false);
     }
@@ -137,6 +182,7 @@ function SecretsSection({ backendAvailable }: { backendAvailable: boolean }) {
           <input
             className={styles.input}
             type="text"
+            aria-label="Maximum training steps"
             value={maxSteps}
             onChange={(e) => {
               setMaxSteps(e.target.value);
@@ -149,6 +195,7 @@ function SecretsSection({ backendAvailable }: { backendAvailable: boolean }) {
           <input
             className={styles.input}
             type="text"
+            aria-label="Save interval steps"
             value={saveSteps}
             onChange={(e) => {
               setSaveSteps(e.target.value);
@@ -161,6 +208,7 @@ function SecretsSection({ backendAvailable }: { backendAvailable: boolean }) {
           <input
             className={styles.input}
             type="password"
+            aria-label="Brev API token"
             value={brevToken}
             onChange={(e) => {
               setBrevToken(e.target.value);
@@ -173,6 +221,7 @@ function SecretsSection({ backendAvailable }: { backendAvailable: boolean }) {
           <input
             className={styles.input}
             type="text"
+            aria-label="Brev instance name"
             value={instanceName}
             onChange={(e) => {
               setInstanceName(e.target.value);
@@ -217,7 +266,7 @@ function SecretsSection({ backendAvailable }: { backendAvailable: boolean }) {
 // Upload Dataset Section
 // ---------------------------------------------------------------------------
 
-function UploadSection({ backendAvailable }: { backendAvailable: boolean }) {
+function useUploadSection(backendAvailable: boolean) {
   const opened = useStore((state) => state.opened);
   const [selectedFile, setSelectedFile] = useState('');
   const [volume, setVolume] = useState(
@@ -229,6 +278,37 @@ function UploadSection({ backendAvailable }: { backendAvailable: boolean }) {
   const [uploadLog, setUploadLog] = useState<string[]>([]);
 
   async function handleUpload() {
+    function handleUploadEvent(event: SseEvent) {
+      switch (event.type) {
+        case 'progress':
+          setUploadPercent(event.percent as number);
+          setUploadStatus(event.line as string);
+          break;
+
+        case 'output':
+        case 'start': {
+          const line = (event.line ?? event.type) as string;
+          setUploadLog((prev) => [...prev, line]);
+          setUploadStatus(line);
+          break;
+        }
+
+        case 'done':
+          setUploadPercent(100);
+          setUploadStatus('Upload complete.');
+          break;
+
+        case 'error': {
+          const message = event.message as string;
+          setUploadStatus(`Error: ${message}`);
+          setUploadLog((prev) => [...prev, `Error: ${message}`]);
+          break;
+        }
+
+        // No default
+      }
+    }
+
     if (!selectedFile) {
       return;
     }
@@ -259,51 +339,9 @@ function UploadSection({ backendAvailable }: { backendAvailable: boolean }) {
         throw new Error('No stream');
       }
 
-      const decoder = new TextDecoder();
-      let buffer = '';
-
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) {
-          break;
-        }
-
-        buffer += decoder.decode(value, { stream: true });
-        const parts = buffer.split('\n\n');
-        buffer = parts.pop() ?? '';
-
-        for (const part of parts) {
-          const trimmed = part.trim();
-          if (!trimmed.startsWith('data: ')) {
-            continue;
-          }
-
-          try {
-            const event: Record<string, unknown> = JSON.parse(trimmed.slice(6));
-            if (event.type === 'progress') {
-              setUploadPercent(event.percent as number);
-              setUploadStatus(event.line as string);
-            } else if (event.type === 'output' || event.type === 'start') {
-              const line = (event.line ?? event.type) as string;
-              setUploadLog((prev) => [...prev, line]);
-              setUploadStatus(line);
-            } else if (event.type === 'done') {
-              setUploadPercent(100);
-              setUploadStatus('Upload complete.');
-            } else if (event.type === 'error') {
-              setUploadStatus(`Error: ${event.message as string}`);
-              setUploadLog((prev) => [
-                ...prev,
-                `Error: ${event.message as string}`,
-              ]);
-            }
-          } catch {
-            // skip
-          }
-        }
-      }
+      await consumeSseStream(reader, handleUploadEvent);
     } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = formatUnknownError(error);
       setUploadStatus(`Error: ${msg}`);
       setUploadLog((prev) => [...prev, `Error: ${msg}`]);
     } finally {
@@ -398,7 +436,7 @@ function UploadSection({ backendAvailable }: { backendAvailable: boolean }) {
 // Pipelines Section
 // ---------------------------------------------------------------------------
 
-function PipelinesSection({ backendAvailable }: { backendAvailable: boolean }) {
+function usePipelinesSection(backendAvailable: boolean) {
   const [runs, setRuns] = useState<JobRun[]>([]);
   const pollTimers = useRef(new Map<string, ReturnType<typeof setInterval>>());
 
@@ -413,7 +451,7 @@ function PipelinesSection({ backendAvailable }: { backendAvailable: boolean }) {
   }, []);
 
   const pollStatus = useCallback((runId: string) => {
-    const poll = async () => {
+    async function poll() {
       try {
         const response = await fetch(
           `${BASE_URL}/api/databricks/job-status?run_id=${runId}`,
@@ -429,9 +467,9 @@ function PipelinesSection({ backendAvailable }: { backendAvailable: boolean }) {
             r.runId === runId
               ? {
                   ...r,
-                  state: data.lifeCycleState ?? '',
-                  resultState: data.resultState ?? '',
-                  message: data.stateMessage ?? '',
+                  state: data.lifeCycleState,
+                  resultState: data.resultState,
+                  message: data.stateMessage,
                 }
               : r,
           ),
@@ -451,7 +489,7 @@ function PipelinesSection({ backendAvailable }: { backendAvailable: boolean }) {
       } catch {
         // keep polling
       }
-    };
+    }
 
     void poll();
     const timer = setInterval(() => {
@@ -468,8 +506,11 @@ function PipelinesSection({ backendAvailable }: { backendAvailable: boolean }) {
 
     const jobIds = PIPELINES.map((p) => p.id).join(',');
 
-    void fetch(`${BASE_URL}/api/databricks/active-runs?job_ids=${jobIds}`)
-      .then(async (response) => {
+    async function loadActiveRuns() {
+      try {
+        const response = await fetch(
+          `${BASE_URL}/api/databricks/active-runs?job_ids=${jobIds}`,
+        );
         if (!response.ok) {
           return;
         }
@@ -508,10 +549,12 @@ function PipelinesSection({ backendAvailable }: { backendAvailable: boolean }) {
             pollStatus(run.runId);
           }
         }
-      })
-      .catch(() => {
+      } catch {
         // Ignore — just means no active runs or server issue.
-      });
+      }
+    }
+
+    void loadActiveRuns();
   }, [backendAvailable, pollStatus]);
 
   async function handleRun(jobId: string, name: string) {
@@ -523,7 +566,7 @@ function PipelinesSection({ backendAvailable }: { backendAvailable: boolean }) {
       });
 
       const data: { ok: boolean; runId: string | null } = await response.json();
-      const runId = data.runId ? String(data.runId) : null;
+      const { runId } = data;
 
       const run: JobRun = {
         jobId,
@@ -548,7 +591,7 @@ function PipelinesSection({ backendAvailable }: { backendAvailable: boolean }) {
           name,
           state: 'ERROR',
           resultState: '',
-          message: error instanceof Error ? error.message : String(error),
+          message: formatUnknownError(error),
           polling: false,
         },
         ...prev,
@@ -619,11 +662,7 @@ function PipelinesSection({ backendAvailable }: { backendAvailable: boolean }) {
 // Volume Browser Section
 // ---------------------------------------------------------------------------
 
-function VolumeBrowserSection({
-  backendAvailable,
-}: {
-  backendAvailable: boolean;
-}) {
+function useVolumeBrowserSection(backendAvailable: boolean) {
   const [volume, setVolume] = useState(VOLUMES[VOLUMES.length - 1]); // trained_models default
   const [pathStack, setPathStack] = useState<string[]>([]);
   const [files, setFiles] = useState<VolumeFile[]>([]);
@@ -654,8 +693,8 @@ function VolumeBrowserSection({
       }
       const data: { files: VolumeFile[] } = await response.json();
       setFiles(data.files);
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : String(err));
+    } catch (error_: unknown) {
+      setError(formatUnknownError(error_));
       setFiles([]);
     } finally {
       setLoading(false);
@@ -669,7 +708,7 @@ function VolumeBrowserSection({
   }, [backendAvailable, volume, currentPath, loadFiles]);
 
   function navigateInto(dirName: string) {
-    setPathStack((prev) => [...prev, dirName.replace(/\/$/, '')]);
+    setPathStack((prev) => [...prev, dirName.replace(/\/$/u, '')]);
   }
 
   function navigateUp() {
@@ -682,11 +721,19 @@ function VolumeBrowserSection({
   }
 
   async function handleDownload(fileName: string) {
+    function handleDownloadEvent(event: SseEvent) {
+      const line = (event.line ??
+        event.message ??
+        event.dst ??
+        event.type) as string;
+      setDownloadLog((prev) => [...prev, line]);
+    }
+
     const volumeRoot = `dbfs:/Volumes/${volume.replaceAll('.', '/')}`;
     const src = currentPath
       ? `${volumeRoot}/${currentPath}/${fileName}`
       : `${volumeRoot}/${fileName}`;
-    const dstPath = `${downloadDst.replace(/\/$/, '')}/${fileName}`;
+    const dstPath = `${downloadDst.replace(/\/$/u, '')}/${fileName}`;
 
     setDownloading(fileName);
     setDownloadLog([]);
@@ -701,40 +748,11 @@ function VolumeBrowserSection({
         throw new Error('No stream');
       }
 
-      const decoder = new TextDecoder();
-      let buffer = '';
-
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) {
-          break;
-        }
-
-        buffer += decoder.decode(value, { stream: true });
-        const parts = buffer.split('\n\n');
-        buffer = parts.pop() ?? '';
-
-        for (const part of parts) {
-          const trimmed = part.trim();
-          if (!trimmed.startsWith('data: ')) {
-            continue;
-          }
-          try {
-            const event: Record<string, unknown> = JSON.parse(trimmed.slice(6));
-            const line = (event.line ??
-              event.message ??
-              event.dst ??
-              event.type) as string;
-            setDownloadLog((prev) => [...prev, line]);
-          } catch {
-            // skip
-          }
-        }
-      }
-    } catch (err: unknown) {
+      await consumeSseStream(reader, handleDownloadEvent);
+    } catch (error_: unknown) {
       setDownloadLog((prev) => [
         ...prev,
-        `Error: ${err instanceof Error ? err.message : String(err)}`,
+        `Error: ${formatUnknownError(error_)}`,
       ]);
     } finally {
       setDownloading(null);
@@ -771,6 +789,7 @@ function VolumeBrowserSection({
           <input
             className={styles.input}
             type="text"
+            aria-label="Download destination"
             value={downloadDst}
             onChange={(e) => {
               setDownloadDst(e.target.value);
@@ -870,6 +889,11 @@ function DatabricksPage() {
     return pollBackendStatus(setBackend);
   }, []);
 
+  const secretsSection = useSecretsSection(backend.available);
+  const uploadSection = useUploadSection(backend.available);
+  const pipelinesSection = usePipelinesSection(backend.available);
+  const volumeBrowserSection = useVolumeBrowserSection(backend.available);
+
   return (
     <div className={styles.root}>
       <header className={styles.header}>
@@ -889,10 +913,10 @@ function DatabricksPage() {
         )}
       </header>
 
-      <SecretsSection backendAvailable={backend.available} />
-      <UploadSection backendAvailable={backend.available} />
-      <PipelinesSection backendAvailable={backend.available} />
-      <VolumeBrowserSection backendAvailable={backend.available} />
+      {secretsSection}
+      {uploadSection}
+      {pipelinesSection}
+      {volumeBrowserSection}
     </div>
   );
 }

@@ -3,6 +3,9 @@ import '@testing-library/jest-dom/vitest';
 import { cleanup } from '@testing-library/react';
 import { afterEach, vi } from 'vitest';
 
+import ImageDataPolyfill from './src/test-utils/ImageDataPolyfill';
+import ResizeObserverPolyfill from './src/test-utils/ResizeObserverPolyfill';
+
 const store: Record<string, string> = {};
 
 const localStorageMock: Storage = {
@@ -11,10 +14,12 @@ const localStorageMock: Storage = {
     store[key] = value;
   }),
   removeItem: vi.fn((key: string) => {
-    delete store[key];
+    Reflect.deleteProperty(store, key);
   }),
   clear: vi.fn(() => {
-    Object.keys(store).forEach((key) => delete store[key]);
+    for (const key of Object.keys(store)) {
+      Reflect.deleteProperty(store, key);
+    }
   }),
   key: vi.fn((index: number) => Object.keys(store)[index] ?? null),
   get length() {
@@ -30,29 +35,7 @@ Object.defineProperty(globalThis, 'localStorage', {
 
 // jsdom does not implement the canvas `ImageData` global that browsers provide.
 // Supply a minimal, spec-compatible shim so canvas helpers can be unit-tested.
-if (globalThis.ImageData === undefined) {
-  class ImageDataPolyfill {
-    public readonly data: Uint8ClampedArray;
-    public readonly width: number;
-    public readonly height: number;
-
-    public constructor(
-      dataOrWidth: Uint8ClampedArray | number,
-      widthOrHeight: number,
-      height?: number,
-    ) {
-      if (typeof dataOrWidth === 'number') {
-        this.width = dataOrWidth;
-        this.height = widthOrHeight;
-        this.data = new Uint8ClampedArray(this.width * this.height * 4);
-      } else {
-        this.data = dataOrWidth;
-        this.width = widthOrHeight;
-        this.height = height ?? dataOrWidth.length / 4 / widthOrHeight;
-      }
-    }
-  }
-
+if (!Reflect.has(globalThis, 'ImageData')) {
   Object.defineProperty(globalThis, 'ImageData', {
     value: ImageDataPolyfill,
     writable: true,
@@ -80,12 +63,7 @@ if (typeof globalThis.matchMedia !== 'function') {
   });
 }
 
-if (typeof globalThis.ResizeObserver === 'undefined') {
-  class ResizeObserverPolyfill {
-    public observe(): void {}
-    public unobserve(): void {}
-    public disconnect(): void {}
-  }
+if (!Reflect.has(globalThis, 'ResizeObserver')) {
   Object.defineProperty(globalThis, 'ResizeObserver', {
     value: ResizeObserverPolyfill,
     writable: true,

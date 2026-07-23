@@ -141,20 +141,17 @@ export function buildKeyTree(
     for (const [index, segment] of segments.entries()) {
       currentPath = currentPath ? `${currentPath}/${segment}` : segment;
       const isLeaf = index === segments.length - 1;
-      const existing = currentLevel.get(segment);
+      let node = currentLevel.get(segment);
 
-      if (existing) {
+      if (node) {
         if (isLeaf) {
-          existing.keyInfo = keyInfo;
+          node.keyInfo = keyInfo;
         }
       } else {
-        currentLevel.set(
-          segment,
-          createNode(segment, currentPath, isLeaf ? keyInfo : null),
-        );
+        node = createNode(segment, currentPath, isLeaf ? keyInfo : null);
+        currentLevel.set(segment, node);
       }
 
-      const node = currentLevel.get(segment)!;
       currentLevel = node.childrenByName;
     }
   }

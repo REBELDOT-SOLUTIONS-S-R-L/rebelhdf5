@@ -4,9 +4,9 @@ import { describe, expect, it, vi } from 'vitest';
 
 import LocalService from './LocalService';
 
-const openFilePicker = vi.fn();
+const openFilePicker = vi.fn<() => Promise<void>>();
 
-vi.mock('../Dropzone', () => ({
+vi.mock(import('../Dropzone'), () => ({
   useDropzoneContext: () => ({ openFilePicker }),
 }));
 
@@ -27,6 +27,6 @@ describe('LocalService', () => {
     await userEvent.click(
       screen.getByRole('button', { name: 'Select HDF5 files' }),
     );
-    expect(openFilePicker).toHaveBeenCalledTimes(1);
+    expect(openFilePicker).toHaveBeenCalledOnce();
   });
 });

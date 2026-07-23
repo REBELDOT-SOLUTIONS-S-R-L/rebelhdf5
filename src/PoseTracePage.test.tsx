@@ -2,29 +2,33 @@ import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { type loadDemoRows, type openPoseTraceSource } from './pose-trace/hdf5';
+import { type DemoRow } from './pose-trace/types';
 import PoseTracePage from './PoseTracePage';
 import { FileService, type H5File, useStore } from './stores';
 
 const mocks = vi.hoisted(() => ({
-  openPoseTraceSource: vi.fn(),
-  loadDemoRows: vi.fn(),
+  openPoseTraceSource: vi.fn<typeof openPoseTraceSource>(),
+  loadDemoRows: vi.fn<typeof loadDemoRows>(),
 }));
 
-vi.mock('./pose-trace/hdf5', () => ({
+vi.mock(import('./pose-trace/hdf5'), () => ({
   openPoseTraceSource: mocks.openPoseTraceSource,
   loadDemoRows: mocks.loadDemoRows,
 }));
 
-vi.mock('./pose-trace/PlotlyChart', () => ({ default: () => null }));
+vi.mock(import('./pose-trace/PlotlyChart'), () => ({
+  default: () => <div />,
+}));
 
-vi.mock('./pose-trace/plotConfig', () => ({
+vi.mock(import('./pose-trace/plotConfig'), () => ({
   build3DDataForStep: () => [],
   build3DLayout: () => ({}),
   buildCombinedJointChartData: () => [],
   buildEmptyLayout: () => ({}),
   buildJointChartData: () => [],
   buildJointChartLayout: () => ({}),
-  getDefaultHidden3DTraceGroups: () => [],
+  getDefaultHidden3DTraceGroups: () => new Set<string>(),
   getJointChartSpecs: () => [],
 }));
 
@@ -47,6 +51,22 @@ function renderPage(url = '/pose-trace'): void {
   );
 }
 
+function demoRow(step: number): DemoRow {
+  return {
+    dataset_name: 'trace',
+    demo_name: 'demo_0',
+    step,
+    env_id: 0,
+    episode_index: 0,
+    episode_step: step,
+    source_episode_index: 0,
+    num_samples: 3,
+    success: 1,
+    completed_attempts: null,
+    completed_successes: null,
+  };
+}
+
 beforeEach(() => {
   useStore.setState({ opened: [] }, false);
   mocks.openPoseTraceSource.mockResolvedValue({
@@ -62,9 +82,9 @@ beforeEach(() => {
       },
     ],
     articulation: null,
-    cleanup: vi.fn(),
+    cleanup: vi.fn<() => void>(),
   });
-  mocks.loadDemoRows.mockResolvedValue([{}, {}, {}]);
+  mocks.loadDemoRows.mockResolvedValue([demoRow(0), demoRow(1), demoRow(2)]);
 });
 
 afterEach(() => {

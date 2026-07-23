@@ -38,7 +38,7 @@ describe('RemoteService', () => {
     renderRemote();
     expect(
       screen.getByText(
-        /Paste the URL of a file from a Zenodo record or GitHub repository/i,
+        /paste the url of a file from a zenodo record or github repository/i,
       ),
     ).toBeInTheDocument();
   });

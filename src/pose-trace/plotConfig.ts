@@ -1,19 +1,22 @@
-import type Plotly from 'plotly.js';
-import type { Data, Layout } from 'plotly.js';
+import { type ColorScale, type Dash, type Data, type Layout } from 'plotly.js';
 
-import type { FailurePlane, FailureSlice } from './failureAnalysis';
+import { type FailurePlane, type FailureSlice } from './failureAnalysis';
 import { humanizeColumnName, type Trace3DSpec } from './schema';
-import type {
-  ArticulationJoint,
-  ArticulationSegment,
-  ObjectDistributionAnchor,
-  ObjectDistributionPoint,
-  ObjectDistributionResult,
-  ObjectDistributionSourceDetail,
-  DemoRow,
+import {
+  type ArticulationJoint,
+  type ArticulationSegment,
+  type DemoRow,
+  type ObjectDistributionAnchor,
+  type ObjectDistributionPoint,
+  type ObjectDistributionResult,
+  type ObjectDistributionSourceDetail,
 } from './types';
 
-type SceneVector = { x?: number; y?: number; z?: number };
+interface SceneVector {
+  x?: number;
+  y?: number;
+  z?: number;
+}
 
 export interface PlotSceneCamera {
   center?: SceneVector;
@@ -35,9 +38,9 @@ const FONT_FAMILY = 'Roboto, sans-serif';
 const PLOTLY_WHITE_TEMPLATE = 'plotly_white' as unknown as Layout['template'];
 const FUTURE_TRACE_OPACITY = 0.22;
 const FUTURE_MARKER_OPACITY = 0.35;
-const DEFAULT_3D_CAMERA_EYE = { x: 0.0, y: -1.8, z: 0.5 };
+const DEFAULT_3D_CAMERA_EYE = { x: 0, y: -1.8, z: 0.5 };
 const DEFAULT_3D_CAMERA_UP = { x: 0, y: 0, z: 1 };
-const FAILURE_COLORSCALE: Plotly.ColorScale = [
+const FAILURE_COLORSCALE: ColorScale = [
   [0, '#2ca02c'],
   [0.5, '#ffd000'],
   [1, '#d62728'],
@@ -66,11 +69,11 @@ interface PlotTheme {
 }
 
 function cssColor(name: string, fallback: string): string {
-  if (typeof window === 'undefined') {
+  if (!Reflect.has(globalThis, 'document')) {
     return fallback;
   }
 
-  const value = window
+  const value = globalThis
     .getComputedStyle(document.documentElement)
     .getPropertyValue(name)
     .trim();
@@ -93,11 +96,7 @@ function getPlotTheme(): PlotTheme {
 }
 
 function xAxis(rows: DemoRow[]): number[] {
-  if (rows.length > 0 && rows.every((row) => row.episode_step != null)) {
-    return rows.map((row) => row.episode_step);
-  }
-
-  return rows.map((_, index) => index);
+  return rows.map((row) => row.episode_step);
 }
 
 function series(rows: DemoRow[], key: string): (number | null)[] {
@@ -108,7 +107,7 @@ function series(rows: DemoRow[], key: string): (number | null)[] {
 }
 
 function hasValues(values: (number | null)[]): boolean {
-  return values.some((value) => value != null);
+  return values.some((value) => value !== null);
 }
 
 function collectRowKeys(rows: DemoRow[]): string[] {
@@ -205,6 +204,25 @@ function traceSpecForPrefix(prefix: string, index: number): Trace3DSpec | null {
   return null;
 }
 
+function tracePriority(prefix: string): number {
+  if (prefix.startsWith('eef_') && !prefix.startsWith('eef_post_step_')) {
+    return 0;
+  }
+  if (prefix.startsWith('target_eef_') || prefix.startsWith('ik_input_eef_')) {
+    return 1;
+  }
+  if (prefix.startsWith('eef_post_step_')) {
+    return 2;
+  }
+  if (prefix.startsWith('object_')) {
+    return 3;
+  }
+  if (prefix.startsWith('keypoint_')) {
+    return 4;
+  }
+  return 5;
+}
+
 function build3DTraceSpecs(rows: DemoRow[]): Trace3DSpec[] {
   const prefixes = coordinatePrefixes(rows);
   const prefixSet = new Set(prefixes);
@@ -219,24 +237,10 @@ function build3DTraceSpecs(rows: DemoRow[]): Trace3DSpec[] {
 
   return visiblePrefixes
     .map((prefix, index) => traceSpecForPrefix(prefix, index))
-    .filter((spec): spec is Trace3DSpec => Boolean(spec))
+    .filter((spec): spec is Trace3DSpec => spec !== null)
     .sort((left, right) => {
-      const priority = (prefix: string) => {
-        if (prefix.startsWith('eef_') && !prefix.startsWith('eef_post_step_'))
-          return 0;
-        if (
-          prefix.startsWith('target_eef_') ||
-          prefix.startsWith('ik_input_eef_')
-        )
-          return 1;
-        if (prefix.startsWith('eef_post_step_')) return 2;
-        if (prefix.startsWith('object_')) return 3;
-        if (prefix.startsWith('keypoint_')) return 4;
-        return 5;
-      };
-
       return (
-        priority(left.prefix) - priority(right.prefix) ||
+        tracePriority(left.prefix) - tracePriority(right.prefix) ||
         left.label.localeCompare(right.label)
       );
     });
@@ -318,7 +322,7 @@ function buildTraceVisibility(
 }
 
 function formatObjectScalar(value: number | null): string {
-  return value == null ? '-' : value.toFixed(4);
+  return value === null ? '-' : value.toFixed(4);
 }
 
 function buildObjectHoverTemplate(category: string): string {
@@ -369,7 +373,7 @@ function buildObjectScatterTrace(
       formatObjectScalar(point.initialY),
       formatObjectScalar(point.initialRx),
       formatObjectScalar(point.initialRy),
-      point.numSamples == null ? '-' : String(point.numSamples),
+      point.numSamples === null ? '-' : String(point.numSamples),
       point.sourceLeft,
       point.sourceRight,
     ]),
@@ -393,7 +397,7 @@ function buildObjectSelectedEpisodeHover(
     `initial y: ${formatObjectScalar(point.initialY)}`,
     `initial rx: ${formatObjectScalar(point.initialRx)}`,
     `initial ry: ${formatObjectScalar(point.initialRy)}`,
-    `num samples: ${point.numSamples == null ? '-' : String(point.numSamples)}`,
+    `num samples: ${point.numSamples === null ? '-' : String(point.numSamples)}`,
     `source left: ${point.sourceLeft}`,
     `source right: ${point.sourceRight}`,
   ].join('<br>');
@@ -491,15 +495,21 @@ export function buildObjectDistributionData(
     baseHoverEnabled,
   );
 
-  if (successTrace) traces.push(successTrace);
-  if (failedTrace) traces.push(failedTrace);
-  if (teleopTrace) traces.push(teleopTrace);
+  if (successTrace) {
+    traces.push(successTrace);
+  }
+  if (failedTrace) {
+    traces.push(failedTrace);
+  }
+  if (teleopTrace) {
+    traces.push(teleopTrace);
+  }
 
   if (!selectedPoint || selectedPoint.category === 'teleop') {
     return traces;
   }
 
-  traces.push({
+  const selectedTrace: Data = {
     type: 'scatter',
     x: [selectedPoint.x],
     y: [selectedPoint.y],
@@ -517,9 +527,10 @@ export function buildObjectDistributionData(
       opacity: 0.95,
       line: { color: 'rgba(0,0,0,0.7)', width: 1.5 },
     },
-  });
+  };
 
   traces.push(
+    selectedTrace,
     ...buildObjectSourceOverlay(
       selectedPoint.sourceLeftDetails,
       selectedPoint,
@@ -765,15 +776,14 @@ export function buildFailureMapLayout(plane: FailurePlane): Partial<Layout> {
       scaleratio: 1,
       constrain: 'domain',
     },
-  };
-
-  layout.coloraxis = {
-    cmin: 0,
-    cmax: 1,
-    colorscale: FAILURE_COLORSCALE,
-    colorbar: {
-      title: { text: 'weighted fail rate' },
-      tickformat: '.0%',
+    coloraxis: {
+      cmin: 0,
+      cmax: 1,
+      colorscale: FAILURE_COLORSCALE,
+      colorbar: {
+        title: { text: 'weighted fail rate' },
+        tickformat: '.0%',
+      },
     },
   };
 
@@ -837,6 +847,7 @@ export function buildFailureSliceLayout(
 ): Partial<Layout> {
   const theme = getPlotTheme();
   const axisBase = buildFailureAxisBase(theme);
+  const annotations: NonNullable<Layout['annotations']> = [];
   const layout: Partial<Layout> & Record<string, unknown> = {
     template: PLOTLY_WHITE_TEMPLATE,
     height: 1220,
@@ -855,16 +866,15 @@ export function buildFailureSliceLayout(
       bordercolor: theme.legendBorder,
       borderwidth: 1,
     },
-    annotations: [] as NonNullable<Layout['annotations']>,
-  };
-
-  layout.coloraxis = {
-    cmin: 0,
-    cmax: 1,
-    colorscale: FAILURE_COLORSCALE,
-    colorbar: {
-      title: { text: 'weighted fail rate' },
-      tickformat: '.0%',
+    annotations,
+    coloraxis: {
+      cmin: 0,
+      cmax: 1,
+      colorscale: FAILURE_COLORSCALE,
+      colorbar: {
+        title: { text: 'weighted fail rate' },
+        tickformat: '.0%',
+      },
     },
   };
 
@@ -877,7 +887,7 @@ export function buildFailureSliceLayout(
     sliceDomain(0, 3, 0.06, 0.94, 0.04),
     sliceDomain(1, 3, 0.06, 0.94, 0.04),
     sliceDomain(2, 3, 0.06, 0.94, 0.04),
-  ].reverse() as [number, number][];
+  ].reverse();
 
   for (const slice of slices) {
     const axisIndex = slice.rowIndex * 3 + slice.colIndex;
@@ -904,21 +914,18 @@ export function buildFailureSliceLayout(
       constrain: 'domain',
     };
 
-    layout.annotations = [
-      ...((layout.annotations as NonNullable<Layout['annotations']>) ?? []),
-      {
-        text: formatSliceAnnotation(slice),
-        x: (xDomain[0] + xDomain[1]) / 2,
-        y: yDomain[1] + 0.018,
-        xref: 'paper',
-        yref: 'paper',
-        xanchor: 'center',
-        yanchor: 'bottom',
-        showarrow: false,
-        align: 'center',
-        font: { color: theme.textColor, family: FONT_FAMILY, size: 12 },
-      },
-    ];
+    annotations.push({
+      text: formatSliceAnnotation(slice),
+      x: (xDomain[0] + xDomain[1]) / 2,
+      y: yDomain[1] + 0.018,
+      xref: 'paper',
+      yref: 'paper',
+      xanchor: 'center',
+      yanchor: 'bottom',
+      showarrow: false,
+      align: 'center',
+      font: { color: theme.textColor, family: FONT_FAMILY, size: 12 },
+    });
   }
 
   return layout;
@@ -1159,7 +1166,7 @@ export function build3DDataForStep(
     );
     const { past, future, current } = split3DPoints(points, clampedStepIndex);
     const lastPoint = points[points.length - 1];
-    const startPoint = points[0];
+    const [startPoint] = points;
 
     if (past.length > 0) {
       const { x, y, z } = coordinates(past);
@@ -1173,7 +1180,7 @@ export function build3DDataForStep(
         uid: `${legendGroup}-past`,
         legendgroup: legendGroup,
         visible: legendVisible,
-        line: { color: spec.color, dash: spec.dash as Plotly.Dash, width: 6 },
+        line: { color: spec.color, dash: spec.dash as Dash, width: 6 },
       });
     }
 
@@ -1189,7 +1196,7 @@ export function build3DDataForStep(
         uid: `${legendGroup}-future`,
         legendgroup: legendGroup,
         visible: groupVisible,
-        line: { color: spec.color, dash: spec.dash as Plotly.Dash, width: 6 },
+        line: { color: spec.color, dash: spec.dash as Dash, width: 6 },
         opacity: FUTURE_TRACE_OPACITY,
         showlegend: false,
       });

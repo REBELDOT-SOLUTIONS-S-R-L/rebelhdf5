@@ -12,7 +12,9 @@ function LocalService() {
       <button
         className={styles.selectBtn}
         type="button"
-        onClick={() => openFilePicker()}
+        onClick={() => {
+          void openFilePicker();
+        }}
       >
         Select HDF5 files
       </button>

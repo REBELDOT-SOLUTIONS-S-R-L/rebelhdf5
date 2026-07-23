@@ -4,26 +4,37 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import DatasetProcessingPage from './DatasetProcessingPage';
+import {
+  type getDatasetProcessingInfo,
+  type openPoseTraceSource,
+  type processDataset,
+} from './pose-trace/hdf5';
+import {
+  type pollBackendStatus,
+  type runLeRobotConvert,
+  type runProcess,
+  type scanFiles,
+} from './python-backend';
 import { FileService, type H5File, useStore } from './stores';
 
 const mocks = vi.hoisted(() => ({
-  pollBackendStatus: vi.fn(),
-  scanFiles: vi.fn(),
-  runProcess: vi.fn(),
-  runLeRobotConvert: vi.fn(),
-  getDatasetProcessingInfo: vi.fn(),
-  openPoseTraceSource: vi.fn(),
-  processDataset: vi.fn(),
+  pollBackendStatus: vi.fn<typeof pollBackendStatus>(),
+  scanFiles: vi.fn<typeof scanFiles>(),
+  runProcess: vi.fn<typeof runProcess>(),
+  runLeRobotConvert: vi.fn<typeof runLeRobotConvert>(),
+  getDatasetProcessingInfo: vi.fn<typeof getDatasetProcessingInfo>(),
+  openPoseTraceSource: vi.fn<typeof openPoseTraceSource>(),
+  processDataset: vi.fn<typeof processDataset>(),
 }));
 
-vi.mock('./python-backend', () => ({
+vi.mock(import('./python-backend'), () => ({
   pollBackendStatus: mocks.pollBackendStatus,
   scanFiles: mocks.scanFiles,
   runProcess: mocks.runProcess,
   runLeRobotConvert: mocks.runLeRobotConvert,
 }));
 
-vi.mock('./pose-trace/hdf5', () => ({
+vi.mock(import('./pose-trace/hdf5'), () => ({
   getDatasetProcessingInfo: mocks.getDatasetProcessingInfo,
   openPoseTraceSource: mocks.openPoseTraceSource,
   processDataset: mocks.processDataset,
@@ -199,9 +210,9 @@ describe('DatasetProcessingPage', () => {
     });
     await user.click(screen.getByRole('button', { name: 'Convert' }));
 
-    expect(
-      await screen.findByText('NVENC failed; using CPU H.264.'),
-    ).toBeInTheDocument();
+    await expect(
+      screen.findByText('NVENC failed; using CPU H.264.'),
+    ).resolves.toBeInTheDocument();
     expect(mocks.runLeRobotConvert).toHaveBeenCalledWith(
       expect.objectContaining({
         outputVersion: 'v3.0',
@@ -217,10 +228,12 @@ describe('DatasetProcessingPage', () => {
 
   it('chooses a LeRobot output folder with the desktop picker', async () => {
     const user = userEvent.setup();
-    const chooseDirectory = vi.fn().mockResolvedValue({
-      path: '/picked-output',
-      authorization: 'output-authorization',
-    });
+    const chooseDirectory = vi
+      .fn<NonNullable<RebelHdf5DesktopRuntime['chooseDirectory']>>()
+      .mockResolvedValue({
+        path: '/picked-output',
+        authorization: 'output-authorization',
+      });
     globalThis.rebelHdf5Desktop = { chooseDirectory };
     mockBackend({
       available: true,

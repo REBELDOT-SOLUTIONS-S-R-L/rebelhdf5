@@ -5,16 +5,16 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { FetchError, NetworkError } from './fetch-utils';
 import FileErrorFallback from './FileErrorFallback';
-import { FileService, type H5File } from './stores';
+import { FileService, type H5File, type RemoteFile } from './stores';
 
-function makeFile(overrides: Partial<H5File> = {}): H5File {
+function makeFile(overrides: Partial<RemoteFile> = {}): RemoteFile {
   return {
     url: 'https://example.com/file.h5',
     name: 'file.h5',
     service: FileService.Url,
     resolvedUrl: 'https://example.com/file.h5',
     ...overrides,
-  } as H5File;
+  };
 }
 
 function renderFallback(props: {
@@ -57,7 +57,7 @@ describe('FileErrorFallback', () => {
 
   it('shows the network-error CTA and download link when fetch fails', () => {
     renderFallback({ error: new NetworkError() });
-    expect(screen.getByText(/File could not be fetched/i)).toBeInTheDocument();
+    expect(screen.getByText(/file could not be fetched/i)).toBeInTheDocument();
     expect(
       screen.getByRole('link', { name: 'Download file' }),
     ).toBeInTheDocument();
@@ -66,7 +66,7 @@ describe('FileErrorFallback', () => {
   it('embeds an HttpErrorMessage for FetchError instances', () => {
     renderFallback({ error: new FetchError(404, 'Not Found') });
     expect(
-      screen.getByText(/may no longer exist at this URL/i),
+      screen.getByText(/may no longer exist at this url/i),
     ).toBeInTheDocument();
   });
 
@@ -78,13 +78,13 @@ describe('FileErrorFallback', () => {
         resolvedUrl: 'https://cdn.example.com/a.h5',
       }),
     });
-    expect(screen.getByText(/Resolved URL:/i)).toBeInTheDocument();
+    expect(screen.getByText(/resolved url:/i)).toBeInTheDocument();
   });
 
   it('calls resetErrorBoundary when Retry is clicked', async () => {
-    const reset = vi.fn();
+    const reset = vi.fn<() => void>();
     renderFallback({ error: new Error('boom'), resetErrorBoundary: reset });
     await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
-    expect(reset).toHaveBeenCalledTimes(1);
+    expect(reset).toHaveBeenCalledOnce();
   });
 });

@@ -180,6 +180,7 @@ export interface DatasetProcessingResult extends DatasetProcessingResultMeta {
 }
 
 export interface DemoRow {
+  [key: string]: string | number | null;
   dataset_name: string;
   demo_name: string;
   step: number;
@@ -191,7 +192,6 @@ export interface DemoRow {
   success: number | null;
   completed_attempts: number | null;
   completed_successes: number | null;
-  [key: string]: string | number | null;
 }
 
 export interface ArticulationSegment {

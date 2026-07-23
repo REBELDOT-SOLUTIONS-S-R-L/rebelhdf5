@@ -1,75 +1,75 @@
 import { fetchBuffer } from '../fetch-utils';
 import { FileService, type H5File } from '../stores';
-import type {
-  ObjectDistributionRequest,
-  ObjectDistributionResult,
-  DemoInfo,
-  DemoRow,
-  DatasetComparisonValuesResult,
-  DatasetProcessingProgress,
-  DatasetProcessingRequest,
-  DatasetProcessingResultMeta,
-  DatasetProcessingSourceInfo,
-  DemoVideoFrames,
-  DemoVideoInfo,
-  DemoVideoKey,
-  ParsedArticulation,
-  PoseTraceSource,
-  SourceFeatureCapabilities,
+import {
+  type DatasetComparisonValuesResult,
+  type DatasetProcessingProgress,
+  type DatasetProcessingRequest,
+  type DatasetProcessingResultMeta,
+  type DatasetProcessingSourceInfo,
+  type DemoInfo,
+  type DemoRow,
+  type DemoVideoFrames,
+  type DemoVideoInfo,
+  type DemoVideoKey,
+  type ObjectDistributionRequest,
+  type ObjectDistributionResult,
+  type ParsedArticulation,
+  type PoseTraceSource,
+  type SourceFeatureCapabilities,
 } from './types';
 
-type OpenLocalSourcePayload = {
+interface OpenLocalSourcePayload {
   file: File;
-};
+}
 
-type OpenRemoteSourcePayload = {
+interface OpenRemoteSourcePayload {
   buffer: ArrayBuffer;
   name: string;
-};
+}
 
-type LoadDemoRowsPayload = {
+interface LoadDemoRowsPayload {
   sourceId: string;
   demoName: string;
-};
+}
 
-type GetDatasetProcessingInfoPayload = {
+interface GetDatasetProcessingInfoPayload {
   sourceId: string;
-};
+}
 
-type InspectSourceFeaturesPayload = {
+interface InspectSourceFeaturesPayload {
   sourceId: string;
-};
+}
 
-type LoadDatasetComparisonValuesPayload = {
+interface LoadDatasetComparisonValuesPayload {
   sourceId: string;
   demoName: string;
   keyPaths: string[];
-};
+}
 
 type LoadObjectDistributionPayload = ObjectDistributionRequest;
 type ProcessDatasetPayload = DatasetProcessingRequest;
 
-type ListDemoVideosPayload = {
+interface ListDemoVideosPayload {
   sourceId: string;
   demoName: string;
-};
+}
 
-type LoadDemoVideoPayload = {
+interface LoadDemoVideoPayload {
   sourceId: string;
   demoName: string;
   videoKey: DemoVideoKey;
-};
+}
 
-type CloseSourcePayload = {
+interface CloseSourcePayload {
   sourceId: string;
-};
+}
 
-type OpenSourceResult = {
+interface OpenSourceResult {
   sourceId: string;
   datasetName: string;
   demos: DemoInfo[];
   articulation: ParsedArticulation | null;
-};
+}
 
 type LoadDemoVideoResult = DemoVideoInfo & {
   framesBuffer: ArrayBuffer;
@@ -130,19 +130,27 @@ type PoseTraceWorkerResponse =
       total: number;
     };
 
-type PendingRequest = {
+interface PendingRequest {
   resolve: (value: unknown) => void;
   reject: (reason?: unknown) => void;
   onProgress?: (progress: DatasetProcessingProgress) => void;
   onChunk?: (chunk: ArrayBuffer, index: number, total: number) => void;
-};
+}
 
 let worker: Worker | null = null;
 let nextRequestId = 0;
 const pendingRequests = new Map<number, PendingRequest>();
 
 function stripExtension(filename: string): string {
-  return filename.replace(/\.(hdf5|h5)$/i, '');
+  return filename.replace(/\.(?:h5|hdf5)$/iu, '');
+}
+
+async function closeSource(sourceId: string): Promise<void> {
+  try {
+    await callWorker<null>('closeSource', { sourceId });
+  } catch {
+    // Ignore best-effort cleanup failures during route changes/unmounts.
+  }
 }
 
 function ensureWorker(): Worker {
@@ -150,46 +158,49 @@ function ensureWorker(): Worker {
     return worker;
   }
 
-  worker = new Worker(new URL('./worker.ts', import.meta.url), {
+  worker = new Worker(new URL('worker.ts', import.meta.url), {
     type: 'module',
   });
-  worker.onmessage = (event: MessageEvent<PoseTraceWorkerResponse>) => {
-    const data = event.data;
-    const pending = pendingRequests.get(data.id);
-    if (!pending) {
-      return;
-    }
+  worker.addEventListener(
+    'message',
+    (event: MessageEvent<PoseTraceWorkerResponse>) => {
+      const { data } = event;
+      const pending = pendingRequests.get(data.id);
+      if (!pending) {
+        return;
+      }
 
-    if ('type' in data && data.type === 'progress') {
-      pending.onProgress?.(data.progress);
-      return;
-    }
+      if ('type' in data && data.type === 'progress') {
+        pending.onProgress?.(data.progress);
+        return;
+      }
 
-    if ('type' in data && data.type === 'chunk') {
-      pending.onChunk?.(data.data, data.index, data.total);
-      return;
-    }
+      if ('type' in data) {
+        pending.onChunk?.(data.data, data.index, data.total);
+        return;
+      }
 
-    pendingRequests.delete(data.id);
-    if (data.ok) {
-      pending.resolve(data.result);
-      return;
-    }
+      pendingRequests.delete(data.id);
+      if (data.ok) {
+        pending.resolve(data.result);
+        return;
+      }
 
-    pending.reject(new Error(data.error));
-  };
-  worker.onerror = (event) => {
+      pending.reject(new Error(data.error));
+    },
+  );
+  worker.addEventListener('error', (event) => {
     const message = event.message || 'Pose Trace worker failed.';
     for (const pending of pendingRequests.values()) {
       pending.reject(new Error(message));
     }
     pendingRequests.clear();
-  };
+  });
 
   return worker;
 }
 
-function callWorker<T>(
+async function callWorker<T>(
   type: PoseTraceWorkerRequest['type'],
   payload: PoseTraceWorkerRequest['payload'],
   transfer: Transferable[] = [],
@@ -266,16 +277,12 @@ export async function openPoseTraceSource(
     demos: result.demos,
     articulation: result.articulation,
     cleanup: () => {
-      void callWorker<null>('closeSource', { sourceId: result.sourceId }).catch(
-        () => {
-          // Ignore best-effort cleanup failures during route changes/unmounts.
-        },
-      );
+      void closeSource(result.sourceId);
     },
   };
 }
 
-export function loadDemoRows(
+export async function loadDemoRows(
   source: PoseTraceSource,
   demoName: string,
 ): Promise<DemoRow[]> {
@@ -285,7 +292,7 @@ export function loadDemoRows(
   });
 }
 
-export function getDatasetProcessingInfo(
+export async function getDatasetProcessingInfo(
   source: PoseTraceSource,
 ): Promise<DatasetProcessingSourceInfo> {
   return callWorker<DatasetProcessingSourceInfo>('getDatasetProcessingInfo', {
@@ -293,7 +300,7 @@ export function getDatasetProcessingInfo(
   });
 }
 
-export function inspectSourceFeatures(
+export async function inspectSourceFeatures(
   source: PoseTraceSource,
 ): Promise<SourceFeatureCapabilities> {
   return callWorker<SourceFeatureCapabilities>('inspectSourceFeatures', {
@@ -301,7 +308,7 @@ export function inspectSourceFeatures(
   });
 }
 
-export function loadDatasetComparisonValues(
+export async function loadDatasetComparisonValues(
   source: PoseTraceSource,
   demoName: string,
   keyPaths: string[],
@@ -316,7 +323,7 @@ export function loadDatasetComparisonValues(
   );
 }
 
-export function loadObjectDistribution(
+export async function loadObjectDistribution(
   request: ObjectDistributionRequest,
 ): Promise<ObjectDistributionResult> {
   return callWorker<ObjectDistributionResult>(
@@ -325,7 +332,7 @@ export function loadObjectDistribution(
   );
 }
 
-export function processDataset(
+export async function processDataset(
   request: DatasetProcessingRequest,
   callbacks: {
     onProgress?: (progress: DatasetProcessingProgress) => void;
@@ -343,15 +350,18 @@ export function processDataset(
       onProgress: callbacks.onProgress,
       onChunk: callbacks.onChunk,
     });
-    instance.postMessage({
-      id,
-      type: 'processDataset',
-      payload: request,
-    } as never);
+    instance.postMessage(
+      {
+        id,
+        type: 'processDataset',
+        payload: request,
+      } as never,
+      [],
+    );
   });
 }
 
-export function listDemoVideos(
+export async function listDemoVideos(
   source: PoseTraceSource,
   demoName: string,
 ): Promise<DemoVideoInfo[]> {

@@ -8,12 +8,12 @@ import {
   listFiles,
   pollBackendStatus,
   PYTHON_BACKEND_BASE_URL,
+  type PythonLeRobotConvertRequest,
   resolveFiles,
   runLeRobotConvert,
   runProcess,
   scanFiles,
   updateDatasetArticulation,
-  type PythonLeRobotConvertRequest,
 } from './python-backend';
 
 type FetchMock = ReturnType<typeof vi.fn<typeof fetch>>;
@@ -39,6 +39,20 @@ function sseResponse(events: unknown[]): Response {
     status: 200,
     headers: { 'content-type': 'text/event-stream' },
   });
+}
+
+function basicLeRobotRequest(): PythonLeRobotConvertRequest {
+  return {
+    paths: ['/a.h5'],
+    outputName: 'out',
+    outputDirectory: '/chosen-output',
+    outputDirectoryAuthorization: 'output-authorization',
+    skipFailed: false,
+    defaultTask: 'task',
+    taskRules: [],
+    outputVersion: 'v3.0',
+    videoCodec: 'h264',
+  };
 }
 
 beforeEach(() => {
@@ -486,20 +500,6 @@ describe('runProcess (SSE streaming)', () => {
 });
 
 describe('runLeRobotConvert (SSE streaming)', () => {
-  function basicRequest(): PythonLeRobotConvertRequest {
-    return {
-      paths: ['/a.h5'],
-      outputName: 'out',
-      outputDirectory: '/chosen-output',
-      outputDirectoryAuthorization: 'output-authorization',
-      skipFailed: false,
-      defaultTask: 'task',
-      taskRules: [],
-      outputVersion: 'v3.0',
-      videoCodec: 'h264',
-    };
-  }
-
   it('forwards progress and resolves with the done payload', async () => {
     fetchMock.mockResolvedValueOnce(
       sseResponse([
@@ -530,9 +530,11 @@ describe('runLeRobotConvert (SSE streaming)', () => {
       vi.fn<
         NonNullable<Parameters<typeof runLeRobotConvert>[1]['onProgress']>
       >();
-    const result = await runLeRobotConvert(basicRequest(), { onProgress });
+    const result = await runLeRobotConvert(basicLeRobotRequest(), {
+      onProgress,
+    });
 
-    expect(onProgress).toHaveBeenCalledTimes(1);
+    expect(onProgress).toHaveBeenCalledOnce();
     expect(result.outputType).toBe('directory');
     expect(result.taskCount).toBe(1);
     const rawRequestBody = fetchMock.mock.calls[0]?.[1]?.body;
@@ -559,8 +561,11 @@ describe('runLeRobotConvert (SSE streaming)', () => {
         },
       ]),
     );
-    const onWarning = vi.fn();
-    await runLeRobotConvert(basicRequest(), { onWarning });
+    const onWarning =
+      vi.fn<
+        NonNullable<Parameters<typeof runLeRobotConvert>[1]['onWarning']>
+      >();
+    await runLeRobotConvert(basicLeRobotRequest(), { onWarning });
     expect(onWarning).toHaveBeenCalledWith('NVENC failed; using CPU.');
   });
 
@@ -568,21 +573,21 @@ describe('runLeRobotConvert (SSE streaming)', () => {
     fetchMock.mockResolvedValueOnce(
       Response.json({ error: 'bad request' }, { status: 400 }),
     );
-    await expect(runLeRobotConvert(basicRequest(), {})).rejects.toThrow(
+    await expect(runLeRobotConvert(basicLeRobotRequest(), {})).rejects.toThrow(
       'bad request',
     );
   });
 
   it('throws when the response has no body stream', async () => {
     fetchMock.mockResolvedValueOnce(new Response(null, { status: 200 }));
-    await expect(runLeRobotConvert(basicRequest(), {})).rejects.toThrow(
+    await expect(runLeRobotConvert(basicLeRobotRequest(), {})).rejects.toThrow(
       'Server did not return a readable stream.',
     );
   });
 
   it('rejects when the stream ends without a done event', async () => {
     fetchMock.mockResolvedValueOnce(sseResponse([]));
-    await expect(runLeRobotConvert(basicRequest(), {})).rejects.toThrow(
+    await expect(runLeRobotConvert(basicLeRobotRequest(), {})).rejects.toThrow(
       /without a completion event/u,
     );
   });
@@ -591,7 +596,7 @@ describe('runLeRobotConvert (SSE streaming)', () => {
     fetchMock.mockResolvedValueOnce(
       sseResponse([{ type: 'error', message: 'conversion failed' }]),
     );
-    await expect(runLeRobotConvert(basicRequest(), {})).rejects.toThrow(
+    await expect(runLeRobotConvert(basicLeRobotRequest(), {})).rejects.toThrow(
       'conversion failed',
     );
   });
@@ -612,7 +617,7 @@ describe('runLeRobotConvert (SSE streaming)', () => {
         headers: { 'content-type': 'text/event-stream' },
       }),
     );
-    const result = await runLeRobotConvert(basicRequest(), {});
+    const result = await runLeRobotConvert(basicLeRobotRequest(), {});
     expect(result.fileName).toBe('out');
   });
 });
@@ -638,11 +643,11 @@ describe('pollBackendStatus', () => {
       }),
     );
 
-    const onStatus = vi.fn();
+    const onStatus = vi.fn<Parameters<typeof pollBackendStatus>[0]>();
     const cancel = pollBackendStatus(onStatus, 100, 200);
 
     await vi.waitFor(() => {
-      expect(onStatus).toHaveBeenCalledTimes(1);
+      expect(onStatus).toHaveBeenCalledOnce();
     });
     expect(onStatus.mock.calls[0]?.[0].available).toBe(true);
 
@@ -656,8 +661,8 @@ describe('pollBackendStatus', () => {
 
   it('reports available=false when the server returns an error', async () => {
     fetchMock.mockResolvedValue(new Response('', { status: 500 }));
-    const onStatus = vi.fn();
-    const cancel = pollBackendStatus(onStatus, 50, 5_000);
+    const onStatus = vi.fn<Parameters<typeof pollBackendStatus>[0]>();
+    const cancel = pollBackendStatus(onStatus, 50, 5000);
 
     await vi.waitFor(() => {
       expect(onStatus).toHaveBeenCalled();
