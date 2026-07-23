@@ -192,6 +192,11 @@ class TestSourcePathCandidates:
     def test_dedups_repeated_candidates(self) -> None:
         assert lr.source_path_candidates("action", "action").count("obs/actions") == 1
 
+    def test_state_supports_plural_and_legacy_articulation_paths(self) -> None:
+        candidates = lr.source_path_candidates("observation.state", "state")
+        assert "obs/articulations/*/joint_position" in candidates
+        assert "obs/articulation/*/joint_position" in candidates
+
 
 class TestVideoSourceCandidates:
     def test_observation_images_resolves_to_obs_subkey(self) -> None:
@@ -201,7 +206,16 @@ class TestVideoSourceCandidates:
 
     def test_falls_back_to_modality_key(self) -> None:
         candidates = lr.video_source_candidates("custom", "wrist")
-        assert candidates[-2:] == ["obs/wrist", "wrist"]
+        assert "obs/wrist" in candidates
+        assert "wrist" in candidates
+
+    def test_supports_camera_suffix_without_changing_output_key(self) -> None:
+        candidates = lr.video_source_candidates(
+            "observation.images.top",
+            "top",
+        )
+        assert "obs/cameras/top" in candidates
+        assert "obs/cameras/top_camera" in candidates
 
 
 class TestSourceConfigFor:
@@ -254,6 +268,27 @@ class TestNormalizeSourceDefs:
         with pytest.raises(ValueError, match="Invalid source definition"):
             lr.normalize_source_defs(42)
 
+
+class TestSkipWarningTracker:
+    def test_repeated_reason_is_summarized(self) -> None:
+        tracker = lr.SkipWarningTracker()
+        first = tracker.record("source.h5", "demo_0", "missing camera")
+        second = tracker.record("source.h5", "demo_1", "missing camera")
+        third = tracker.record("source.h5", "demo_2", "missing camera")
+
+        assert first == {
+            "type": "warning",
+            "message": "Skipped source.h5/demo_0: missing camera",
+        }
+        assert second is None
+        assert third is None
+        assert tracker.summaries() == [{
+            "type": "warning",
+            "message": (
+                "Skipped 2 additional demos from source.h5 for the same reason: "
+                "missing camera"
+            ),
+        }]
 
 # ---------------------------------------------------------------------------
 # Task rules
@@ -441,6 +476,19 @@ class TestGetFeatureStats:
         assert np.allclose(stats["mean"], [1, 6])
         assert stats["count"].tolist() == [2]
 
+    def test_v3_quantiles_are_opt_in(self) -> None:
+        arr = np.arange(100, dtype=np.float32)[:, None]
+        legacy = lr.get_feature_stats(arr, axis=0, keepdims=False)
+        v3 = lr.get_feature_stats(
+            arr,
+            axis=0,
+            keepdims=False,
+            include_quantiles=True,
+        )
+        assert "q50" not in legacy
+        assert {"q01", "q10", "q50", "q90", "q99"} <= set(v3)
+        assert v3["q50"][0] == pytest.approx(49.5)
+
 
 class TestAggregateStats:
     def test_combines_per_episode_means_with_pooled_variance(self) -> None:
@@ -511,6 +559,10 @@ def episode_group(tmp_path: Path):
         ep.create_dataset(
             "obs/wrist", data=np.zeros((5, 4, 4, 3), dtype=np.uint8),
         )
+        ep.create_dataset(
+            "obs/cameras/top_camera",
+            data=np.ones((5, 4, 4, 3), dtype=np.uint8),
+        )
     with h5py.File(fp, "r") as f:
         yield f["ep"]
 
@@ -526,6 +578,21 @@ class TestFirstExistingDataset:
     def test_raises_when_none_match(self, episode_group: h5py.Group) -> None:
         with pytest.raises(KeyError):
             lr.first_existing_dataset(episode_group, ["nope_a", "nope_b"])
+
+    def test_expands_articulation_wildcards(self, tmp_path: Path) -> None:
+        path = tmp_path / "plural.h5"
+        with h5py.File(path, "w") as file:
+            file.create_dataset(
+                "ep/obs/articulations/robot/joint_position",
+                data=np.zeros((2, 3), dtype=np.float32),
+            )
+        with h5py.File(path, "r") as file:
+            source, dataset = lr.first_existing_dataset(
+                file["ep"],
+                ["obs/articulations/*/joint_position"],
+            )
+            assert source == "obs/articulations/robot/joint_position"
+            assert dataset.shape == (2, 3)
 
 
 class TestReadVectorFeature:
@@ -584,6 +651,19 @@ class TestReadVideoFeature:
         assert arr.shape == (5, 4, 4, 3)
         assert arr.dtype == np.uint8
 
+    def test_resolves_modality_name_to_camera_suffix(
+        self,
+        episode_group: h5py.Group,
+    ) -> None:
+        arr = lr.read_video_feature(
+            episode_group,
+            "observation.images.top",
+            "top",
+            None,
+        )
+        assert arr.shape == (5, 4, 4, 3)
+        assert np.all(arr == 1)
+
     def test_rejects_non_thwc_shape(self, tmp_path: Path) -> None:
         fp = tmp_path / "bad.h5"
         with h5py.File(fp, "w") as f:
@@ -595,3 +675,100 @@ class TestReadVideoFeature:
                 lr.read_video_feature(
                     f["ep"], "observation.images.wrist", "wrist", "obs/wrist",
                 )
+
+
+class TestFpsResolution:
+    def _source(self, path: Path, *, root_fps: int | None = None, data_fps: int | None = None) -> Path:
+        with h5py.File(path, "w") as file:
+            if root_fps is not None:
+                file.attrs["fps"] = root_fps
+            data = file.create_group("data")
+            if data_fps is not None:
+                data.attrs["frame_rate"] = data_fps
+            data.create_group("demo_0")
+        return path
+
+    def test_infers_consistent_source_fps(self, tmp_path: Path) -> None:
+        first = self._source(tmp_path / "a.h5", data_fps=25)
+        second = self._source(tmp_path / "b.h5", root_fps=25)
+        assert lr.resolve_fps([first, second], {}) == 25
+
+    def test_falls_back_to_30_when_metadata_is_absent(self, tmp_path: Path) -> None:
+        source = self._source(tmp_path / "a.h5")
+        assert lr.resolve_fps([source], {}) == 30
+
+    def test_rejects_conflicting_sources(self, tmp_path: Path) -> None:
+        first = self._source(tmp_path / "a.h5", root_fps=25)
+        second = self._source(tmp_path / "b.h5", root_fps=30)
+        with pytest.raises(ValueError, match="Conflicting FPS values"):
+            lr.resolve_fps([first, second], {})
+
+    def test_config_override_wins(self, tmp_path: Path) -> None:
+        first = self._source(tmp_path / "a.h5", root_fps=25)
+        second = self._source(tmp_path / "b.h5", root_fps=30)
+        assert lr.resolve_fps([first, second], {"fps": 60}) == 60
+
+    @pytest.mark.parametrize("value", [0, -1, 29.97, "bad"])
+    def test_rejects_invalid_config_fps(self, value: object) -> None:
+        with pytest.raises(ValueError, match="FPS"):
+            lr.resolve_fps([], {"fps": value})
+
+
+class TestVideoEncoderSelection:
+    def test_nvenc_probe_uses_supported_frame_dimensions(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        captured: dict[str, object] = {}
+
+        class Result:
+            returncode = 0
+            stderr = b""
+
+        def fake_run(command: list[str], **kwargs: object) -> Result:
+            captured["command"] = command
+            captured.update(kwargs)
+            return Result()
+
+        monkeypatch.setattr(lr.subprocess, "run", fake_run)
+        assert lr.probe_nvenc() == (True, "")
+        assert "256x256" in captured["command"]
+        assert len(captured["input"]) == 256 * 256 * 3
+
+    def test_selects_nvenc_after_successful_probe(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            lr,
+            "available_ffmpeg_encoders",
+            lambda: {lr.GPU_VCODEC, lr.CPU_H264_VCODEC},
+        )
+        monkeypatch.setattr(lr, "probe_nvenc", lambda: (True, ""))
+        assert lr.select_video_encoder("h264") == (lr.GPU_VCODEC, None)
+
+    def test_falls_back_to_cpu_after_failed_probe(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            lr,
+            "available_ffmpeg_encoders",
+            lambda: {lr.GPU_VCODEC, lr.CPU_H264_VCODEC},
+        )
+        monkeypatch.setattr(lr, "probe_nvenc", lambda: (False, "no device"))
+        encoder, warning = lr.select_video_encoder("h264")
+        assert encoder == lr.CPU_H264_VCODEC
+        assert warning is not None and "NVENC probe failed" in warning
+
+    def test_selects_explicit_av1(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            lr,
+            "available_ffmpeg_encoders",
+            lambda: {lr.AV1_VCODEC},
+        )
+        assert lr.select_video_encoder("av1") == (lr.AV1_VCODEC, None)
+
+    @pytest.mark.parametrize("codec", ["h264", "av1"])
+    def test_fails_when_requested_encoder_is_missing(
+        self,
+        codec: str,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(lr, "available_ffmpeg_encoders", lambda: set())
+        with pytest.raises(RuntimeError):
+            lr.select_video_encoder(codec)

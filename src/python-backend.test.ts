@@ -27,6 +27,12 @@ function jsonResponse(body: unknown, init: ResponseInit = {}): Response {
   });
 }
 
+function assertString(value: unknown): asserts value is string {
+  if (typeof value !== 'string') {
+    throw new TypeError('Expected a string value.');
+  }
+}
+
 function sseResponse(events: unknown[]): Response {
   const body = events.map((e) => `data: ${JSON.stringify(e)}\n\n`).join('');
   return new Response(body, {
@@ -484,9 +490,12 @@ describe('runLeRobotConvert (SSE streaming)', () => {
     return {
       paths: ['/a.h5'],
       outputName: 'out',
+      outputDirectory: '/chosen-output',
       skipFailed: false,
       defaultTask: 'task',
       taskRules: [],
+      outputVersion: 'v3.0',
+      videoCodec: 'h264',
     };
   }
 
@@ -525,6 +534,30 @@ describe('runLeRobotConvert (SSE streaming)', () => {
     expect(onProgress).toHaveBeenCalledTimes(1);
     expect(result.outputType).toBe('directory');
     expect(result.taskCount).toBe(1);
+    const rawRequestBody = fetchMock.mock.calls[0]?.[1]?.body;
+    assertString(rawRequestBody);
+    const requestBody = JSON.parse(rawRequestBody) as Record<string, unknown>;
+    expect(requestBody.outputVersion).toBe('v3.0');
+    expect(requestBody.videoCodec).toBe('h264');
+    expect(requestBody.outputDirectory).toBe('/chosen-output');
+  });
+
+  it('forwards nonfatal warning events', async () => {
+    fetchMock.mockResolvedValueOnce(
+      sseResponse([
+        { type: 'warning', message: 'NVENC failed; using CPU.' },
+        {
+          type: 'done',
+          fileName: 'out',
+          demoCount: 1,
+          selectedKeyCount: 0,
+          fileSize: 1,
+        },
+      ]),
+    );
+    const onWarning = vi.fn();
+    await runLeRobotConvert(basicRequest(), { onWarning });
+    expect(onWarning).toHaveBeenCalledWith('NVENC failed; using CPU.');
   });
 
   it('throws the server-supplied error message on non-ok responses', async () => {

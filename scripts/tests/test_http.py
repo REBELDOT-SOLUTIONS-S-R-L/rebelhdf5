@@ -436,10 +436,16 @@ class TestLeRobotConvertValidation:
         a = make_h5_demo_file(
             "a.h5", target_dir=Path(running_server.root_dirs[0]), demo_count=1,
         )
+        modality = Path(running_server.root_dirs[0]) / "modality.json"
+        modality.write_text("{}", encoding="utf-8")
         status, _h, body = _request(
             f"{server_url}/api/convert/lerobot",
             method="POST",
-            body={"paths": [str(a)], "maxEpisodes": 0},
+            body={
+                "paths": [str(a)],
+                "maxEpisodes": 0,
+                "modalityJson": str(modality),
+            },
         )
         assert status == 400
         assert "maxepisodes" in json.loads(body)["error"].lower()
@@ -477,6 +483,162 @@ class TestLeRobotConvertValidation:
         )
         assert status == 400
         assert "taskrules" in json.loads(body)["error"].lower()
+
+    def test_requires_modality_json(
+        self,
+        server_url: str,
+        running_server: BackendServer,
+        make_h5_demo_file: Any,
+    ) -> None:
+        source = make_h5_demo_file(
+            "requires-modality.h5",
+            target_dir=Path(running_server.root_dirs[0]),
+            demo_count=1,
+        )
+        status, _headers, body = _request(
+            f"{server_url}/api/convert/lerobot",
+            method="POST",
+            body={"paths": [str(source)]},
+        )
+        assert status == 400
+        assert "modalityjson" in json.loads(body)["error"].lower()
+
+    def test_rejects_missing_output_directory(
+        self,
+        server_url: str,
+        running_server: BackendServer,
+        make_h5_demo_file: Any,
+    ) -> None:
+        source = make_h5_demo_file(
+            "missing-output-dir.h5",
+            target_dir=Path(running_server.root_dirs[0]),
+            demo_count=1,
+        )
+        modality = Path(running_server.root_dirs[0]) / "modality.json"
+        modality.write_text("{}", encoding="utf-8")
+        status, _headers, body = _request(
+            f"{server_url}/api/convert/lerobot",
+            method="POST",
+            body={
+                "paths": [str(source)],
+                "modalityJson": str(modality),
+                "outputDirectory": str(Path(running_server.root_dir) / "missing"),
+            },
+        )
+        assert status == 400
+        assert "output directory does not exist" in json.loads(body)["error"].lower()
+
+    def test_writes_to_requested_output_directory(
+        self,
+        server_url: str,
+        running_server: BackendServer,
+        make_h5_demo_file: Any,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        source = make_h5_demo_file(
+            "chosen-output.h5",
+            target_dir=Path(running_server.root_dirs[0]),
+            demo_count=1,
+        )
+        modality = Path(running_server.root_dirs[0]) / "chosen-modality.json"
+        modality.write_text("{}", encoding="utf-8")
+        destination = Path(running_server.root_dir).parent / "chosen-destination"
+        destination.mkdir()
+        captured: dict[str, Any] = {}
+
+        def fake_convert(*args: Any, **_kwargs: Any):
+            captured["output_path"] = args[1]
+            yield {
+                "type": "done",
+                "fileName": Path(args[1]).name,
+                "demoCount": 1,
+                "selectedKeyCount": 0,
+                "fileSize": 0,
+            }
+
+        monkeypatch.setattr("backend.http.lerobot_ops.convert_with_progress", fake_convert)
+        status, _headers, body = _request(
+            f"{server_url}/api/convert/lerobot",
+            method="POST",
+            body={
+                "paths": [str(source)],
+                "modalityJson": str(modality),
+                "outputDirectory": str(destination),
+                "outputName": "my-lerobot-dataset",
+            },
+        )
+        assert status == 200
+        assert b'"type": "done"' in body
+        assert captured["output_path"] == destination / "my-lerobot-dataset"
+
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [("outputVersion", "v4.0"), ("videoCodec", "vp9")],
+    )
+    def test_rejects_unsupported_format_or_codec(
+        self,
+        server_url: str,
+        field: str,
+        value: str,
+    ) -> None:
+        status, _headers, body = _request(
+            f"{server_url}/api/convert/lerobot",
+            method="POST",
+            body={"paths": [], field: value},
+        )
+        assert status == 400
+        assert field.lower() in json.loads(body)["error"].lower()
+
+    @pytest.mark.parametrize(
+        ("request_options", "expected_version", "expected_codec"),
+        [
+            ({}, "v3.0", "h264"),
+            ({"outputVersion": "v2.1", "videoCodec": "av1"}, "v2.1", "av1"),
+        ],
+    )
+    def test_forwards_default_and_explicit_output_choices(
+        self,
+        server_url: str,
+        running_server: BackendServer,
+        make_h5_demo_file: Any,
+        monkeypatch: pytest.MonkeyPatch,
+        request_options: dict[str, str],
+        expected_version: str,
+        expected_codec: str,
+    ) -> None:
+        source = make_h5_demo_file(
+            f"request-{expected_version}.h5",
+            target_dir=Path(running_server.root_dirs[0]),
+            demo_count=1,
+        )
+        modality = Path(running_server.root_dirs[0]) / f"modality-{expected_version}.json"
+        modality.write_text("{}", encoding="utf-8")
+        captured: dict[str, Any] = {}
+
+        def fake_convert(*args: Any, **kwargs: Any):
+            captured.update(kwargs)
+            yield {
+                "type": "done",
+                "fileName": "fake",
+                "demoCount": 1,
+                "selectedKeyCount": 0,
+                "fileSize": 0,
+            }
+
+        monkeypatch.setattr("backend.http.lerobot_ops.convert_with_progress", fake_convert)
+        status, _headers, body = _request(
+            f"{server_url}/api/convert/lerobot",
+            method="POST",
+            body={
+                "paths": [str(source)],
+                "modalityJson": str(modality),
+                **request_options,
+            },
+        )
+        assert status == 200
+        assert b'"type": "done"' in body
+        assert captured["output_version"] == expected_version
+        assert captured["video_codec"] == expected_codec
 
 
 class TestDatabricksRoutes:

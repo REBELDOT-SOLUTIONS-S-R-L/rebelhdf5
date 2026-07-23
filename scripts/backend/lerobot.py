@@ -1,12 +1,22 @@
-"""General LeRobot v2.1 conversion for demo-based HDF5 datasets."""
+"""LeRobot v2.1/v3.0 conversion for demo-based HDF5 datasets.
+
+HDF5 discovery, validation, statistics, and video encoding are shared here.
+The v2.1 serializer remains in this module while the file-oriented v3.0
+serializer lives in :mod:`backend.lerobot_v3`.
+"""
 
 from __future__ import annotations
 
 import json
+import math
+import os
 import shutil
 import subprocess
+import tempfile
+from dataclasses import dataclass
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
+from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import Any, Generator
 
@@ -17,15 +27,19 @@ from .hdf5_ops import require_data_group, sort_demo_names
 
 DEFAULT_FPS = 30
 DEFAULT_CHUNK_SIZE = 1000
-CODEBASE_VERSION = "v2.1"
+DEFAULT_DATA_FILE_SIZE_IN_MB = 100
+DEFAULT_VIDEO_FILE_SIZE_IN_MB = 200
+V21_CODEBASE_VERSION = "v2.1"
+# Kept as a compatibility alias for callers of the original v2.1 module.
+CODEBASE_VERSION = V21_CODEBASE_VERSION
 GPU_VCODEC = "h264_nvenc"
+CPU_H264_VCODEC = "libx264"
+AV1_VCODEC = "libsvtav1"
 PIX_FMT = "yuv420p"
 
-DEFAULT_MODALITY_JSON = (
-    Path("/workspace/IsaacTools/ROBOTICS-lehome-challenge")
-    / "configs/gr00t/modality.json"
-)
 DEFAULT_TASK = "Fold the garment on the table"
+SUPPORTED_OUTPUT_VERSIONS = {"v2.1", "v3.0"}
+SUPPORTED_VIDEO_CODECS = {"h264", "av1"}
 
 DEFAULT_COLUMN_NAMES = {
     "state": "observation.state",
@@ -33,8 +47,10 @@ DEFAULT_COLUMN_NAMES = {
 }
 
 DEFAULT_CONVERSION_CONFIG: dict[str, Any] = {
-    "fps": DEFAULT_FPS,
     "robot_type": "so101_bimanual",
+    "chunk_size": DEFAULT_CHUNK_SIZE,
+    "data_files_size_in_mb": DEFAULT_DATA_FILE_SIZE_IN_MB,
+    "video_files_size_in_mb": DEFAULT_VIDEO_FILE_SIZE_IN_MB,
     "exclude_name_substrings": ["_failed"],
     # With the new standard schema we do not hardcode any embodiment-specific
     # paths. Provide a conversion config JSON next to modality.json with
@@ -51,6 +67,31 @@ VIDEO_PATH_TEMPLATE = "videos/chunk-{episode_chunk:03d}/{video_key}/episode_{epi
 
 _PA: Any | None = None
 _PQ: Any | None = None
+
+
+@dataclass(frozen=True)
+class ConversionContext:
+    """Validated inputs and schema shared by the two serializers."""
+
+    input_paths: list[Path]
+    modality_path: Path
+    conversion_config_path: Path | None
+    modality_python_path: Path | None
+    modality_meta: dict[str, Any]
+    raw_config: dict[str, Any]
+    config: dict[str, Any]
+    fps: int
+    chunk_size: int
+    data_files_size_in_mb: float
+    video_files_size_in_mb: float
+    robot_type: str | None
+    state_features: dict[str, dict[str, Any]]
+    action_features: dict[str, dict[str, Any]]
+    video_features: dict[str, dict[str, Any]]
+    annotation_keys: list[str]
+    task_strings: list[str]
+    sources: list[tuple[int, Path]]
+    total_demos: int
 
 
 def _require_pyarrow() -> tuple[Any, Any]:
@@ -183,12 +224,17 @@ def source_path_candidates(feature_key: str, modality_type: str) -> list[str]:
         ])
     if modality_type == "state":
         suffix = feature_key.rsplit(".", 1)[-1]
-        # New standard schema: joint state for an articulation is at
-        # `obs/articulation/<articulation_name>/joint_position`. We try the
-        # explicit suffix first, then a few common location patterns.
+        # Standard schema: joint state for an articulation is at
+        # `obs/articulations/<name>/joint_position`. Early files used the
+        # singular `articulation` spelling, so both forms remain supported.
         candidates.extend([
+            f"obs/articulations/{suffix}/joint_position",
+            f"obs/articulations/{suffix}/joint_velocity",
             f"obs/articulation/{suffix}/joint_position",
             f"obs/articulation/{suffix}/joint_velocity",
+            "obs/articulations/*/joint_position",
+            "obs/articulation/*/joint_position",
+            f"obs/articulations/{suffix}",
             f"obs/articulation/{suffix}",
             f"obs/{suffix}",
             f"states/{suffix}",
@@ -203,19 +249,31 @@ def source_path_candidates(feature_key: str, modality_type: str) -> list[str]:
 
 def video_source_candidates(original_key: str, modality_key: str) -> list[str]:
     candidates: list[str] = []
+    camera_names: list[str] = []
     if "/" in original_key:
         candidates.append(original_key)
     if original_key.startswith("observation.images."):
         suffix = original_key.rsplit(".", 1)[-1]
+        camera_names.append(suffix)
         # New standard schema: cameras live at `obs/cameras/<name>`.
-        candidates.append(f"obs/cameras/{suffix}")
-        candidates.append(f"obs/{suffix}")
+        # Some HDF5 producers use a descriptive modality name (`top`) while
+        # recording the device as `<name>_camera` (`top_camera`). Keep the
+        # modality name as the LeRobot output key and only alias source lookup.
+        if not suffix.endswith("_camera"):
+            camera_names.append(f"{suffix}_camera")
     if "." in original_key:
         candidates.append(original_key.replace(".", "/"))
-    # Camera path candidates for the inferred modality_key.
-    candidates.append(f"obs/cameras/{modality_key}")
-    candidates.append(f"obs/{modality_key}")
-    candidates.append(modality_key)
+    camera_names.append(modality_key)
+    if not modality_key.endswith("_camera"):
+        camera_names.append(f"{modality_key}_camera")
+
+    # Camera path candidates for the inferred modality key. These aliases are
+    # deliberately deterministic; ambiguous embodiment-specific mappings can
+    # still be supplied through conversion_config.video_sources.
+    for camera_name in camera_names:
+        candidates.append(f"obs/cameras/{camera_name}")
+        candidates.append(f"obs/{camera_name}")
+        candidates.append(camera_name)
 
     out: list[str] = []
     for candidate in candidates:
@@ -264,7 +322,54 @@ def first_existing_dataset(ep: h5py.Group, candidates: list[str]) -> tuple[str, 
         value = ep.get(candidate)
         if isinstance(value, h5py.Dataset):
             return candidate, value
+        if "*" in candidate:
+            matches: list[tuple[str, h5py.Dataset]] = []
+
+            def collect_match(name: str, item: h5py.Group | h5py.Dataset) -> None:
+                if isinstance(item, h5py.Dataset) and fnmatchcase(name, candidate):
+                    matches.append((name, item))
+
+            ep.visititems(collect_match)
+            if matches:
+                matches.sort(key=lambda match: match[0])
+                return matches[0]
     raise KeyError(" or ".join(candidates))
+
+
+class SkipWarningTracker:
+    """Emit one immediate warning per source/reason and summarize repeats."""
+
+    def __init__(self) -> None:
+        self._counts: dict[tuple[str, str], int] = {}
+
+    def record(
+        self,
+        source_name: str,
+        demo_name: str,
+        reason: str,
+    ) -> dict[str, str] | None:
+        key = (source_name, reason)
+        count = self._counts.get(key, 0) + 1
+        self._counts[key] = count
+        if count != 1:
+            return None
+        return {
+            "type": "warning",
+            "message": f"Skipped {source_name}/{demo_name}: {reason}",
+        }
+
+    def summaries(self) -> list[dict[str, str]]:
+        return [
+            {
+                "type": "warning",
+                "message": (
+                    f"Skipped {count - 1} additional demos from {source_name} "
+                    f"for the same reason: {reason}"
+                ),
+            }
+            for (source_name, reason), count in self._counts.items()
+            if count > 1
+        ]
 
 
 def as_2d_float32(arr: np.ndarray, source_path: str) -> np.ndarray:
@@ -430,6 +535,9 @@ def build_features(
     video_shapes: dict[str, tuple[int, int, int]],
     annotation_keys: list[str],
     config: dict[str, Any],
+    *,
+    fps: int | None = None,
+    video_codec: str = "h264",
 ) -> dict[str, Any]:
     feature_names = config.get("feature_names", {})
     if not isinstance(feature_names, dict):
@@ -443,7 +551,7 @@ def build_features(
             names = generate_feature_names(dim, info["groups"])
         features[original_key] = {"dtype": "float32", "shape": [dim], "names": names}
 
-    fps = int(config.get("fps", DEFAULT_FPS))
+    resolved_fps = int(fps if fps is not None else config.get("fps", DEFAULT_FPS))
     for original_key, shape in video_shapes.items():
         height, width, channels = shape
         features[original_key] = {
@@ -451,11 +559,11 @@ def build_features(
             "shape": [height, width, channels],
             "names": ["height", "width", "channels"],
             "info": {
-                "video.fps": float(fps),
+                "video.fps": float(resolved_fps),
                 "video.height": height,
                 "video.width": width,
                 "video.channels": channels,
-                "video.codec": "h264",
+                "video.codec": video_codec,
                 "video.pix_fmt": PIX_FMT,
                 "video.is_depth_map": False,
                 "has_audio": False,
@@ -474,12 +582,22 @@ def build_features(
     return features
 
 
-def compute_episode_stats(episode_data: dict[str, np.ndarray], video_keys: set[str]) -> dict[str, Any]:
+def compute_episode_stats(
+    episode_data: dict[str, np.ndarray],
+    video_keys: set[str],
+    *,
+    include_quantiles: bool = False,
+) -> dict[str, Any]:
     ep_stats: dict[str, Any] = {}
     for key, data in episode_data.items():
         if key in video_keys:
             ep_ft_array = sample_images_from_thwc(data)
-            stats = get_feature_stats(ep_ft_array, axis=(0, 2, 3), keepdims=True)
+            stats = get_feature_stats(
+                ep_ft_array,
+                axis=(0, 2, 3),
+                keepdims=True,
+                include_quantiles=include_quantiles,
+            )
             ep_stats[key] = {
                 k: v if k == "count" else np.squeeze(v.astype(np.float64) / 255.0, axis=0)
                 for k, v in stats.items()
@@ -487,7 +605,12 @@ def compute_episode_stats(episode_data: dict[str, np.ndarray], video_keys: set[s
         else:
             arr = np.asarray(data)
             keepdims = arr.ndim == 1
-            ep_stats[key] = get_feature_stats(arr, axis=0, keepdims=keepdims)
+            ep_stats[key] = get_feature_stats(
+                arr,
+                axis=0,
+                keepdims=keepdims,
+                include_quantiles=include_quantiles,
+            )
     return ep_stats
 
 
@@ -526,14 +649,24 @@ def sample_images_from_thwc(imgs_thwc: np.ndarray) -> np.ndarray:
     return auto_downsample_batch(sampled)
 
 
-def get_feature_stats(array: np.ndarray, axis: Any, keepdims: bool) -> dict[str, np.ndarray]:
-    return {
+def get_feature_stats(
+    array: np.ndarray,
+    axis: Any,
+    keepdims: bool,
+    *,
+    include_quantiles: bool = False,
+) -> dict[str, np.ndarray]:
+    stats = {
         "min": np.min(array, axis=axis, keepdims=keepdims),
         "max": np.max(array, axis=axis, keepdims=keepdims),
         "mean": np.mean(array, axis=axis, keepdims=keepdims),
         "std": np.std(array, axis=axis, keepdims=keepdims),
         "count": np.array([len(array)]),
     }
+    if include_quantiles:
+        for quantile, key in ((0.01, "q01"), (0.10, "q10"), (0.50, "q50"), (0.90, "q90"), (0.99, "q99")):
+            stats[key] = np.quantile(array, quantile, axis=axis, keepdims=keepdims)
+    return stats
 
 
 def aggregate_feature_stats(stats_ft_list: list[dict[str, np.ndarray]]) -> dict[str, np.ndarray]:
@@ -552,13 +685,23 @@ def aggregate_feature_stats(stats_ft_list: list[dict[str, np.ndarray]]) -> dict[
     weighted_variances = (variances + delta_means**2) * counts
     total_variance = weighted_variances.sum(axis=0) / total_count
 
-    return {
+    aggregated = {
         "min": np.min(np.stack([s["min"] for s in stats_ft_list]), axis=0),
         "max": np.max(np.stack([s["max"] for s in stats_ft_list]), axis=0),
         "mean": total_mean,
         "std": np.sqrt(total_variance),
         "count": total_count,
     }
+    quantile_keys = [
+        key
+        for key in stats_ft_list[0]
+        if key.startswith("q") and key[1:].isdigit()
+    ]
+    for key in quantile_keys:
+        if all(key in stats for stats in stats_ft_list):
+            values = np.stack([stats[key] for stats in stats_ft_list])
+            aggregated[key] = (values * counts).sum(axis=0) / total_count
+    return aggregated
 
 
 def aggregate_stats(stats_list: list[dict[str, Any]]) -> dict[str, Any]:
@@ -566,7 +709,7 @@ def aggregate_stats(stats_list: list[dict[str, Any]]) -> dict[str, Any]:
     return {key: aggregate_feature_stats([s[key] for s in stats_list if key in s]) for key in data_keys}
 
 
-def assert_gpu_encoder_available() -> None:
+def available_ffmpeg_encoders() -> set[str]:
     if shutil.which("ffmpeg") is None:
         raise RuntimeError("ffmpeg is required for LeRobot video conversion.")
 
@@ -577,14 +720,111 @@ def assert_gpu_encoder_available() -> None:
         stderr=subprocess.STDOUT,
         text=True,
     )
-    if GPU_VCODEC not in result.stdout:
+    if result.returncode != 0:
         raise RuntimeError(
-            f"ffmpeg does not list the required GPU encoder {GPU_VCODEC}. "
-            "Install an ffmpeg build with NVENC support."
+            f"Could not inspect ffmpeg encoders: {result.stdout.strip()}"
         )
+    return {
+        encoder
+        for encoder in (GPU_VCODEC, CPU_H264_VCODEC, AV1_VCODEC)
+        if encoder in result.stdout
+    }
 
 
-def encode_mp4_from_array(frames_thwc: np.ndarray, out_path: Path, fps: int) -> None:
+def probe_nvenc() -> tuple[bool, str]:
+    """Actually initialize NVENC and encode one frame.
+
+    Listing an encoder only proves that ffmpeg was compiled with it. The probe
+    also catches missing drivers, inaccessible GPUs, and exhausted sessions.
+    """
+
+    # NVENC-capable GPUs commonly reject tiny frames even when the encoder and
+    # driver are healthy. 256x256 is accepted across supported generations and
+    # remains cheap enough for a real one-frame initialization probe.
+    probe_width = 256
+    probe_height = 256
+    frame = bytes(probe_width * probe_height * 3)
+    result = subprocess.run(
+        [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-f",
+            "rawvideo",
+            "-pix_fmt",
+            "rgb24",
+            "-s",
+            f"{probe_width}x{probe_height}",
+            "-framerate",
+            "1",
+            "-i",
+            "-",
+            "-frames:v",
+            "1",
+            "-c:v",
+            GPU_VCODEC,
+            "-f",
+            "null",
+            "-",
+        ],
+        input=frame,
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    error = result.stderr.decode("utf-8", errors="replace").strip()
+    return result.returncode == 0, error
+
+
+def select_video_encoder(video_codec: str) -> tuple[str, str | None]:
+    """Resolve a requested logical codec to an installed, usable encoder."""
+
+    if video_codec not in SUPPORTED_VIDEO_CODECS:
+        raise ValueError(f"Unsupported video codec: {video_codec}")
+    encoders = available_ffmpeg_encoders()
+
+    if video_codec == "av1":
+        if AV1_VCODEC not in encoders:
+            raise RuntimeError(
+                f"ffmpeg does not provide the requested AV1 encoder {AV1_VCODEC}."
+            )
+        return AV1_VCODEC, None
+
+    if GPU_VCODEC in encoders:
+        available, probe_error = probe_nvenc()
+        if available:
+            return GPU_VCODEC, None
+        if CPU_H264_VCODEC in encoders:
+            detail = f" ({probe_error})" if probe_error else ""
+            return CPU_H264_VCODEC, (
+                f"NVENC probe failed{detail}; falling back to CPU H.264 with {CPU_H264_VCODEC}."
+            )
+
+    if CPU_H264_VCODEC in encoders:
+        return CPU_H264_VCODEC, (
+            f"NVENC is unavailable; falling back to CPU H.264 with {CPU_H264_VCODEC}."
+        )
+    raise RuntimeError(
+        "ffmpeg provides neither a usable h264_nvenc encoder nor the libx264 CPU fallback."
+    )
+
+
+def assert_gpu_encoder_available() -> None:
+    """Compatibility wrapper retained for older callers.
+
+    H.264 conversion now permits the documented CPU fallback.
+    """
+
+    select_video_encoder("h264")
+
+
+def encode_mp4_from_array(
+    frames_thwc: np.ndarray,
+    out_path: Path,
+    fps: int,
+    encoder: str = GPU_VCODEC,
+) -> None:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     if frames_thwc.dtype != np.uint8:
         frames_thwc = frames_thwc.astype(np.uint8)
@@ -608,39 +848,29 @@ def encode_mp4_from_array(frames_thwc: np.ndarray, out_path: Path, fps: int) -> 
         "-i",
         "-",
         "-c:v",
-        GPU_VCODEC,
-        "-preset",
-        "p1",
-        "-tune",
-        "ull",
-        "-rc",
-        "vbr",
-        "-cq",
-        "30",
-        "-bf",
-        "0",
-        "-g",
-        "2",
-        "-pix_fmt",
-        PIX_FMT,
-        str(out_path),
+        encoder,
     ]
-    proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
-    try:
-        assert proc.stdin is not None
-        proc.stdin.write(frames_thwc.tobytes())
-    finally:
-        if proc.stdin is not None:
-            proc.stdin.close()
-    ret = proc.wait()
-    if ret != 0:
-        err = ""
-        if proc.stderr is not None:
-            err = proc.stderr.read().decode("utf-8", errors="replace")
-            proc.stderr.close()
-        raise RuntimeError(f"ffmpeg failed encoding {out_path}: {err.strip()}")
-    if proc.stderr is not None:
-        proc.stderr.close()
+    if encoder == GPU_VCODEC:
+        cmd.extend(["-preset", "p1", "-tune", "ull", "-rc", "vbr", "-cq", "30", "-bf", "0"])
+    elif encoder == CPU_H264_VCODEC:
+        cmd.extend(["-preset", "veryfast", "-crf", "23", "-bf", "0"])
+    elif encoder == AV1_VCODEC:
+        cmd.extend(["-preset", "8", "-crf", "35"])
+    else:
+        raise ValueError(f"Unsupported ffmpeg encoder: {encoder}")
+    cmd.extend(["-g", "2", "-pix_fmt", PIX_FMT, str(out_path)])
+
+    result = subprocess.run(
+        cmd,
+        input=frames_thwc.tobytes(),
+        check=False,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+    )
+    if result.returncode != 0:
+        error = result.stderr.decode("utf-8", errors="replace").strip()
+        out_path.unlink(missing_ok=True)
+        raise RuntimeError(f"ffmpeg failed encoding {out_path}: {error}")
 
 
 def write_episode_parquet(
@@ -816,6 +1046,190 @@ def count_selected_demos(sources: list[tuple[int, Path]], skip_failed: bool) -> 
     return total
 
 
+FPS_ATTRIBUTE_NAMES = ("fps", "frame_rate", "frequency", "control_frequency")
+
+
+def _coerce_fps(value: Any, source: str) -> int:
+    array = np.asarray(value)
+    if array.size != 1:
+        raise ValueError(f"FPS metadata at {source} must be a scalar, got shape {array.shape}.")
+    scalar = array.reshape(-1)[0]
+    if isinstance(scalar, bytes):
+        scalar = scalar.decode("utf-8")
+    try:
+        numeric = float(scalar)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"FPS metadata at {source} is not numeric: {scalar!r}.") from exc
+    if not math.isfinite(numeric) or numeric <= 0 or not numeric.is_integer():
+        raise ValueError(f"FPS at {source} must be a positive whole number, got {numeric!r}.")
+    return int(numeric)
+
+
+def infer_hdf5_fps(path: Path) -> int | None:
+    """Read FPS from root/data/demo attributes without assuming one producer."""
+
+    found: list[tuple[str, int]] = []
+    with h5py.File(path, "r") as file:
+        containers: list[tuple[str, h5py.Group | h5py.File]] = [("/", file)]
+        data = file.get("data")
+        if isinstance(data, h5py.Group):
+            containers.append(("/data", data))
+            for demo_name in sort_demo_names(list(data.keys())):
+                demo = data.get(demo_name)
+                if isinstance(demo, h5py.Group):
+                    containers.append((f"/data/{demo_name}", demo))
+
+        for container_path, container in containers:
+            for attribute in FPS_ATTRIBUTE_NAMES:
+                if attribute in container.attrs:
+                    source = f"{path}:{container_path}@{attribute}"
+                    found.append((source, _coerce_fps(container.attrs[attribute], source)))
+
+    values = {fps for _, fps in found}
+    if len(values) > 1:
+        detail = ", ".join(f"{source}={fps}" for source, fps in found)
+        raise ValueError(f"Conflicting FPS metadata in {path}: {detail}.")
+    return next(iter(values)) if values else None
+
+
+def resolve_fps(input_paths: list[Path], raw_config: dict[str, Any]) -> int:
+    """Use an explicit config FPS, otherwise require consistent source metadata."""
+
+    if raw_config.get("fps") is not None:
+        return _coerce_fps(raw_config["fps"], "conversion config")
+
+    inferred = [(path, infer_hdf5_fps(path)) for path in input_paths]
+    present = [(path, fps) for path, fps in inferred if fps is not None]
+    values = {fps for _, fps in present}
+    if len(values) > 1:
+        detail = ", ".join(f"{path}={fps}" for path, fps in present)
+        raise ValueError(f"Conflicting FPS values across HDF5 sources: {detail}.")
+    return next(iter(values)) if values else DEFAULT_FPS
+
+
+def _positive_int_setting(config: dict[str, Any], key: str, default: int) -> int:
+    value = config.get(key, default)
+    if isinstance(value, bool):
+        raise ValueError(f"{key} must be a positive integer.")
+    try:
+        integer = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{key} must be a positive integer.") from exc
+    if integer <= 0 or float(value) != integer:
+        raise ValueError(f"{key} must be a positive integer, got {value!r}.")
+    return integer
+
+
+def _positive_float_setting(config: dict[str, Any], key: str, default: float) -> float:
+    value = config.get(key, default)
+    if isinstance(value, bool):
+        raise ValueError(f"{key} must be positive.")
+    try:
+        number = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{key} must be positive.") from exc
+    if not math.isfinite(number) or number <= 0:
+        raise ValueError(f"{key} must be positive, got {value!r}.")
+    return number
+
+
+def prepare_conversion(
+    input_paths: list[Path],
+    modality_json: Path | None,
+    conversion_config_json: Path | None,
+    modality_python: Path | None,
+    *,
+    output_version: str,
+    skip_failed: bool,
+    max_episodes: int | None,
+    default_task: str | None,
+    task_rules: list[dict[str, Any]] | None,
+) -> ConversionContext:
+    """Load and validate all inputs before creating an output directory."""
+
+    if output_version not in SUPPORTED_OUTPUT_VERSIONS:
+        raise ValueError(f"Unsupported LeRobot output version: {output_version}")
+    if modality_json is None:
+        raise ValueError("A readable modalityJson file is required for LeRobot conversion.")
+    modality_path = Path(modality_json)
+    if not modality_path.is_file():
+        raise FileNotFoundError(f"modality.json not found: {modality_path}")
+
+    modality_meta = load_json_file(modality_path)
+    raw_config = load_json_file(conversion_config_json)
+    config = merge_config(raw_config)
+
+    task_strings, sources = discover_sources(input_paths, config, default_task, task_rules)
+    if not sources:
+        raise RuntimeError("No selected HDF5 files are eligible for LeRobot conversion.")
+    source_paths = list(dict.fromkeys(path for _, path in sources))
+    fps = resolve_fps(source_paths, raw_config)
+    config["fps"] = fps
+
+    chunk_size = _positive_int_setting(config, "chunk_size", DEFAULT_CHUNK_SIZE)
+    data_size = _positive_float_setting(
+        config,
+        "data_files_size_in_mb",
+        DEFAULT_DATA_FILE_SIZE_IN_MB,
+    )
+    video_size = _positive_float_setting(
+        config,
+        "video_files_size_in_mb",
+        DEFAULT_VIDEO_FILE_SIZE_IN_MB,
+    )
+
+    state_features = collect_vector_features(modality_meta, "state")
+    action_features = collect_vector_features(modality_meta, "action")
+    video_features = collect_video_features(modality_meta)
+    annotation_keys = collect_annotation_original_keys(modality_meta)
+
+    total_demos = count_selected_demos(sources, skip_failed)
+    if max_episodes is not None:
+        total_demos = min(total_demos, max_episodes)
+    if total_demos == 0:
+        raise RuntimeError("No demos matched the selected conversion settings.")
+
+    configured_robot_type = config.get("robot_type")
+    if output_version == "v3.0" and "robot_type" not in raw_config:
+        robot_type = None
+    else:
+        robot_type = str(configured_robot_type) if configured_robot_type is not None else None
+
+    return ConversionContext(
+        input_paths=input_paths,
+        modality_path=modality_path,
+        conversion_config_path=conversion_config_json,
+        modality_python_path=modality_python,
+        modality_meta=modality_meta,
+        raw_config=raw_config,
+        config=config,
+        fps=fps,
+        chunk_size=chunk_size,
+        data_files_size_in_mb=data_size,
+        video_files_size_in_mb=video_size,
+        robot_type=robot_type,
+        state_features=state_features,
+        action_features=action_features,
+        video_features=video_features,
+        annotation_keys=annotation_keys,
+        task_strings=task_strings,
+        sources=sources,
+        total_demos=total_demos,
+    )
+
+
+def copy_provenance(context: ConversionContext, output_root: Path) -> None:
+    meta_dir = output_root / "meta"
+    meta_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copy(context.modality_path, meta_dir / "modality.json")
+    config_path = context.conversion_config_path
+    if config_path is not None and config_path.exists():
+        shutil.copy(config_path, meta_dir / "conversion_config.json")
+    python_path = context.modality_python_path
+    if python_path is not None and python_path.exists():
+        shutil.copy(python_path, meta_dir / python_path.name)
+
+
 def directory_size(path: Path) -> int:
     total = 0
     for child in path.rglob("*"):
@@ -824,49 +1238,25 @@ def directory_size(path: Path) -> int:
     return total
 
 
-def convert_with_progress(
-    input_paths: list[Path],
+def _convert_v21_with_progress(
+    context: ConversionContext,
     output_root: Path,
-    modality_json: Path | None,
-    conversion_config_json: Path | None = None,
-    modality_python: Path | None = None,
+    *,
+    encoder: str | None,
+    video_codec: str,
     skip_failed: bool = True,
     max_episodes: int | None = None,
-    default_task: str | None = None,
-    task_rules: list[dict[str, Any]] | None = None,
 ) -> Generator[dict[str, Any], None, None]:
-    _require_pyarrow()
-    assert_gpu_encoder_available()
-
-    modality_path = modality_json or DEFAULT_MODALITY_JSON
-    if not modality_path.exists():
-        raise FileNotFoundError(f"modality.json not found: {modality_path}")
-    modality_meta = load_json_file(modality_path)
-    config = merge_config(load_json_file(conversion_config_json))
-
-    fps = int(config.get("fps", DEFAULT_FPS))
-    chunk_size = int(config.get("chunk_size", DEFAULT_CHUNK_SIZE))
-    robot_type = config.get("robot_type")
-    robot_type = str(robot_type) if robot_type is not None else None
-
-    state_features = collect_vector_features(modality_meta, "state")
-    action_features = collect_vector_features(modality_meta, "action")
-    video_features = collect_video_features(modality_meta)
-    annotation_keys = collect_annotation_original_keys(modality_meta)
-
-    if output_root.exists() and any(output_root.iterdir()):
-        raise FileExistsError(f"Output {output_root} exists and is non-empty.")
-    output_root.mkdir(parents=True, exist_ok=True)
-
-    task_strings, sources = discover_sources(input_paths, config, default_task, task_rules)
-    if not sources:
-        raise RuntimeError("No selected HDF5 files are eligible for LeRobot conversion.")
-
-    total_demos = count_selected_demos(sources, skip_failed)
-    if max_episodes is not None:
-        total_demos = min(total_demos, max_episodes)
-    if total_demos == 0:
-        raise RuntimeError("No demos matched the selected conversion settings.")
+    fps = context.fps
+    chunk_size = context.chunk_size
+    config = context.config
+    state_features = context.state_features
+    action_features = context.action_features
+    video_features = context.video_features
+    annotation_keys = context.annotation_keys
+    task_strings = context.task_strings
+    sources = context.sources
+    total_demos = context.total_demos
 
     yield {
         "type": "start",
@@ -882,8 +1272,9 @@ def convert_with_progress(
     episode_stats: list[dict[str, Any]] = []
     video_shapes: dict[str, tuple[int, int, int]] = {}
     video_keys = set(video_features)
+    skip_warnings = SkipWarningTracker()
 
-    with ThreadPoolExecutor(max_workers=max(1, len(video_features)), thread_name_prefix="nvenc") as cam_pool:
+    with ThreadPoolExecutor(max_workers=max(1, len(video_features)), thread_name_prefix="video-encode") as cam_pool:
         for task_idx, hdf5_path in sources:
             source_name = hdf5_path.stem
             task_string = task_strings[task_idx]
@@ -895,6 +1286,14 @@ def convert_with_progress(
 
                     ep = data[demo_name]
                     if skip_failed and not bool(ep.attrs.get("success", True)):
+                        skipped += 1
+                        warning = skip_warnings.record(
+                            hdf5_path.name,
+                            demo_name,
+                            "success is false.",
+                        )
+                        if warning is not None:
+                            yield warning
                         continue
 
                     yield {
@@ -916,10 +1315,13 @@ def convert_with_progress(
                         )
                     except (KeyError, ValueError) as exc:
                         skipped += 1
-                        yield {
-                            "type": "warning",
-                            "message": f"Skipped {hdf5_path.name}/{demo_name}: {exc}",
-                        }
+                        warning = skip_warnings.record(
+                            hdf5_path.name,
+                            demo_name,
+                            str(exc),
+                        )
+                        if warning is not None:
+                            yield warning
                         continue
 
                     for video_key, frames in video_arrays.items():
@@ -961,7 +1363,17 @@ def convert_with_progress(
                             video_key=video_key,
                             episode_index=ep_idx,
                         )
-                        futures.append(cam_pool.submit(encode_mp4_from_array, frames, video_path, fps))
+                        if encoder is None:
+                            raise RuntimeError("No video encoder was selected.")
+                        futures.append(
+                            cam_pool.submit(
+                                encode_mp4_from_array,
+                                frames,
+                                video_path,
+                                fps,
+                                encoder,
+                            )
+                        )
                     for future in futures:
                         future.result()
 
@@ -992,6 +1404,8 @@ def convert_with_progress(
             if max_episodes is not None and ep_idx >= max_episodes:
                 break
 
+    yield from skip_warnings.summaries()
+
     if ep_idx == 0:
         raise RuntimeError("No episodes written. Check selected files and conversion source mappings.")
 
@@ -1019,6 +1433,8 @@ def convert_with_progress(
         video_shapes,
         annotation_keys,
         config,
+        fps=fps,
+        video_codec=video_codec,
     )
     write_meta(
         output_root=output_root,
@@ -1029,18 +1445,13 @@ def convert_with_progress(
         episode_entries=episode_entries,
         episode_stats=episode_stats,
         aggregated_stats=aggregated,
-        robot_type=robot_type,
+        robot_type=context.robot_type,
         task_strings=task_strings,
         fps=fps,
         chunk_size=chunk_size,
     )
 
-    meta_dir = output_root / "meta"
-    shutil.copy(modality_path, meta_dir / "modality.json")
-    if conversion_config_json is not None and conversion_config_json.exists():
-        shutil.copy(conversion_config_json, meta_dir / "conversion_config.json")
-    if modality_python is not None and modality_python.exists():
-        shutil.copy(modality_python, meta_dir / modality_python.name)
+    copy_provenance(context, output_root)
 
     yield {
         "type": "done",
@@ -1055,3 +1466,102 @@ def convert_with_progress(
         "taskCount": len(task_strings),
         "finishedAt": datetime.now().isoformat(timespec="seconds"),
     }
+
+
+def convert_with_progress(
+    input_paths: list[Path],
+    output_root: Path,
+    modality_json: Path | None,
+    conversion_config_json: Path | None = None,
+    modality_python: Path | None = None,
+    skip_failed: bool = True,
+    max_episodes: int | None = None,
+    default_task: str | None = None,
+    task_rules: list[dict[str, Any]] | None = None,
+    output_version: str = "v3.0",
+    video_codec: str = "h264",
+) -> Generator[dict[str, Any], None, None]:
+    """Convert into a sibling staging directory and atomically publish it."""
+
+    _require_pyarrow()
+    if output_version not in SUPPORTED_OUTPUT_VERSIONS:
+        raise ValueError(f"Unsupported LeRobot output version: {output_version}")
+    if video_codec not in SUPPORTED_VIDEO_CODECS:
+        raise ValueError(f"Unsupported video codec: {video_codec}")
+    if output_root.exists():
+        raise FileExistsError(f"Output already exists: {output_root}")
+
+    context = prepare_conversion(
+        input_paths,
+        modality_json,
+        conversion_config_json,
+        modality_python,
+        output_version=output_version,
+        skip_failed=skip_failed,
+        max_episodes=max_episodes,
+        default_task=default_task,
+        task_rules=task_rules,
+    )
+
+    encoder: str | None = None
+    encoder_warning: str | None = None
+    if context.video_features:
+        encoder, encoder_warning = select_video_encoder(video_codec)
+
+    output_root.parent.mkdir(parents=True, exist_ok=True)
+    staging_root = Path(
+        tempfile.mkdtemp(
+            prefix=f".{output_root.name}.staging-",
+            dir=output_root.parent,
+        )
+    )
+    published = False
+    try:
+        if encoder_warning:
+            yield {"type": "warning", "message": encoder_warning}
+
+        if output_version == "v2.1":
+            events = _convert_v21_with_progress(
+                context,
+                staging_root,
+                encoder=encoder,
+                video_codec=video_codec,
+                skip_failed=skip_failed,
+                max_episodes=max_episodes,
+            )
+        else:
+            from .lerobot_v3 import convert_v3_with_progress
+
+            events = convert_v3_with_progress(
+                context,
+                staging_root,
+                encoder=encoder,
+                video_codec=video_codec,
+                skip_failed=skip_failed,
+                max_episodes=max_episodes,
+            )
+
+        saw_done = False
+        for event in events:
+            if event.get("type") != "done":
+                yield event
+                continue
+
+            if output_root.exists():
+                raise FileExistsError(f"Output was created during conversion: {output_root}")
+            os.rename(staging_root, output_root)
+            published = True
+            saw_done = True
+            final_event = dict(event)
+            final_event.update({
+                "fileSize": directory_size(output_root),
+                "fileName": output_root.name,
+                "outputPath": str(output_root),
+            })
+            yield final_event
+
+        if not saw_done:
+            raise RuntimeError("LeRobot conversion ended without a completion event.")
+    finally:
+        if not published and staging_root.exists():
+            shutil.rmtree(staging_root, ignore_errors=True)

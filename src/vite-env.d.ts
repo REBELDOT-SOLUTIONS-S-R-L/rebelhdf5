@@ -4,6 +4,7 @@ declare const __PYTHON_BACKEND_PORT__: number;
 
 interface RebelHdf5DesktopRuntime {
   backendPort?: number;
+  chooseDirectory?: (defaultPath?: string) => Promise<string | undefined>;
   getPathForFile?: (file: File) => string | undefined;
   readFile?: (path: string) => Promise<ArrayBuffer>;
 }

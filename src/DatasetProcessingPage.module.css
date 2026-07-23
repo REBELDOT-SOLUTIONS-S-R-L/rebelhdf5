@@ -118,6 +118,21 @@
   opacity: 0.86;
 }
 
+.warningText {
+  margin: 0;
+  color: #f4c76b;
+}
+
+.warningText p {
+  margin: 0;
+  font-weight: 700;
+}
+
+.warningText ul {
+  margin: 0.35rem 0 0;
+  padding-left: 1.25rem;
+}
+
 .keysCard {
   composes: card;
   width: 100%;
@@ -381,6 +396,16 @@
   width: 100%;
   margin-top: 0.5rem;
   color: var(--color-gray);
+}
+
+.pathPickerRow {
+  display: flex;
+  align-items: stretch;
+  gap: 0.6rem;
+}
+
+.pathPickerRow .secondaryBtn {
+  flex: 0 0 auto;
 }
 
 .textarea {

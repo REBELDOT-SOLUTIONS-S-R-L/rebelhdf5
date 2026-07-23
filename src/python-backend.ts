@@ -117,17 +117,24 @@ export interface PythonProcessRequest {
 export interface PythonLeRobotConvertRequest {
   paths: string[];
   outputName: string;
+  outputDirectory?: string;
   skipFailed: boolean;
   modalityJson?: string;
   conversionConfigJson?: string;
   modalityPython?: string;
   defaultTask?: string;
-  taskRules?: Array<Record<string, unknown>>;
+  taskRules?: Record<string, unknown>[];
   maxEpisodes?: number;
+  outputVersion: LeRobotOutputVersion;
+  videoCodec: LeRobotVideoCodec;
 }
+
+export type LeRobotOutputVersion = 'v2.1' | 'v3.0';
+export type LeRobotVideoCodec = 'h264' | 'av1';
 
 export interface PythonProcessCallbacks {
   onProgress?: (progress: DatasetProcessingProgress) => void;
+  onWarning?: (message: string) => void;
 }
 
 export type PythonProcessResult = DatasetProcessingResultMeta & {
@@ -480,7 +487,7 @@ export async function runProcess(
   return finalResult;
 }
 
-/** Convert selected HDF5 files to a LeRobot v2.1 dataset directory. */
+/** Convert selected HDF5 files to a LeRobot v2.1 or v3.0 dataset directory. */
 export async function runLeRobotConvert(
   request: PythonLeRobotConvertRequest,
   callbacks: PythonProcessCallbacks,
@@ -491,6 +498,7 @@ export async function runLeRobotConvert(
     body: JSON.stringify({
       paths: request.paths,
       outputName: request.outputName,
+      outputDirectory: request.outputDirectory,
       skipFailed: request.skipFailed,
       modalityJson: request.modalityJson,
       conversionConfigJson: request.conversionConfigJson,
@@ -498,6 +506,8 @@ export async function runLeRobotConvert(
       defaultTask: request.defaultTask,
       taskRules: request.taskRules,
       maxEpisodes: request.maxEpisodes,
+      outputVersion: request.outputVersion,
+      videoCodec: request.videoCodec,
     }),
   });
 
@@ -562,6 +572,11 @@ export async function runLeRobotConvert(
             totalFrames: event.totalFrames as number | undefined,
             taskCount: event.taskCount as number | undefined,
           };
+
+          break;
+
+        case 'warning':
+          callbacks.onWarning?.(event.message as string);
 
           break;
 

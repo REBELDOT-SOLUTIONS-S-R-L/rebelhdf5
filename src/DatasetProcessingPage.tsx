@@ -36,6 +36,8 @@ import {
 } from './pose-trace/types';
 import {
   pollBackendStatus,
+  type LeRobotOutputVersion,
+  type LeRobotVideoCodec,
   type PythonBackendStatus,
   type PythonScanResult,
   runLeRobotConvert,
@@ -77,8 +79,6 @@ const DATASET_PROCESSING_OPERATIONS: DatasetProcessingOperation[] = [
   'lerobot',
 ];
 const BACKEND_SOURCE_PREFIX = 'backend:';
-const DEFAULT_LEROBOT_MODALITY_JSON =
-  '/workspace/IsaacTools/ROBOTICS-lehome-challenge/configs/gr00t/modality.json';
 const DEFAULT_LEROBOT_TASK = 'Complete the task';
 
 function getBackendSourceId(path: string): string {
@@ -254,9 +254,12 @@ function DatasetProcessingPage() {
   const [appendSourceUrls, setAppendSourceUrls] = useState<string[]>([]);
   const [lerobotSourceUrls, setLerobotSourceUrls] = useState<string[]>([]);
   const [skipFailedDemos, setSkipFailedDemos] = useState(true);
-  const [lerobotModalityJsonPath, setLerobotModalityJsonPath] = useState(
-    DEFAULT_LEROBOT_MODALITY_JSON,
-  );
+  const [lerobotOutputVersion, setLerobotOutputVersion] =
+    useState<LeRobotOutputVersion>('v3.0');
+  const [lerobotVideoCodec, setLerobotVideoCodec] =
+    useState<LeRobotVideoCodec>('h264');
+  const [lerobotOutputDirectory, setLerobotOutputDirectory] = useState('');
+  const [lerobotModalityJsonPath, setLerobotModalityJsonPath] = useState('');
   const [lerobotConversionConfigPath, setLerobotConversionConfigPath] =
     useState('');
   const [lerobotModalityPythonPath, setLerobotModalityPythonPath] =
@@ -274,6 +277,7 @@ function DatasetProcessingPage() {
   const [progress, setProgress] = useState<DatasetProcessingProgress | null>(
     null,
   );
+  const [lerobotWarnings, setLerobotWarnings] = useState<string[]>([]);
 
   // Python backend state.
   const [backend, setBackend] = useState<PythonBackendStatus>({
@@ -732,12 +736,22 @@ function DatasetProcessingPage() {
   }, [cutEndDemoName, cutStartDemoName, primaryDemos]);
 
   const defaultOutputName = useMemo(
-    () => buildDefaultOutputName(operation, selectedSourceRefs, cutDemoNames),
-    [cutDemoNames, operation, selectedSourceRefs],
+    () =>
+      buildDefaultOutputName(
+        operation,
+        selectedSourceRefs,
+        cutDemoNames,
+        lerobotOutputVersion,
+      ),
+    [cutDemoNames, lerobotOutputVersion, operation, selectedSourceRefs],
   );
   const processingDescription = useMemo(() => {
     if (operation === 'lerobot') {
-      return `Converting ${orderedSelectedSourceUrls.length} HDF5 dataset${orderedSelectedSourceUrls.length === 1 ? '' : 's'} to LeRobot v2.1 with GPU video encoding.`;
+      const codecDescription =
+        lerobotVideoCodec === 'h264'
+          ? 'H.264 (NVENC with automatic CPU fallback)'
+          : 'smaller AV1';
+      return `Converting ${orderedSelectedSourceUrls.length} HDF5 dataset${orderedSelectedSourceUrls.length === 1 ? '' : 's'} to LeRobot ${lerobotOutputVersion} with ${codecDescription} video.`;
     }
 
     if (operation === 'merge') {
@@ -752,6 +766,8 @@ function DatasetProcessingPage() {
   }, [
     appendSourceUrls.length,
     cutDemoNames.length,
+    lerobotOutputVersion,
+    lerobotVideoCodec,
     operation,
     orderedSelectedSourceUrls.length,
   ]);
@@ -764,6 +780,7 @@ function DatasetProcessingPage() {
         Boolean(backendScan) &&
         orderedSelectedSourceUrls.length > 0 &&
         backendScanPaths.length === orderedSelectedSourceUrls.length &&
+        lerobotModalityJsonPath.trim().length > 0 &&
         !backendLoading &&
         !resolveError
       );
@@ -806,6 +823,7 @@ function DatasetProcessingPage() {
     backendScanPaths.length,
     resolveError,
     mergeSourceUrls.length,
+    lerobotModalityJsonPath,
     operation,
     orderedSelectedSourceUrls.length,
     primarySourceUrl,
@@ -823,6 +841,9 @@ function DatasetProcessingPage() {
         appendSourceUrls,
         lerobotSourceUrls,
         skipFailedDemos,
+        lerobotOutputVersion,
+        lerobotVideoCodec,
+        lerobotOutputDirectory,
         lerobotModalityJsonPath,
         lerobotConversionConfigPath,
         lerobotModalityPythonPath,
@@ -840,8 +861,11 @@ function DatasetProcessingPage() {
       lerobotDefaultTask,
       lerobotModalityJsonPath,
       lerobotModalityPythonPath,
+      lerobotOutputDirectory,
+      lerobotOutputVersion,
       lerobotSourceUrls,
       lerobotTaskRulesText,
+      lerobotVideoCodec,
       mergeSourceUrls,
       operation,
       primarySourceUrl,
@@ -855,7 +879,29 @@ function DatasetProcessingPage() {
 
   useEffect(() => {
     setLastResult(null);
+    setLerobotWarnings([]);
   }, [resultResetKey]);
+
+  async function handleChooseLerobotOutputDirectory() {
+    const chooseDirectory = globalThis.rebelHdf5Desktop?.chooseDirectory;
+    if (!chooseDirectory) {
+      return;
+    }
+    try {
+      const selectedDirectory = await chooseDirectory(
+        lerobotOutputDirectory.trim() || backend.outputDir,
+      );
+      if (selectedDirectory) {
+        setLerobotOutputDirectory(selectedDirectory);
+      }
+    } catch (error) {
+      setProcessingError(
+        error instanceof Error
+          ? error.message
+          : 'Could not open the output folder picker.',
+      );
+    }
+  }
 
   async function handleProcess() {
     if (!canProcess) {
@@ -865,6 +911,7 @@ function DatasetProcessingPage() {
     setProcessingError(null);
     setLastResult(null);
     setProgress(null);
+    setLerobotWarnings([]);
     setIsProcessing(true);
 
     try {
@@ -883,6 +930,8 @@ function DatasetProcessingPage() {
             {
               paths: backendScanPaths,
               outputName: defaultOutputName,
+              outputDirectory:
+                lerobotOutputDirectory.trim() || backend.outputDir || undefined,
               skipFailed: skipFailedDemos,
               modalityJson: lerobotModalityJsonPath.trim() || undefined,
               conversionConfigJson:
@@ -890,8 +939,17 @@ function DatasetProcessingPage() {
               modalityPython: lerobotModalityPythonPath.trim() || undefined,
               defaultTask: lerobotDefaultTask.trim() || undefined,
               taskRules,
+              outputVersion: lerobotOutputVersion,
+              videoCodec: lerobotVideoCodec,
             },
-            { onProgress: setProgress },
+            {
+              onProgress: setProgress,
+              onWarning: (message) => {
+                setLerobotWarnings((current) =>
+                  current.includes(message) ? current : [...current, message],
+                );
+              },
+            },
           );
 
           setLastResult({
@@ -1046,7 +1104,7 @@ function DatasetProcessingPage() {
           <h1 className={styles.title}>Dataset Processing</h1>
           <p className={styles.subtitle}>
             Cut demos, merge multiple datasets, append one dataset to another,
-            or convert HDF5 files to LeRobot v2.1. Processing leaves the
+            or convert HDF5 files to LeRobot v2.1 or v3.0. Processing leaves the
             original files unchanged.
           </p>
         </div>
@@ -1332,10 +1390,94 @@ function DatasetProcessingPage() {
                   <span>Skip demos whose success attribute is false</span>
                 </label>
                 <p className={styles.infoText}>
-                  The converter writes LeRobot v2.1 parquet, metadata,
-                  modality.json, and GPU-encoded MP4 videos.
+                  {lerobotOutputVersion === 'v3.0'
+                    ? 'V3 packs multiple episodes into larger Parquet and MP4 shards and reconstructs episodes from relational metadata.'
+                    : 'V2.1 keeps one Parquet and MP4 file per episode with JSONL task and episode metadata.'}{' '}
+                  {lerobotVideoCodec === 'h264'
+                    ? 'H.264 prioritizes speed and falls back to CPU encoding when NVENC cannot initialize.'
+                    : 'AV1 uses libsvtav1 for smaller output at the cost of slower encoding.'}{' '}
+                  The selected modality JSON defines the state/action layout and
+                  camera feature names in the output; use the conversion config
+                  only when its fields need explicit HDF5 source paths or a
+                  robot_type.
                 </p>
                 <div className={styles.lerobotConfigGrid}>
+                  <div className={styles.field}>
+                    <label
+                      className={styles.fieldLabel}
+                      htmlFor="lerobot-output-version"
+                    >
+                      Output Format
+                    </label>
+                    <select
+                      id="lerobot-output-version"
+                      className={styles.select}
+                      value={lerobotOutputVersion}
+                      onChange={(event) => {
+                        setLerobotOutputVersion(
+                          event.target.value as LeRobotOutputVersion,
+                        );
+                      }}
+                    >
+                      <option value="v3.0">LeRobot v3.0 (recommended)</option>
+                      <option value="v2.1">LeRobot v2.1 (legacy)</option>
+                    </select>
+                  </div>
+
+                  <div className={styles.field}>
+                    <label
+                      className={styles.fieldLabel}
+                      htmlFor="lerobot-output-directory"
+                    >
+                      Output Parent Folder
+                    </label>
+                    <div className={styles.pathPickerRow}>
+                      <input
+                        id="lerobot-output-directory"
+                        className={styles.select}
+                        placeholder={backend.outputDir ?? 'Choose a folder'}
+                        value={lerobotOutputDirectory}
+                        onChange={(event) => {
+                          setLerobotOutputDirectory(event.target.value);
+                        }}
+                      />
+                      {globalThis.rebelHdf5Desktop?.chooseDirectory && (
+                        <button
+                          type="button"
+                          className={styles.secondaryBtn}
+                          onClick={() => {
+                            void handleChooseLerobotOutputDirectory();
+                          }}
+                        >
+                          <FiFolder aria-hidden />
+                          Browse
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className={styles.field}>
+                    <label
+                      className={styles.fieldLabel}
+                      htmlFor="lerobot-video-codec"
+                    >
+                      Video Codec
+                    </label>
+                    <select
+                      id="lerobot-video-codec"
+                      className={styles.select}
+                      value={lerobotVideoCodec}
+                      onChange={(event) => {
+                        setLerobotVideoCodec(
+                          event.target.value as LeRobotVideoCodec,
+                        );
+                      }}
+                    >
+                      <option value="h264">H.264 (faster)</option>
+                      <option value="av1">AV1 (smaller)</option>
+                    </select>
+                  </div>
+
                   <div className={styles.field}>
                     <label
                       className={styles.fieldLabel}
@@ -1346,6 +1488,8 @@ function DatasetProcessingPage() {
                     <input
                       id="lerobot-modality-json-path"
                       className={styles.select}
+                      placeholder="Required"
+                      required
                       value={lerobotModalityJsonPath}
                       onChange={(event) => {
                         setLerobotModalityJsonPath(event.target.value);
@@ -1492,7 +1636,9 @@ function DatasetProcessingPage() {
                     ? 'Output Format:'
                     : 'Selected Keys:'}
                 </span>{' '}
-                {operation === 'lerobot' ? 'LeRobot v2.1' : selectedKeys.length}
+                {operation === 'lerobot'
+                  ? `LeRobot ${lerobotOutputVersion}`
+                  : selectedKeys.length}
               </div>
               {operation === 'cut' && (
                 <div className={styles.statusItem}>
@@ -1604,7 +1750,17 @@ function DatasetProcessingPage() {
                 {operation === 'lerobot' ? (
                   <>
                     The LeRobot dataset directory will be created as{' '}
-                    <code>{defaultOutputName}</code>.
+                    <code>{defaultOutputName}</code>
+                    {(lerobotOutputDirectory.trim() || backend.outputDir) && (
+                      <>
+                        {' '}
+                        inside{' '}
+                        <code>
+                          {lerobotOutputDirectory.trim() || backend.outputDir}
+                        </code>
+                      </>
+                    )}
+                    .
                   </>
                 ) : (
                   <>
@@ -1617,6 +1773,16 @@ function DatasetProcessingPage() {
 
             {processingError && (
               <p className={styles.errorText}>{processingError}</p>
+            )}
+            {lerobotWarnings.length > 0 && (
+              <div className={styles.warningText} role="status">
+                <p>Conversion warnings:</p>
+                <ul>
+                  {lerobotWarnings.map((warning) => (
+                    <li key={warning}>{warning}</li>
+                  ))}
+                </ul>
+              </div>
             )}
             {lastResult && (
               <p className={styles.successText}>
@@ -1668,7 +1834,7 @@ function DatasetProcessingPage() {
                       : progress?.phase === 'streaming'
                         ? 'Preparing download…'
                         : progress?.phase === 'encoding'
-                          ? 'Encoding MP4 videos on GPU…'
+                          ? `Encoding ${lerobotVideoCodec === 'h264' ? 'H.264' : 'AV1'} MP4 videos…`
                           : progress?.phase === 'converting'
                             ? 'Converting HDF5 demos…'
                             : progress?.phase === 'stats'
@@ -1726,7 +1892,7 @@ function DatasetProcessingPage() {
               <p className={styles.infoText}>
                 {operation === 'lerobot'
                   ? backend.available
-                    ? 'Select at least one backend-backed HDF5 file to convert to LeRobot v2.1.'
+                    ? 'Select at least one backend-backed HDF5 file and a required modality JSON file.'
                     : 'LeRobot conversion requires the local Python processing server.'
                   : operation === 'merge'
                     ? 'Select at least two datasets and one key to create a merged output.'

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import gzip
 import json
+import os
 import traceback
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler
@@ -177,7 +178,7 @@ class BackendHandler(BaseHTTPRequestHandler):
             "rootDir": self.server.root_dir,
             "rootDirs": list(self.server.root_dirs),
             "outputDir": self.server.output_dir,
-            "version": 9,
+            "version": 10,
             "indexing": index_status["indexing"],
             "indexReady": index_status["ready"],
             "indexedFileCount": index_status["count"],
@@ -210,6 +211,21 @@ class BackendHandler(BaseHTTPRequestHandler):
         if not resolved:
             return None, f"{label} not found or ambiguous: {raw_path}"
         return resolved, None
+
+    def _resolve_output_directory(self, raw_path: Any) -> tuple[Path | None, str | None]:
+        if raw_path is None or raw_path == "":
+            raw_path = self.server.output_dir
+        if not isinstance(raw_path, str):
+            return None, "outputDirectory must be a path string."
+        try:
+            output_dir = Path(raw_path).expanduser().resolve(strict=True)
+        except (OSError, RuntimeError, ValueError):
+            return None, f"Output directory does not exist: {raw_path}"
+        if not output_dir.is_dir():
+            return None, f"Output location is not a directory: {raw_path}"
+        if not os.access(output_dir, os.W_OK | os.X_OK):
+            return None, f"Output directory is not writable: {raw_path}"
+        return output_dir, None
 
     def _handle_files(self, directories: list[str], *, recursive: bool = False) -> None:
         try:
@@ -437,7 +453,19 @@ class BackendHandler(BaseHTTPRequestHandler):
         try:
             body = self._read_json_body()
             paths, path_error = self._resolve_body_paths(body.get("paths", []))
-            output_name = Path(str(body.get("outputName", "lerobot-v21"))).name.strip() or "lerobot-v21"
+            output_version = body.get("outputVersion", "v3.0")
+            video_codec = body.get("videoCodec", "h264")
+            if output_version not in lerobot_ops.SUPPORTED_OUTPUT_VERSIONS:
+                return self._error(400, "outputVersion must be 'v2.1' or 'v3.0'.")
+            if video_codec not in lerobot_ops.SUPPORTED_VIDEO_CODECS:
+                return self._error(400, "videoCodec must be 'h264' or 'av1'.")
+            default_output_name = (
+                "lerobot-v3" if output_version == "v3.0" else "lerobot-v21"
+            )
+            output_name = (
+                Path(str(body.get("outputName", default_output_name))).name.strip()
+                or default_output_name
+            )
             skip_failed = bool(body.get("skipFailed", True))
             max_episodes_raw = body.get("maxEpisodes")
             max_episodes = int(max_episodes_raw) if max_episodes_raw is not None else None
@@ -453,6 +481,9 @@ class BackendHandler(BaseHTTPRequestHandler):
                 body.get("modalityPython"),
                 "modalityPython",
             )
+            output_dir, output_dir_error = self._resolve_output_directory(
+                body.get("outputDirectory"),
+            )
             default_task = body.get("defaultTask")
             if default_task is not None and not isinstance(default_task, str):
                 return self._error(400, "defaultTask must be a string.")
@@ -465,12 +496,19 @@ class BackendHandler(BaseHTTPRequestHandler):
             for config_error in (modality_error, conversion_config_error, modality_python_error):
                 if config_error:
                     return self._error(400, config_error)
+            if output_dir_error:
+                return self._error(400, output_dir_error)
             if not paths:
                 return self._error(400, "No input files specified.")
+            if modality_json is None:
+                return self._error(
+                    400,
+                    "modalityJson is required and must be a readable JSON file.",
+                )
             if max_episodes is not None and max_episodes < 1:
                 return self._error(400, "maxEpisodes must be >= 1.")
 
-            output_dir = Path(self.server.output_dir)
+            assert output_dir is not None
             output_path = output_dir / output_name
             counter = 1
             while output_path.exists():
@@ -490,6 +528,8 @@ class BackendHandler(BaseHTTPRequestHandler):
                     max_episodes=max_episodes,
                     default_task=default_task,
                     task_rules=task_rules,
+                    output_version=output_version,
+                    video_codec=video_codec,
                 ):
                     self._send_sse(event)
 

@@ -1,4 +1,5 @@
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -76,6 +77,7 @@ beforeEach(() => {
 
 afterEach(() => {
   useStore.setState({ opened: [] }, false);
+  Reflect.deleteProperty(globalThis, 'rebelHdf5Desktop');
 });
 
 describe('DatasetProcessingPage', () => {
@@ -134,5 +136,103 @@ describe('DatasetProcessingPage', () => {
     expect(
       within(sourceSelect).getByRole('option', { name: 'beta.hdf5' }),
     ).toBeInTheDocument();
+  });
+
+  it('defaults LeRobot conversion to v3 and H.264 and updates the output name', async () => {
+    const user = userEvent.setup();
+    mockBackend({ available: true, rootDir: '/data', version: 10 });
+    useStore.setState({ opened: [remoteFile('run.hdf5')] }, false);
+    renderPage();
+
+    await user.selectOptions(screen.getByLabelText('Operation'), 'lerobot');
+
+    expect(screen.getByLabelText('Output Format')).toHaveValue('v3.0');
+    expect(screen.getByLabelText('Video Codec')).toHaveValue('h264');
+    expect(screen.getByText('run-lerobot-v3')).toBeInTheDocument();
+    expect(screen.getByLabelText('Modality JSON')).toHaveValue('');
+
+    await user.selectOptions(screen.getByLabelText('Output Format'), 'v2.1');
+    expect(screen.getByText('run-lerobot-v21')).toBeInTheDocument();
+    expect(screen.getByText(/V2\.1 keeps one Parquet/u)).toBeInTheDocument();
+  });
+
+  it('sends the selected format and displays conversion warnings', async () => {
+    const user = userEvent.setup();
+    mockBackend({ available: true, rootDir: '/data', version: 10 });
+    useStore.setState({ opened: [remoteFile('run.hdf5')] }, false);
+    mocks.scanFiles.mockResolvedValue({
+      files: [
+        {
+          name: 'run.hdf5',
+          path: 'run.hdf5',
+          demoCount: 1,
+          demoNames: ['demo_0'],
+          keys: [],
+        },
+      ],
+      commonKeys: [],
+    });
+    mocks.runLeRobotConvert.mockImplementation(async (_request, callbacks) => {
+      callbacks.onWarning?.('NVENC failed; using CPU H.264.');
+      return {
+        fileName: 'run-lerobot-v3',
+        demoCount: 1,
+        selectedKeyCount: 0,
+        fileSize: 1,
+        outputType: 'directory',
+      };
+    });
+    renderPage();
+
+    await user.selectOptions(screen.getByLabelText('Operation'), 'lerobot');
+    await user.type(
+      screen.getByLabelText('Modality JSON'),
+      '/tmp/modality.json',
+    );
+    await user.type(
+      screen.getByLabelText('Output Parent Folder'),
+      '/chosen-output',
+    );
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Convert' })).toBeEnabled();
+    });
+    await user.click(screen.getByRole('button', { name: 'Convert' }));
+
+    expect(
+      await screen.findByText('NVENC failed; using CPU H.264.'),
+    ).toBeInTheDocument();
+    expect(mocks.runLeRobotConvert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        outputVersion: 'v3.0',
+        videoCodec: 'h264',
+        outputDirectory: '/chosen-output',
+      }),
+      expect.objectContaining({
+        onProgress: expect.any(Function),
+        onWarning: expect.any(Function),
+      }),
+    );
+  });
+
+  it('chooses a LeRobot output folder with the desktop picker', async () => {
+    const user = userEvent.setup();
+    const chooseDirectory = vi.fn().mockResolvedValue('/picked-output');
+    globalThis.rebelHdf5Desktop = { chooseDirectory };
+    mockBackend({
+      available: true,
+      rootDir: '/data',
+      version: 10,
+      outputDir: '/default-output',
+    });
+    useStore.setState({ opened: [remoteFile('run.hdf5')] }, false);
+    renderPage();
+
+    await user.selectOptions(screen.getByLabelText('Operation'), 'lerobot');
+    await user.click(screen.getByRole('button', { name: 'Browse' }));
+
+    expect(chooseDirectory).toHaveBeenCalledWith('/default-output');
+    expect(screen.getByLabelText('Output Parent Folder')).toHaveValue(
+      '/picked-output',
+    );
   });
 });

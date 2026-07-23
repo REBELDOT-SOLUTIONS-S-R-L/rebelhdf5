@@ -6,7 +6,14 @@ const fsp = require('node:fs/promises');
 const http = require('node:http');
 const path = require('node:path');
 
-const { app, BrowserWindow, dialog, session, shell } = require('electron');
+const {
+  app,
+  BrowserWindow,
+  dialog,
+  ipcMain,
+  session,
+  shell,
+} = require('electron');
 
 const {
   checkBackendHealth,
@@ -60,6 +67,21 @@ let backendProcess = null;
 let staticServer = null;
 let mainWindow = null;
 let quitting = false;
+
+ipcMain.handle('rebelhdf5:choose-directory', async (event, defaultPath) => {
+  if (!mainWindow || event.sender.id !== mainWindow.webContents.id) {
+    return undefined;
+  }
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Choose LeRobot output folder',
+    defaultPath:
+      typeof defaultPath === 'string' && defaultPath.length > 0
+        ? defaultPath
+        : undefined,
+    properties: ['openDirectory', 'createDirectory'],
+  });
+  return result.canceled ? undefined : result.filePaths[0];
+});
 
 function configureFileSystemAccess() {
   session.defaultSession.setPermissionCheckHandler(
