@@ -23,7 +23,7 @@ export interface AttributeTreeNode {
 
 /** Render an attribute value for display: strings as-is, everything else JSON. */
 export function formatAttrValue(value: unknown): string {
-  if (value == null) {
+  if (value === null || value === undefined) {
     return '-';
   }
 
@@ -96,7 +96,7 @@ export function buildSlashTree(
     });
   }
 
-  const toNode = (node: MutableNode): AttributeTreeNode => {
+  function toNode(node: MutableNode): AttributeTreeNode {
     const sortedChildren = [...node.children.values()].sort((left, right) =>
       left.name.localeCompare(right.name),
     );
@@ -111,7 +111,7 @@ export function buildSlashTree(
       value: node.isLeaf ? formatAttrValue(node.value) : undefined,
       children: sortedChildren.map(toNode),
     };
-  };
+  }
 
   return [...root.children.values()]
     .sort((left, right) => left.name.localeCompare(right.name))
@@ -123,12 +123,12 @@ export function formatGroupTitle(path: string): string {
   if (path === '/' || path === '') {
     return '/.attrs';
   }
-  return `${path.replace(/^\//, '')}.attrs`;
+  return `${path.replace(/^\//u, '')}.attrs`;
 }
 
 /** Pretty-print a leaf value, expanding JSON objects/arrays with indentation. */
 export function prettifyLeafValue(formatted: string | undefined): string {
-  if (formatted == null || formatted === '') {
+  if (formatted === undefined || formatted === '') {
     return '-';
   }
   try {
@@ -151,7 +151,7 @@ export function makeSegmentId(name: string): string {
 export function rowsFromArticulation(
   articulation: DatasetArticulation,
 ): SegmentRow[] {
-  return Object.entries(articulation.segmentation ?? {})
+  return Object.entries(articulation.segmentation)
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([name, segment]) => ({
       id: makeSegmentId(name),
@@ -165,7 +165,7 @@ export function rowsFromArticulation(
 export function endEffectorRowsFromArticulation(
   articulation: DatasetArticulation,
 ): EndEffectorRow[] {
-  return Object.entries(articulation.end_effectors ?? {})
+  return Object.entries(articulation.end_effectors)
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([name, endEffector]) => ({
       id: makeSegmentId(name),
@@ -218,7 +218,7 @@ export function articulationFromRows(
 
 /** Return an error message if row names are blank or duplicated, else null. */
 export function validateNamedRows(
-  rows: Array<{ name: string }>,
+  rows: { name: string }[],
   label: string,
 ): string | null {
   const names = new Set<string>();

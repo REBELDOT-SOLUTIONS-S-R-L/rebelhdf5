@@ -1,36 +1,38 @@
-import h5wasm, {
+import { Plugin } from '@h5web/h5wasm';
+import {
   type Dataset as H5WasmDataset,
   type Entity,
   type File as H5WasmFile,
   type Group as H5WasmGroup,
+  h5wasm,
 } from 'h5wasm';
-import { Plugin } from '@h5web/h5wasm';
 
+import { formatUnknownError } from '../error-utils';
 import { getPlugin } from '../plugin-utils';
-import { OBJECT_DISTRIBUTION_ANCHORS } from './types';
-import type {
-  ArticulationEndEffector,
-  ArticulationJoint,
-  ArticulationSegment,
-  ObjectDistributionAnchor,
-  ObjectDistributionSourceDiagnostics,
-  ObjectDistributionCategory,
-  ObjectDistributionPoint,
-  ObjectDistributionRequest,
-  ObjectDistributionResult,
-  ObjectDistributionSourceDetail,
-  DemoInfo,
-  DemoRow,
-  DatasetComparisonValue,
-  DatasetComparisonValuesResult,
-  DatasetProcessingProgress,
-  DatasetProcessingRequest,
-  DatasetProcessingSourceInfo,
-  DatasetProcessingResultMeta,
-  DemoVideoInfo,
-  DemoVideoKey,
-  ParsedArticulation,
-  SourceFeatureCapabilities,
+import {
+  type ArticulationEndEffector,
+  type ArticulationJoint,
+  type ArticulationSegment,
+  type DatasetComparisonValue,
+  type DatasetComparisonValuesResult,
+  type DatasetProcessingProgress,
+  type DatasetProcessingRequest,
+  type DatasetProcessingResultMeta,
+  type DatasetProcessingSourceInfo,
+  type DemoInfo,
+  type DemoRow,
+  type DemoVideoInfo,
+  type DemoVideoKey,
+  OBJECT_DISTRIBUTION_ANCHORS,
+  type ObjectDistributionAnchor,
+  type ObjectDistributionCategory,
+  type ObjectDistributionPoint,
+  type ObjectDistributionRequest,
+  type ObjectDistributionResult,
+  type ObjectDistributionSourceDetail,
+  type ObjectDistributionSourceDiagnostics,
+  type ParsedArticulation,
+  type SourceFeatureCapabilities,
 } from './types';
 
 type PoseSeries = number[][][];
@@ -41,51 +43,51 @@ type H5WasmCompressionConfig = Pick<
   'compression' | 'compression_opts'
 >;
 
-type OpenLocalSourcePayload = {
+interface OpenLocalSourcePayload {
   file: File;
-};
+}
 
-type OpenRemoteSourcePayload = {
+interface OpenRemoteSourcePayload {
   buffer: ArrayBuffer;
   name: string;
-};
+}
 
-type LoadDemoRowsPayload = {
+interface LoadDemoRowsPayload {
   sourceId: string;
   demoName: string;
-};
+}
 
-type GetDatasetProcessingInfoPayload = {
+interface GetDatasetProcessingInfoPayload {
   sourceId: string;
-};
+}
 
-type InspectSourceFeaturesPayload = {
+interface InspectSourceFeaturesPayload {
   sourceId: string;
-};
+}
 
-type LoadDatasetComparisonValuesPayload = {
+interface LoadDatasetComparisonValuesPayload {
   sourceId: string;
   demoName: string;
   keyPaths: string[];
-};
+}
 
 type LoadObjectDistributionPayload = ObjectDistributionRequest;
 type ProcessDatasetPayload = DatasetProcessingRequest;
 
-type ListDemoVideosPayload = {
+interface ListDemoVideosPayload {
   sourceId: string;
   demoName: string;
-};
+}
 
-type LoadDemoVideoPayload = {
+interface LoadDemoVideoPayload {
   sourceId: string;
   demoName: string;
   videoKey: DemoVideoKey;
-};
+}
 
-type CloseSourcePayload = {
+interface CloseSourcePayload {
   sourceId: string;
-};
+}
 
 type PoseTraceWorkerRequest =
   | { id: number; type: 'openLocalSource'; payload: OpenLocalSourcePayload }
@@ -122,12 +124,12 @@ type LoadDemoVideoResult = DemoVideoInfo & {
 
 type ProcessDatasetResult = DatasetProcessingResultMeta;
 
-type OpenSourceResultPayload = {
+interface OpenSourceResultPayload {
   sourceId: string;
   datasetName: string;
   demos: DemoInfo[];
   articulation: ParsedArticulation | null;
-};
+}
 
 type PoseTraceWorkerResponse =
   | {
@@ -198,19 +200,23 @@ interface TeleopSource {
 const PLUGIN_ROOT = '/plugins';
 const FILTER_PLUGIN_NAMES: Record<number, Plugin> = {
   307: Plugin.BZIP2,
-  32000: Plugin.LZF,
-  32001: Plugin.Blosc,
-  32004: Plugin.LZ4,
-  32008: Plugin.Bitshuffle,
-  32013: Plugin.ZFP,
-  32015: Plugin.Zstandard,
-  32019: Plugin.JPEG,
-  32026: Plugin.Blosc2,
+  32_000: Plugin.LZF,
+  32_001: Plugin.Blosc,
+  32_004: Plugin.LZ4,
+  32_008: Plugin.Bitshuffle,
+  32_013: Plugin.ZFP,
+  32_015: Plugin.Zstandard,
+  32_019: Plugin.JPEG,
+  32_026: Plugin.Blosc2,
 };
 
 const openSources = new Map<string, OpenSourceEntry>();
 let modulePromise: Promise<H5Module> | null = null;
-const workerScope = self as unknown as {
+const workerScope = globalThis as unknown as {
+  addEventListener: (
+    type: 'message',
+    listener: (event: MessageEvent<PoseTraceWorkerRequest>) => void,
+  ) => void;
   postMessage: (
     message: PoseTraceWorkerResponse,
     transfer?: Transferable[],
@@ -218,11 +224,11 @@ const workerScope = self as unknown as {
 };
 
 function sanitizeFilename(filename: string): string {
-  return filename.replaceAll(/[^a-zA-Z0-9._-]/g, '_');
+  return filename.replaceAll(/[^\w\-.]/gu, '_');
 }
 
 function stripExtension(filename: string): string {
-  return filename.replace(/\.(hdf5|h5)$/i, '');
+  return filename.replace(/\.(?:h5|hdf5)$/iu, '');
 }
 
 function uniqueName(prefix: string): string {
@@ -267,7 +273,7 @@ async function ensureModule(): Promise<H5Module> {
 function demoSortKey(name: string): [number, number, string] {
   if (name.startsWith('demo_')) {
     const suffix = name.slice('demo_'.length);
-    if (/^\d+$/.test(suffix)) {
+    if (/^\d+$/u.test(suffix)) {
       return [0, Number(suffix), name];
     }
   }
@@ -276,7 +282,7 @@ function demoSortKey(name: string): [number, number, string] {
 }
 
 function optionalInt(value: unknown): number | null {
-  if (value == null || value === '') {
+  if (value === null || value === undefined || value === '') {
     return null;
   }
 
@@ -293,7 +299,7 @@ function optionalInt(value: unknown): number | null {
 }
 
 function optionalBool(value: unknown): boolean | null {
-  if (value == null || value === '') {
+  if (value === null || value === undefined || value === '') {
     return null;
   }
 
@@ -307,8 +313,12 @@ function optionalBool(value: unknown): boolean | null {
 
   if (typeof value === 'string') {
     const normalized = value.trim().toLowerCase();
-    if (normalized === '0' || normalized === 'false') return false;
-    if (normalized === '1' || normalized === 'true') return true;
+    if (normalized === '0' || normalized === 'false') {
+      return false;
+    }
+    if (normalized === '1' || normalized === 'true') {
+      return true;
+    }
     return normalized.length > 0;
   }
 
@@ -328,7 +338,9 @@ function isDataset(entity: Entity | null): entity is H5WasmDataset {
 }
 
 function getAttributeValue(group: H5WasmGroup, name: string): unknown {
-  return group.attrs[name]?.json_value;
+  return Object.hasOwn(group.attrs, name)
+    ? group.attrs[name].json_value
+    : undefined;
 }
 
 function maybeChildGroup(group: H5WasmGroup, name: string): H5WasmGroup | null {
@@ -531,8 +543,8 @@ function listCameraNames(demoGroup: H5WasmGroup): string[] {
 
 function humanizeCameraLabel(name: string): string {
   return name
-    .replaceAll(/[_-]+/g, ' ')
-    .replaceAll(/\s+/g, ' ')
+    .replaceAll(/[-_]+/gu, ' ')
+    .replaceAll(/\s+/gu, ' ')
     .trim()
     .split(' ')
     .map((word) =>
@@ -639,9 +651,9 @@ function extractXYZAtStep(
   }
 
   const frame = poseSeries[stepIdx];
-  const x = frame?.[0]?.[3];
-  const y = frame?.[1]?.[3];
-  const z = frame?.[2]?.[3];
+  const x = frame[0]?.[3];
+  const y = frame[1]?.[3];
+  const z = frame[2]?.[3];
 
   if (typeof x !== 'number' || typeof y !== 'number' || typeof z !== 'number') {
     return null;
@@ -734,7 +746,7 @@ function parseIndexRange(
   if (Array.isArray(coerced) && coerced.length === 2) {
     const start = optionalInt(coerced[0]);
     const end = optionalInt(coerced[1]);
-    if (start != null && end != null && start <= end) {
+    if (start !== null && end !== null && start <= end) {
       return { start, end };
     }
   }
@@ -770,7 +782,7 @@ function parseJointIndices(
   for (const entry of coerced) {
     if (Array.isArray(entry) && entry.length >= 2) {
       const index = optionalInt(entry[1]);
-      if (index == null) {
+      if (index === null) {
         continue;
       }
       joints.push({
@@ -789,7 +801,7 @@ function parseJointIndices(
     const index = optionalInt(
       record.column_index ?? record.index ?? record.joint_index,
     );
-    if (index == null) {
+    if (index === null) {
       continue;
     }
 
@@ -883,7 +895,7 @@ function readStandardArticulationsFromAttrs(dataGroup: H5WasmGroup): unknown {
     ...new Set(
       Object.keys(dataGroup.attrs)
         .map((key) => key.match(/^articulations\/([^/]+)\//u)?.[1])
-        .filter((name): name is string => Boolean(name)),
+        .filter((name): name is string => name !== undefined),
     ),
   ].sort((left, right) => left.localeCompare(right));
 
@@ -901,7 +913,7 @@ function readStandardArticulationsFromAttrs(dataGroup: H5WasmGroup): unknown {
     const articulationJointNumber = optionalInt(
       getAttributeValue(dataGroup, `${prefix}/joint_number`),
     );
-    if (articulationJointNumber != null) {
+    if (articulationJointNumber !== null) {
       jointNumber += articulationJointNumber;
       hasJointNumber = true;
     }
@@ -939,7 +951,7 @@ function readArticulationFromAttrs(dataGroup: H5WasmGroup): unknown {
   }
 
   const direct = getAttributeValue(dataGroup, 'articulation');
-  if (direct != null) {
+  if (direct !== null && direct !== undefined) {
     return coerceArticulationValue(direct);
   }
 
@@ -1021,112 +1033,144 @@ function parseInclusiveRange(
   return parseIndexRange(value);
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function parseArticulationSegments(raw: unknown): ArticulationSegment[] {
+  const segmentation: ArticulationSegment[] = [];
+  if (!isRecord(raw)) {
+    return segmentation;
+  }
+
+  for (const [segmentName, value] of Object.entries(raw)) {
+    if (!isRecord(value)) {
+      continue;
+    }
+    const targetRange = parseInclusiveRange(value.target);
+    const obsRange = parseInclusiveRange(value.obs);
+    if (!targetRange || !obsRange) {
+      continue;
+    }
+    segmentation.push({
+      name: segmentName,
+      targetStart: targetRange.start,
+      targetEnd: targetRange.end,
+      obsStart: obsRange.start,
+      obsEnd: obsRange.end,
+    });
+  }
+  return segmentation.sort((left, right) =>
+    left.name.localeCompare(right.name),
+  );
+}
+
+function parseArrayEndEffectors(values: unknown[]): ArticulationEndEffector[] {
+  const endEffectors: ArticulationEndEffector[] = [];
+  for (const value of values) {
+    if (!isRecord(value)) {
+      continue;
+    }
+    const poseStart = optionalInt(value.poseStart);
+    const poseEnd = optionalInt(value.poseEnd);
+    if (
+      typeof value.name !== 'string' ||
+      poseStart === null ||
+      poseEnd === null
+    ) {
+      continue;
+    }
+
+    const poseOrder = Array.isArray(value.poseOrder)
+      ? value.poseOrder.filter(
+          (entry): entry is string => typeof entry === 'string',
+        )
+      : [];
+    endEffectors.push({
+      name: value.name,
+      poseStart,
+      poseEnd,
+      poseOrder,
+      gripperStart: optionalInt(value.gripperStart),
+      gripperEnd: optionalInt(value.gripperEnd),
+    });
+  }
+  return endEffectors.sort((left, right) =>
+    left.name.localeCompare(right.name),
+  );
+}
+
+function parseMappedEndEffectors(
+  values: Record<string, unknown>,
+): ArticulationEndEffector[] {
+  const endEffectors: ArticulationEndEffector[] = [];
+  for (const [name, value] of Object.entries(values)) {
+    if (!isRecord(value)) {
+      continue;
+    }
+    const poseRange = parseInclusiveRange(value.pose);
+    const gripperRange = parseInclusiveRange(value.gripper);
+    if (!poseRange) {
+      continue;
+    }
+    endEffectors.push({
+      name,
+      poseStart: poseRange.start,
+      poseEnd: poseRange.end,
+      poseOrder: [],
+      gripperStart: gripperRange?.start ?? null,
+      gripperEnd: gripperRange?.end ?? null,
+    });
+  }
+  return endEffectors.sort((left, right) =>
+    left.name.localeCompare(right.name),
+  );
+}
+
+function parseArticulationEndEffectors(
+  raw: unknown,
+): ArticulationEndEffector[] {
+  if (Array.isArray(raw)) {
+    return parseArrayEndEffectors(raw);
+  }
+  return isRecord(raw) ? parseMappedEndEffectors(raw) : [];
+}
+
+function parseArticulationJoints(raw: unknown): ArticulationJoint[] {
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+
+  return raw.flatMap((value) => {
+    if (
+      !isRecord(value) ||
+      typeof value.articulationName !== 'string' ||
+      typeof value.name !== 'string' ||
+      typeof value.index !== 'number' ||
+      !Number.isInteger(value.index)
+    ) {
+      return [];
+    }
+    return [
+      {
+        articulationName: value.articulationName,
+        name: value.name,
+        index: value.index,
+      },
+    ];
+  });
+}
+
 function parseArticulation(raw: unknown): ParsedArticulation | null {
-  if (!raw || typeof raw !== 'object') {
+  if (!isRecord(raw)) {
     return null;
   }
 
-  const rawRecord = raw as Record<string, unknown>;
-  const name = typeof rawRecord.name === 'string' ? rawRecord.name : '';
-  const jointNumberRaw = rawRecord.joint_number;
-  const jointNumber = optionalInt(jointNumberRaw);
-
-  const segmentation: ArticulationSegment[] = [];
-  const segRaw = rawRecord.segmentation;
-  if (segRaw && typeof segRaw === 'object' && !Array.isArray(segRaw)) {
-    for (const [segName, segValue] of Object.entries(
-      segRaw as Record<string, unknown>,
-    )) {
-      if (!segValue || typeof segValue !== 'object') {
-        continue;
-      }
-      const segRecord = segValue as Record<string, unknown>;
-      const targetRange = parseInclusiveRange(segRecord.target);
-      const obsRange = parseInclusiveRange(segRecord.obs);
-      if (!targetRange || !obsRange) {
-        continue;
-      }
-      segmentation.push({
-        name: segName,
-        targetStart: targetRange.start,
-        targetEnd: targetRange.end,
-        obsStart: obsRange.start,
-        obsEnd: obsRange.end,
-      });
-    }
-    segmentation.sort((left, right) => left.name.localeCompare(right.name));
-  }
-
-  const endEffectors: ArticulationEndEffector[] = [];
-  const eefRaw = rawRecord.end_effectors;
-  if (Array.isArray(eefRaw)) {
-    for (const eefValue of eefRaw) {
-      if (
-        !eefValue ||
-        typeof eefValue !== 'object' ||
-        Array.isArray(eefValue)
-      ) {
-        continue;
-      }
-      const eefRecord = eefValue as Record<string, unknown>;
-      const poseStart = optionalInt(eefRecord.poseStart);
-      const poseEnd = optionalInt(eefRecord.poseEnd);
-      if (
-        typeof eefRecord.name !== 'string' ||
-        poseStart == null ||
-        poseEnd == null
-      ) {
-        continue;
-      }
-
-      const poseOrder = Array.isArray(eefRecord.poseOrder)
-        ? eefRecord.poseOrder.filter(
-            (entry): entry is string => typeof entry === 'string',
-          )
-        : [];
-      endEffectors.push({
-        name: eefRecord.name,
-        poseStart,
-        poseEnd,
-        poseOrder,
-        gripperStart: optionalInt(eefRecord.gripperStart),
-        gripperEnd: optionalInt(eefRecord.gripperEnd),
-      });
-    }
-    endEffectors.sort((left, right) => left.name.localeCompare(right.name));
-  } else if (eefRaw && typeof eefRaw === 'object') {
-    for (const [eefName, eefValue] of Object.entries(
-      eefRaw as Record<string, unknown>,
-    )) {
-      if (!eefValue || typeof eefValue !== 'object') {
-        continue;
-      }
-      const eefRecord = eefValue as Record<string, unknown>;
-      const poseRange = parseInclusiveRange(eefRecord.pose);
-      const gripperRange = parseInclusiveRange(eefRecord.gripper);
-      if (!poseRange) {
-        continue;
-      }
-      endEffectors.push({
-        name: eefName,
-        poseStart: poseRange.start,
-        poseEnd: poseRange.end,
-        poseOrder: [],
-        gripperStart: gripperRange?.start ?? null,
-        gripperEnd: gripperRange?.end ?? null,
-      });
-    }
-    endEffectors.sort((left, right) => left.name.localeCompare(right.name));
-  }
-
-  const joints = Array.isArray(rawRecord.joints)
-    ? (rawRecord.joints as ArticulationJoint[]).filter(
-        (joint) =>
-          typeof joint.articulationName === 'string' &&
-          typeof joint.name === 'string' &&
-          Number.isInteger(joint.index),
-      )
-    : [];
+  const name = typeof raw.name === 'string' ? raw.name : '';
+  const jointNumber = optionalInt(raw.joint_number);
+  const segmentation = parseArticulationSegments(raw.segmentation);
+  const endEffectors = parseArticulationEndEffectors(raw.end_effectors);
+  const joints = parseArticulationJoints(raw.joints);
 
   if (
     !name &&
@@ -1201,12 +1245,12 @@ function read2DDataset(
     return null;
   }
 
-  const rows: number[][] = new Array(rowCount);
+  const rows = Array.from({ length: rowCount }, (): number[] => []);
   for (let rowIdx = 0; rowIdx < rowCount; rowIdx += 1) {
     const offset = rowIdx * colCount;
-    const row: number[] = new Array(colCount);
+    const row = Array.from({ length: colCount }, () => 0);
     for (let colIdx = 0; colIdx < colCount; colIdx += 1) {
-      row[colIdx] = Number(flatSource[offset + colIdx]);
+      row[colIdx] = flatSource[offset + colIdx];
     }
     rows[rowIdx] = row;
   }
@@ -1276,7 +1320,7 @@ function poseComponentColumn(
 ): number {
   const fallbackOffset = component === 'x' ? 0 : component === 'y' ? 1 : 2;
   const poseOrderOffset = eef.poseOrder.indexOf(component);
-  const offset = poseOrderOffset >= 0 ? poseOrderOffset : fallbackOffset;
+  const offset = poseOrderOffset !== -1 ? poseOrderOffset : fallbackOffset;
   const column = eef.poseStart + offset;
   return column < eef.poseEnd ? column : -1;
 }
@@ -1325,20 +1369,154 @@ function loadObjectKeypointPoses(
   );
 }
 
-function buildDemoRows(entry: OpenSourceEntry, demoName: string): DemoRow[] {
-  const demoGroup = getDemoGroup(entry, demoName);
-  const articulation = entry.articulation;
+function assignPoseCoordinates(
+  row: DemoRow,
+  stepIndex: number,
+  poses: Record<string, PoseSeries>,
+  prefixes: string[],
+): void {
+  const output = row;
+  for (const name of Object.keys(poses).sort((left, right) =>
+    left.localeCompare(right),
+  )) {
+    const xyz = extractXYZAtStep(poses[name], stepIndex);
+    for (const prefix of prefixes) {
+      output[`${prefix}_${name}_x`] = xyz?.[0] ?? null;
+      output[`${prefix}_${name}_y`] = xyz?.[1] ?? null;
+      output[`${prefix}_${name}_z`] = xyz?.[2] ?? null;
+    }
+  }
+}
 
-  const eefPosePostStepGroup = findPoseGroup(demoGroup, 'eef_pose_post_step');
+function assignActionPoseTargets(
+  row: DemoRow,
+  stepIndex: number,
+  actionsPose: number[][] | null,
+  endEffectors: ArticulationEndEffector[],
+): void {
+  const output = row;
+  for (const endEffector of endEffectors) {
+    const targetX = extractColumnAtStep(
+      actionsPose,
+      stepIndex,
+      poseComponentColumn(endEffector, 'x'),
+    );
+    const targetY = extractColumnAtStep(
+      actionsPose,
+      stepIndex,
+      poseComponentColumn(endEffector, 'y'),
+    );
+    const targetZ = extractColumnAtStep(
+      actionsPose,
+      stepIndex,
+      poseComponentColumn(endEffector, 'z'),
+    );
+    for (const prefix of ['target_eef', 'ik_input_eef']) {
+      output[`${prefix}_${endEffector.name}_x`] = targetX;
+      output[`${prefix}_${endEffector.name}_y`] = targetY;
+      output[`${prefix}_${endEffector.name}_z`] = targetZ;
+    }
+  }
+}
+
+function assignSegmentJointValues(
+  row: DemoRow,
+  stepIndex: number,
+  segments: ArticulationSegment[],
+  actionsJoints: number[][] | null,
+  obsJointPosition: number[][] | null,
+): void {
+  const output = row;
+  for (const segment of segments) {
+    const jointCount = Math.min(
+      segment.targetEnd - segment.targetStart + 1,
+      segment.obsEnd - segment.obsStart + 1,
+    );
+    for (let offset = 0; offset < jointCount; offset += 1) {
+      const targetColumn = segment.targetStart + offset;
+      const observationColumn = segment.obsStart + offset;
+      output[`joint_target_${segment.name}_${targetColumn}`] =
+        extractColumnAtStep(actionsJoints, stepIndex, targetColumn);
+      output[`joint_obs_${segment.name}_${targetColumn}`] = extractColumnAtStep(
+        obsJointPosition,
+        stepIndex,
+        observationColumn,
+      );
+    }
+  }
+}
+
+function assignNamedJointValues(
+  row: DemoRow,
+  stepIndex: number,
+  joints: ArticulationJoint[],
+  actionsJoints: number[][] | null,
+  obsByArticulation: Record<string, number[][] | null>,
+): void {
+  const output = row;
+  for (const joint of joints) {
+    const rowKey = makeJointRowKey(
+      joint.articulationName,
+      joint.name,
+      joint.index,
+    );
+    output[`joint_target_${rowKey}`] = extractColumnAtStep(
+      actionsJoints,
+      stepIndex,
+      joint.index,
+    );
+    output[`joint_obs_${rowKey}`] = extractColumnAtStep(
+      obsByArticulation[joint.articulationName] ?? null,
+      stepIndex,
+      joint.index,
+    );
+  }
+}
+
+function collectDemoArrayLengths(
+  poseArrays: PoseSeries[],
+  matrixArrays: (number[][] | null)[],
+): number[] {
+  const validPoseLengths = poseArrays
+    .filter((series) =>
+      series.every((frame) => Array.isArray(frame) && frame.length === 4),
+    )
+    .map((series) => series.length);
+  const matrixLengths = matrixArrays.flatMap((data) =>
+    data ? [data.length] : [],
+  );
+  return [...validPoseLengths, ...matrixLengths];
+}
+
+interface DemoRowSources {
+  actionsJoints: number[][] | null;
+  actionsPose: number[][] | null;
+  eefPose: Record<string, PoseSeries>;
+  eefPosePostStep: Record<string, PoseSeries>;
+  endEffectors: ArticulationEndEffector[];
+  joints: ArticulationJoint[];
+  legacyTargetEefPose: Record<string, PoseSeries>;
+  objectPose: Record<string, PoseSeries>;
+  obsJointPosition: number[][] | null;
+  obsJointPositionByArticulation: Record<string, number[][] | null>;
+  segments: ArticulationSegment[];
+  usesActionsPoseTarget: boolean;
+}
+
+function loadDemoRowSources(
+  demoGroup: H5WasmGroup,
+  articulation: ParsedArticulation | null,
+): DemoRowSources {
   const eefPose = loadEndEffectorPoses(demoGroup);
-  const eefPosePostStep = loadPoseArrays(eefPosePostStepGroup);
+  const eefPosePostStep = loadPoseArrays(
+    findPoseGroup(demoGroup, 'eef_pose_post_step'),
+  );
   const objectPose = loadObjectKeypointPoses(demoGroup);
-
-  const usesActionsPoseTarget = (articulation?.endEffectors.length ?? 0) > 0;
+  const endEffectors = articulation?.endEffectors ?? [];
+  const usesActionsPoseTarget = endEffectors.length > 0;
   const actionsPose = usesActionsPoseTarget
     ? read2DDataset(demoGroup, 'actions/pose')
     : null;
-
   let legacyTargetEefPose: Record<string, PoseSeries> = {};
   if (!usesActionsPoseTarget) {
     const legacyTargetGroup =
@@ -1347,13 +1525,13 @@ function buildDemoRows(entry: OpenSourceEntry, demoName: string): DemoRow[] {
     legacyTargetEefPose = loadPoseArrays(legacyTargetGroup);
   }
 
-  const articulationName = articulation?.name?.trim() ?? '';
   const segments = articulation?.segmentation ?? [];
   const joints = articulation?.joints ?? [];
   const actionsJoints =
     segments.length > 0 || joints.length > 0
       ? read2DDataset(demoGroup, 'actions/joints')
       : null;
+  const articulationName = articulation?.name.trim() ?? '';
   const obsJointPositionPath =
     segments.length > 0
       ? findObsJointPositionPath(demoGroup, articulationName)
@@ -1362,55 +1540,113 @@ function buildDemoRows(entry: OpenSourceEntry, demoName: string): DemoRow[] {
     ? read2DDataset(demoGroup, obsJointPositionPath)
     : null;
   const obsJointPositionByArticulation: Record<string, number[][] | null> = {};
-  for (const jointArticulationName of [
-    ...new Set(joints.map((joint) => joint.articulationName)),
-  ]) {
-    const path = findObsJointPositionPath(demoGroup, jointArticulationName);
-    obsJointPositionByArticulation[jointArticulationName] = path
+  for (const articulationJointName of new Set(
+    joints.map((joint) => joint.articulationName),
+  )) {
+    const path = findObsJointPositionPath(demoGroup, articulationJointName);
+    obsJointPositionByArticulation[articulationJointName] = path
       ? read2DDataset(demoGroup, path)
       : null;
   }
-  const hasMappedObsJointPosition = Object.values(
-    obsJointPositionByArticulation,
-  ).some((data) => data != null);
 
-  if (
-    Object.keys(eefPose).length === 0 &&
-    Object.keys(legacyTargetEefPose).length === 0 &&
-    Object.keys(eefPosePostStep).length === 0 &&
-    Object.keys(objectPose).length === 0 &&
-    !actionsPose &&
-    !actionsJoints &&
-    !obsJointPosition &&
-    !hasMappedObsJointPosition
-  ) {
+  return {
+    actionsJoints,
+    actionsPose,
+    eefPose,
+    eefPosePostStep,
+    endEffectors,
+    joints,
+    legacyTargetEefPose,
+    objectPose,
+    obsJointPosition,
+    obsJointPositionByArticulation,
+    segments,
+    usesActionsPoseTarget,
+  };
+}
+
+function hasDemoRowData(sources: DemoRowSources): boolean {
+  const poseCount = [
+    sources.eefPose,
+    sources.legacyTargetEefPose,
+    sources.eefPosePostStep,
+    sources.objectPose,
+  ].reduce((count, poses) => count + Object.keys(poses).length, 0);
+  const hasMatrix = [
+    sources.actionsPose,
+    sources.actionsJoints,
+    sources.obsJointPosition,
+    ...Object.values(sources.obsJointPositionByArticulation),
+  ].some((data) => data !== null);
+  return poseCount > 0 || hasMatrix;
+}
+
+function getDemoRowArrayLengths(sources: DemoRowSources): number[] {
+  return collectDemoArrayLengths(
+    [
+      ...Object.values(sources.eefPose),
+      ...Object.values(sources.legacyTargetEefPose),
+      ...Object.values(sources.eefPosePostStep),
+      ...Object.values(sources.objectPose),
+    ],
+    [
+      sources.actionsPose,
+      sources.actionsJoints,
+      sources.obsJointPosition,
+      ...Object.values(sources.obsJointPositionByArticulation),
+    ],
+  );
+}
+
+function assignDemoRowValues(
+  row: DemoRow,
+  stepIndex: number,
+  sources: DemoRowSources,
+): void {
+  assignPoseCoordinates(row, stepIndex, sources.eefPose, ['eef']);
+  if (sources.usesActionsPoseTarget) {
+    assignActionPoseTargets(
+      row,
+      stepIndex,
+      sources.actionsPose,
+      sources.endEffectors,
+    );
+  } else {
+    assignPoseCoordinates(row, stepIndex, sources.legacyTargetEefPose, [
+      'target_eef',
+      'ik_input_eef',
+    ]);
+  }
+  assignPoseCoordinates(row, stepIndex, sources.eefPosePostStep, [
+    'eef_post_step',
+  ]);
+  assignPoseCoordinates(row, stepIndex, sources.objectPose, ['object']);
+  assignSegmentJointValues(
+    row,
+    stepIndex,
+    sources.segments,
+    sources.actionsJoints,
+    sources.obsJointPosition,
+  );
+  assignNamedJointValues(
+    row,
+    stepIndex,
+    sources.joints,
+    sources.actionsJoints,
+    sources.obsJointPositionByArticulation,
+  );
+}
+
+function buildDemoRows(entry: OpenSourceEntry, demoName: string): DemoRow[] {
+  const demoGroup = getDemoGroup(entry, demoName);
+  const sources = loadDemoRowSources(demoGroup, entry.articulation);
+  if (!hasDemoRowData(sources)) {
     throw new Error(
       `Demo '${demoName}' does not contain usable pose datasets.`,
     );
   }
 
-  const poseArrays = [
-    ...Object.values(eefPose),
-    ...Object.values(legacyTargetEefPose),
-    ...Object.values(eefPosePostStep),
-    ...Object.values(objectPose),
-  ];
-  const poseLengths = poseArrays
-    .filter((series) =>
-      series.every((frame) => Array.isArray(frame) && frame.length === 4),
-    )
-    .map((series) => series.length);
-
-  const arrayLengths: number[] = [...poseLengths];
-  if (actionsPose) arrayLengths.push(actionsPose.length);
-  if (actionsJoints) arrayLengths.push(actionsJoints.length);
-  if (obsJointPosition) arrayLengths.push(obsJointPosition.length);
-  for (const mappedObsJointPosition of Object.values(
-    obsJointPositionByArticulation,
-  )) {
-    if (mappedObsJointPosition)
-      arrayLengths.push(mappedObsJointPosition.length);
-  }
+  const arrayLengths = getDemoRowArrayLengths(sources);
 
   if (arrayLengths.length === 0) {
     throw new Error(
@@ -1439,118 +1675,12 @@ function buildDemoRows(entry: OpenSourceEntry, demoName: string): DemoRow[] {
       episode_step: stepIdx,
       source_episode_index: sourceEpisodeIndex,
       num_samples: storedNumSamples ?? numSteps,
-      success: successValue == null ? null : Number(successValue),
+      success: successValue === null ? null : Number(successValue),
       completed_attempts: null,
       completed_successes: null,
     };
 
-    for (const eefName of Object.keys(eefPose).sort((left, right) =>
-      left.localeCompare(right),
-    )) {
-      const xyz = extractXYZAtStep(eefPose[eefName], stepIdx);
-      row[`eef_${eefName}_x`] = xyz?.[0] ?? null;
-      row[`eef_${eefName}_y`] = xyz?.[1] ?? null;
-      row[`eef_${eefName}_z`] = xyz?.[2] ?? null;
-    }
-
-    if (usesActionsPoseTarget && articulation) {
-      for (const eef of articulation.endEffectors) {
-        const targetX = extractColumnAtStep(
-          actionsPose,
-          stepIdx,
-          poseComponentColumn(eef, 'x'),
-        );
-        const targetY = extractColumnAtStep(
-          actionsPose,
-          stepIdx,
-          poseComponentColumn(eef, 'y'),
-        );
-        const targetZ = extractColumnAtStep(
-          actionsPose,
-          stepIdx,
-          poseComponentColumn(eef, 'z'),
-        );
-        row[`target_eef_${eef.name}_x`] = targetX;
-        row[`target_eef_${eef.name}_y`] = targetY;
-        row[`target_eef_${eef.name}_z`] = targetZ;
-        row[`ik_input_eef_${eef.name}_x`] = targetX;
-        row[`ik_input_eef_${eef.name}_y`] = targetY;
-        row[`ik_input_eef_${eef.name}_z`] = targetZ;
-      }
-    } else {
-      for (const eefName of Object.keys(legacyTargetEefPose).sort(
-        (left, right) => left.localeCompare(right),
-      )) {
-        const targetXYZ = extractXYZAtStep(
-          legacyTargetEefPose[eefName],
-          stepIdx,
-        );
-        row[`target_eef_${eefName}_x`] = targetXYZ?.[0] ?? null;
-        row[`target_eef_${eefName}_y`] = targetXYZ?.[1] ?? null;
-        row[`target_eef_${eefName}_z`] = targetXYZ?.[2] ?? null;
-        row[`ik_input_eef_${eefName}_x`] = targetXYZ?.[0] ?? null;
-        row[`ik_input_eef_${eefName}_y`] = targetXYZ?.[1] ?? null;
-        row[`ik_input_eef_${eefName}_z`] = targetXYZ?.[2] ?? null;
-      }
-    }
-
-    for (const eefName of Object.keys(eefPosePostStep).sort((left, right) =>
-      left.localeCompare(right),
-    )) {
-      const postStepXYZ = extractXYZAtStep(eefPosePostStep[eefName], stepIdx);
-      row[`eef_post_step_${eefName}_x`] = postStepXYZ?.[0] ?? null;
-      row[`eef_post_step_${eefName}_y`] = postStepXYZ?.[1] ?? null;
-      row[`eef_post_step_${eefName}_z`] = postStepXYZ?.[2] ?? null;
-    }
-
-    for (const objectName of Object.keys(objectPose).sort((left, right) =>
-      left.localeCompare(right),
-    )) {
-      const xyz = extractXYZAtStep(objectPose[objectName], stepIdx);
-      row[`object_${objectName}_x`] = xyz?.[0] ?? null;
-      row[`object_${objectName}_y`] = xyz?.[1] ?? null;
-      row[`object_${objectName}_z`] = xyz?.[2] ?? null;
-    }
-
-    for (const segment of segments) {
-      const jointCount = Math.min(
-        segment.targetEnd - segment.targetStart + 1,
-        segment.obsEnd - segment.obsStart + 1,
-      );
-      for (let offset = 0; offset < jointCount; offset += 1) {
-        const targetCol = segment.targetStart + offset;
-        const obsCol = segment.obsStart + offset;
-        row[`joint_target_${segment.name}_${targetCol}`] = extractColumnAtStep(
-          actionsJoints,
-          stepIdx,
-          targetCol,
-        );
-        row[`joint_obs_${segment.name}_${targetCol}`] = extractColumnAtStep(
-          obsJointPosition,
-          stepIdx,
-          obsCol,
-        );
-      }
-    }
-
-    for (const joint of joints) {
-      const rowKey = makeJointRowKey(
-        joint.articulationName,
-        joint.name,
-        joint.index,
-      );
-      row[`joint_target_${rowKey}`] = extractColumnAtStep(
-        actionsJoints,
-        stepIdx,
-        joint.index,
-      );
-      row[`joint_obs_${rowKey}`] = extractColumnAtStep(
-        obsJointPositionByArticulation[joint.articulationName] ?? null,
-        stepIdx,
-        joint.index,
-      );
-    }
-
+    assignDemoRowValues(row, stepIdx, sources);
     rows.push(row);
   }
 
@@ -1558,8 +1688,8 @@ function buildDemoRows(entry: OpenSourceEntry, demoName: string): DemoRow[] {
 }
 
 function readDatasetArray(dataset: H5WasmDataset): unknown {
-  const arrayValue = dataset.to_array();
-  if (arrayValue != null) {
+  const arrayValue: unknown = dataset.to_array();
+  if (arrayValue !== null && arrayValue !== undefined) {
     return arrayValue;
   }
 
@@ -1575,12 +1705,12 @@ function formatDatasetDtype(dataset: H5WasmDataset): string {
   try {
     return JSON.stringify(dtype);
   } catch {
-    return String(dtype);
+    return formatUnknownError(dtype, 'unknown');
   }
 }
 
 function toComparisonValue(value: unknown): unknown {
-  if (value == null) {
+  if (value === null || value === undefined) {
     return null;
   }
 
@@ -1598,14 +1728,15 @@ function toComparisonValue(value: unknown): unknown {
 
   if (ArrayBuffer.isView(value)) {
     if ('length' in value) {
-      return Array.from(value as unknown as ArrayLike<unknown>).map(
+      return Array.from(
+        value as unknown as ArrayLike<unknown>,
         toComparisonValue,
       );
     }
 
-    return Array.from(
-      new Uint8Array(value.buffer, value.byteOffset, value.byteLength),
-    );
+    return [
+      ...new Uint8Array(value.buffer, value.byteOffset, value.byteLength),
+    ];
   }
 
   if (Array.isArray(value)) {
@@ -1629,12 +1760,12 @@ function toComparisonValue(value: unknown): unknown {
     );
   }
 
-  return String(value);
+  return formatUnknownError(value);
 }
 
 function comparisonSelectionForShape(shape: readonly number[] | null): {
   selection: string | null;
-  slices: Array<[number, number]> | null;
+  slices: [number, number][] | null;
 } {
   if (!shape) {
     return { selection: null, slices: null };
@@ -1668,7 +1799,7 @@ function squeezeLeadingDimensions(value: unknown, count: number): unknown {
       return result;
     }
 
-    result = result[0];
+    [result] = result;
   }
 
   return result;
@@ -1678,7 +1809,7 @@ function readDatasetComparisonValue(dataset: H5WasmDataset): {
   value: unknown;
   selection: string | null;
 } {
-  const shape = dataset.shape;
+  const { shape } = dataset;
   const { selection, slices } = comparisonSelectionForShape(shape);
 
   if (shape && shape.length > 2 && slices) {
@@ -1707,12 +1838,12 @@ function asNumberVector(value: unknown): number[] | null {
   }
 
   if (value.every(isFiniteNumber)) {
-    return value as number[];
+    return value;
   }
 
-  const firstRow = value[0];
+  const [firstRow] = value;
   if (Array.isArray(firstRow) && firstRow.every(isFiniteNumber)) {
-    return firstRow as number[];
+    return firstRow;
   }
 
   return null;
@@ -1723,7 +1854,7 @@ function asPoseMatrix(value: unknown): number[][] | null {
     return null;
   }
 
-  const firstItem = value[0];
+  const [firstItem] = value;
   if (Array.isArray(firstItem) && Array.isArray(firstItem[0])) {
     return asPoseMatrix(firstItem);
   }
@@ -1732,33 +1863,25 @@ function asPoseMatrix(value: unknown): number[][] | null {
     return null;
   }
 
-  return value as number[][];
+  return value;
 }
 
 function homogeneousMatrixToPoseVector(matrix: number[][]): number[] | null {
   if (matrix.length < 3) {
     return null;
   }
-  const row0 = matrix[0];
-  const row1 = matrix[1];
-  const row2 = matrix[2];
+  const [row0, row1, row2] = matrix;
   if (row0.length < 4 || row1.length < 4 || row2.length < 4) {
     return null;
   }
 
-  const x = row0[3];
-  const y = row1[3];
-  const z = row2[3];
+  const x = row0.at(3) ?? 0;
+  const y = row1.at(3) ?? 0;
+  const z = row2.at(3) ?? 0;
 
-  const r00 = row0[0];
-  const r01 = row0[1];
-  const r02 = row0[2];
-  const r10 = row1[0];
-  const r11 = row1[1];
-  const r12 = row1[2];
-  const r20 = row2[0];
-  const r21 = row2[1];
-  const r22 = row2[2];
+  const [r00, r01, r02] = row0;
+  const [r10, r11, r12] = row1;
+  const [r20, r21, r22] = row2;
 
   // Shepperd's method: numerically stable rotation matrix → quaternion (wxyz).
   const trace = r00 + r11 + r22;
@@ -1905,7 +2028,7 @@ function readSourceDemoIndices(
     return [];
   }
 
-  const value = dataset.value;
+  const { value } = dataset;
   if (ArrayBuffer.isView(value)) {
     return [...value]
       .map((entry) => Math.trunc(Number(entry)))
@@ -1923,22 +2046,32 @@ function readSourceDemoIndices(
     .filter(Number.isFinite);
 }
 
+function leadingDimension(dataset: H5WasmDataset | null): number | null {
+  if (!dataset?.shape || dataset.shape.length === 0) {
+    return null;
+  }
+  return dataset.shape[0];
+}
+
 function episodeLength(demoGroup: H5WasmGroup): number | null {
   // New schema: `actions/pose` and `actions/joints` both have a leading T dim.
   const actionsJoints = maybeChildDataset(demoGroup, 'actions/joints');
-  if (actionsJoints?.shape?.[0] != null) {
-    return actionsJoints.shape[0];
+  const jointLength = leadingDimension(actionsJoints);
+  if (jointLength !== null) {
+    return jointLength;
   }
 
   const actionsPose = maybeChildDataset(demoGroup, 'actions/pose');
-  if (actionsPose?.shape?.[0] != null) {
-    return actionsPose.shape[0];
+  const poseLength = leadingDimension(actionsPose);
+  if (poseLength !== null) {
+    return poseLength;
   }
 
   // Legacy schema: a single `actions` dataset.
   const actions = maybeChildDataset(demoGroup, 'actions');
-  if (actions?.shape?.[0] != null) {
-    return actions.shape[0];
+  const actionLength = leadingDimension(actions);
+  if (actionLength !== null) {
+    return actionLength;
   }
 
   return optionalInt(getAttributeValue(demoGroup, 'num_samples'));
@@ -2040,7 +2173,7 @@ function resolveSideSourceDetails(
 
   values.forEach((indexValue, slot) => {
     const demoName = `demo_${indexValue}`;
-    const source = teleopSourcesByDemo[demoName]?.[0];
+    const source = (teleopSourcesByDemo[demoName] ?? []).at(0);
     if (!source) {
       return;
     }
@@ -2424,7 +2557,7 @@ function loadDatasetComparisonValues(
           dtype: null,
           selection: null,
           value: null,
-          error: error instanceof Error ? error.message : String(error),
+          error: formatUnknownError(error),
         };
       }
     }),
@@ -2442,7 +2575,7 @@ function copyAttributes(
     }
 
     const value = attribute.value ?? attribute.json_value;
-    if (value == null) {
+    if (value === null || value === undefined) {
       continue;
     }
 
@@ -2488,7 +2621,7 @@ function getCutDemoNames(
   const startIndex = demoNames.indexOf(cutRange.startDemoName);
   const endIndex = demoNames.indexOf(cutRange.endDemoName);
 
-  if (startIndex < 0 || endIndex < 0) {
+  if (startIndex === -1 || endIndex === -1) {
     throw new Error('The selected demo range is no longer valid.');
   }
 
@@ -2547,13 +2680,13 @@ function ensureTargetGroupPath(
 function getDatasetCopyValue(
   dataset: H5WasmDataset,
 ): H5WasmCreateDatasetArgs['data'] {
-  const value = dataset.value;
-  if (value != null) {
+  const { value } = dataset;
+  if (value !== null) {
     return value as H5WasmCreateDatasetArgs['data'];
   }
 
   const jsonValue = dataset.json_value;
-  if (jsonValue != null) {
+  if (jsonValue !== null) {
     return jsonValue as H5WasmCreateDatasetArgs['data'];
   }
 
@@ -2567,9 +2700,10 @@ function buildDatasetCopyPlan(
 
   for (const keyPath of selectedKeys) {
     const splitIndex = keyPath.lastIndexOf('/');
-    const parentGroupPath = splitIndex >= 0 ? keyPath.slice(0, splitIndex) : '';
+    const parentGroupPath =
+      splitIndex !== -1 ? keyPath.slice(0, splitIndex) : '';
     const datasetName =
-      splitIndex >= 0 ? keyPath.slice(splitIndex + 1) : keyPath;
+      splitIndex !== -1 ? keyPath.slice(splitIndex + 1) : keyPath;
 
     let groupPlan = planByParentGroup.get(parentGroupPath);
     if (!groupPlan) {
@@ -2593,7 +2727,7 @@ function getDatasetCompressionConfig(
     const filter = dataset.filters[index];
 
     if (filter.id === 1) {
-      const compressionLevel = filter.cd_values[0];
+      const [compressionLevel] = filter.cd_values;
       return Number.isFinite(compressionLevel)
         ? {
             compression: 'gzip',
@@ -2604,7 +2738,7 @@ function getDatasetCompressionConfig(
           };
     }
 
-    if (FILTER_PLUGIN_NAMES[filter.id]) {
+    if (Object.hasOwn(FILTER_PLUGIN_NAMES, filter.id)) {
       return filter.cd_values.length > 0
         ? {
             compression: filter.id,
@@ -2640,20 +2774,20 @@ function copyDatasetChunked(
   name: string,
   onSliceProgress?: (copiedRows: number, totalRows: number) => void,
 ) {
-  const metadata = source.metadata;
+  const { metadata } = source;
   const { shape } = metadata;
   if (!shape || shape.length === 0 || shape[0] === 0) {
     return;
   }
 
-  const totalRows = shape[0];
+  const [totalRows] = shape;
   const restShape = shape.slice(1);
   const compressionConfig = getDatasetCompressionConfig(source);
 
   // Read the first batch to create the dataset.
   const firstBatchSize = Math.min(CHUNKED_COPY_ROW_BATCH, totalRows);
-  const firstSlice = source.slice([[0, firstBatchSize]]);
-  if (firstSlice == null) {
+  const firstSlice: unknown = source.slice([[0, firstBatchSize]]);
+  if (firstSlice === null || firstSlice === undefined) {
     return;
   }
 
@@ -2677,8 +2811,8 @@ function copyDatasetChunked(
     offset += CHUNKED_COPY_ROW_BATCH
   ) {
     const end = Math.min(offset + CHUNKED_COPY_ROW_BATCH, totalRows);
-    const batchData = source.slice([[offset, end]]);
-    if (batchData == null) {
+    const batchData: unknown = source.slice([[offset, end]]);
+    if (batchData === null || batchData === undefined) {
       break;
     }
 
@@ -2728,7 +2862,7 @@ function copySelectedDatasetsForDemo(
       }
 
       const estimatedBytes = estimateDatasetBytes(sourceEntity);
-      const metadata = sourceEntity.metadata;
+      const { metadata } = sourceEntity;
 
       if (
         estimatedBytes > CHUNKED_COPY_BYTE_THRESHOLD &&
@@ -2772,7 +2906,7 @@ function normalizeOutputFileName(fileName: string): string {
     return 'processed-dataset.hdf5';
   }
 
-  return /\.(hdf5|h5)$/i.test(trimmed) ? trimmed : `${trimmed}.hdf5`;
+  return /\.(?:h5|hdf5)$/iu.test(trimmed) ? trimmed : `${trimmed}.hdf5`;
 }
 
 const OUTPUT_CHUNK_SIZE = 64 * 1024 * 1024; // 64 MB
@@ -2808,7 +2942,7 @@ async function processDataset(
   }
 
   function reportProgress(progress: DatasetProcessingProgress) {
-    workerScope.postMessage({ id: messageId, type: 'progress', progress });
+    workerScope.postMessage({ id: messageId, type: 'progress', progress }, []);
   }
 
   const outputName = normalizeOutputFileName(request.fileName);
@@ -2984,7 +3118,7 @@ function listDemoVideoInfo(
 }
 
 function datasetToUint8Array(dataset: H5WasmDataset): Uint8Array {
-  const value = dataset.value;
+  const { value } = dataset;
 
   if (value instanceof Uint8Array) {
     return new Uint8Array(value);
@@ -3042,7 +3176,12 @@ async function openLocalSource(file: File): Promise<OpenSourceResultPayload> {
   const workerFsPath = `${mountPoint}/${file.name}`;
 
   FS.mkdir(mountPoint);
-  FS.mount(FS.filesystems.WORKERFS, { files: [file] }, mountPoint);
+  const workerFileSystem = (
+    FS.filesystems as {
+      WORKERFS: Parameters<typeof FS.mount>[0];
+    }
+  ).WORKERFS;
+  FS.mount(workerFileSystem, { files: [file] }, mountPoint);
 
   const h5File = new h5wasm.File(workerFsPath, 'r');
   const demos = listDemos(h5File);
@@ -3212,24 +3351,27 @@ async function handleRequest(
   }
 }
 
-self.onmessage = (event: MessageEvent<PoseTraceWorkerRequest>) => {
-  const message = event.data;
+async function respondToRequest(
+  message: PoseTraceWorkerRequest,
+): Promise<void> {
+  try {
+    const { result, transfer = [] } = await handleRequest(message);
+    const response: PoseTraceWorkerResponse = {
+      id: message.id,
+      ok: true,
+      result,
+    };
+    workerScope.postMessage(response, transfer);
+  } catch (error: unknown) {
+    const response: PoseTraceWorkerResponse = {
+      id: message.id,
+      ok: false,
+      error: formatUnknownError(error),
+    };
+    workerScope.postMessage(response, []);
+  }
+}
 
-  void handleRequest(message)
-    .then(({ result, transfer = [] }) => {
-      const response: PoseTraceWorkerResponse = {
-        id: message.id,
-        ok: true,
-        result,
-      };
-      workerScope.postMessage(response, transfer);
-    })
-    .catch((error: unknown) => {
-      const response: PoseTraceWorkerResponse = {
-        id: message.id,
-        ok: false,
-        error: error instanceof Error ? error.message : String(error),
-      };
-      self.postMessage(response);
-    });
-};
+workerScope.addEventListener('message', (event) => {
+  void respondToRequest(event.data);
+});

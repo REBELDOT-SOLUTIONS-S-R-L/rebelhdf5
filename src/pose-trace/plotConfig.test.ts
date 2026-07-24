@@ -4,19 +4,19 @@ import {
   build3DData,
   build3DDataForStep,
   build3DLayout,
-  buildObjectDistributionData,
-  buildObjectDistributionLayout,
   buildCombinedJointChartData,
   buildEmptyLayout,
   buildJointChartData,
   buildJointChartLayout,
+  buildObjectDistributionData,
+  buildObjectDistributionLayout,
   getJointChartSpecs,
 } from './plotConfig';
-import type {
-  ArticulationSegment,
-  ObjectDistributionPoint,
-  ObjectDistributionResult,
-  DemoRow,
+import {
+  type ArticulationSegment,
+  type DemoRow,
+  type ObjectDistributionPoint,
+  type ObjectDistributionResult,
 } from './types';
 
 function makeRow(step: number, overrides: Partial<DemoRow> = {}): DemoRow {
@@ -54,6 +54,53 @@ function makeRow(step: number, overrides: Partial<DemoRow> = {}): DemoRow {
   };
 }
 
+function segment(
+  overrides: Partial<ArticulationSegment> = {},
+): ArticulationSegment {
+  return {
+    name: 'left_arm',
+    targetStart: 0,
+    targetEnd: 4,
+    obsStart: 0,
+    obsEnd: 4,
+    ...overrides,
+  };
+}
+
+function emptyResult(): ObjectDistributionResult {
+  return {
+    anchor: 'initial_pose',
+    successPoints: [],
+    failedPoints: [],
+    teleopPoints: [],
+    teleopDiagnostics: null,
+    availableObjects: [],
+  };
+}
+
+function makePoint(
+  category: 'success' | 'failed' | 'teleop',
+  x = 0,
+  y = 0,
+): ObjectDistributionPoint {
+  return {
+    category,
+    datasetName: 'ds',
+    demoName: 'demo_0',
+    x,
+    y,
+    initialX: x,
+    initialY: y,
+    initialRx: 0,
+    initialRy: 0,
+    numSamples: null,
+    sourceLeft: '',
+    sourceRight: '',
+    sourceLeftDetails: [],
+    sourceRightDetails: [],
+  };
+}
+
 describe('buildEmptyLayout', () => {
   it('returns a 2D layout with the title and message annotated', () => {
     const layout = buildEmptyLayout('No data', 'Please pick a file');
@@ -76,19 +123,6 @@ describe('buildEmptyLayout', () => {
 });
 
 describe('getJointChartSpecs', () => {
-  function segment(
-    overrides: Partial<ArticulationSegment> = {},
-  ): ArticulationSegment {
-    return {
-      name: 'left_arm',
-      targetStart: 0,
-      targetEnd: 4,
-      obsStart: 0,
-      obsEnd: 4,
-      ...overrides,
-    };
-  }
-
   it('expands a single segment into one spec per joint (inclusive range)', () => {
     const specs = getJointChartSpecs([segment()]);
     expect(specs).toHaveLength(5);
@@ -133,7 +167,7 @@ describe('buildJointChartData', () => {
     const traces = buildJointChartData(rows, {
       segmentName: 'left_arm',
       jointIndex: 0,
-    }) as Array<{ name?: string }>;
+    }) as { name?: string }[];
     expect(traces).toHaveLength(2);
     expect(traces.map((trace) => trace.name)).toEqual(['target', 'obs']);
   });
@@ -154,9 +188,9 @@ describe('buildJointChartData', () => {
         'joint_obs_robot::elbow::1': i + 1.1,
       }),
     );
-    const traces = buildCombinedJointChartData(rows, specs) as Array<{
+    const traces = buildCombinedJointChartData(rows, specs) as {
       name?: string;
-    }>;
+    }[];
     expect(traces.map((trace) => trace.name)).toEqual([
       'robot / shoulder_pan [0] target',
       'robot / shoulder_pan [0] obs',
@@ -208,40 +242,6 @@ describe('build3DLayout', () => {
 });
 
 describe('buildObjectDistribution helpers', () => {
-  function emptyResult(): ObjectDistributionResult {
-    return {
-      anchor: 'initial_pose',
-      successPoints: [],
-      failedPoints: [],
-      teleopPoints: [],
-      teleopDiagnostics: null,
-      availableObjects: [],
-    };
-  }
-
-  function makePoint(
-    category: 'success' | 'failed' | 'teleop',
-    x = 0,
-    y = 0,
-  ): ObjectDistributionPoint {
-    return {
-      category,
-      datasetName: 'ds',
-      demoName: 'demo_0',
-      x,
-      y,
-      initialX: x,
-      initialY: y,
-      initialRx: 0,
-      initialRy: 0,
-      numSamples: null,
-      sourceLeft: '',
-      sourceRight: '',
-      sourceLeftDetails: [],
-      sourceRightDetails: [],
-    };
-  }
-
   it('returns no traces for a null result', () => {
     expect(buildObjectDistributionData(null, null)).toEqual([]);
   });

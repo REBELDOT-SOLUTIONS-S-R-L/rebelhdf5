@@ -11,6 +11,19 @@ import {
 import { type DatasetProcessingKeyInfo } from './pose-trace/types';
 import { type PythonScanResult } from './python-backend';
 
+function fileInfo(
+  overrides: Partial<PythonScanResult['files'][number]>,
+): PythonScanResult['files'][number] {
+  return {
+    name: 'f.h5',
+    path: '/data/f.h5',
+    demoCount: 4,
+    demoNames: [],
+    keys: [],
+    ...overrides,
+  };
+}
+
 describe('stripExtension', () => {
   it('removes .h5 and .hdf5 case-insensitively', () => {
     expect(stripExtension('dataset.h5')).toBe('dataset');
@@ -56,7 +69,7 @@ describe('parseTaskRulesJson', () => {
   });
 
   it('throws on invalid JSON', () => {
-    expect(() => parseTaskRulesJson('[not json]')).toThrow();
+    expect(() => parseTaskRulesJson('[not json]')).toThrow(/JSON|Unexpected/u);
   });
 });
 
@@ -141,14 +154,14 @@ describe('buildKeyTree', () => {
     // Groups sort before leaves; `obs` (group) precedes `actions` (leaf).
     expect(tree.map((node) => node.name)).toEqual(['obs', 'actions']);
 
-    const obs = tree[0];
+    const [obs] = tree;
     expect(obs.keyInfo).toBeNull();
     // Children are sorted alphabetically for display...
     expect(obs.children.map((child) => child.name)).toEqual(['rgb', 'state']);
     // ...while leafKeyPaths preserves original insertion order.
     expect(obs.leafKeyPaths).toEqual(['obs/state', 'obs/rgb']);
 
-    const actions = tree[1];
+    const [, actions] = tree;
     expect(actions.keyInfo).not.toBeNull();
     expect(actions.leafKeyPaths).toEqual(['actions']);
   });
@@ -171,7 +184,7 @@ describe('buildKeyTree', () => {
   it('treats a path that is both a group and a leaf as a leaf', () => {
     // `obs` appears as a leaf and as a parent of `obs/state`.
     const tree = buildKeyTree([info('obs'), info('obs/state')]);
-    const obs = tree[0];
+    const [obs] = tree;
     expect(obs.keyInfo).not.toBeNull();
     // Once a node carries keyInfo its leafKeyPaths is just its own path.
     expect(obs.leafKeyPaths).toEqual(['obs']);
@@ -203,19 +216,6 @@ describe('sumKeyInfos', () => {
 });
 
 describe('buildBackendKeyInfos', () => {
-  function fileInfo(
-    overrides: Partial<PythonScanResult['files'][number]>,
-  ): PythonScanResult['files'][number] {
-    return {
-      name: 'f.h5',
-      path: '/data/f.h5',
-      demoCount: 4,
-      demoNames: [],
-      keys: [],
-      ...overrides,
-    };
-  }
-
   it('returns an empty array for null input', () => {
     expect(buildBackendKeyInfos(null)).toEqual([]);
   });

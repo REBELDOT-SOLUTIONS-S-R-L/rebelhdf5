@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import type { Figure, PlotParams } from 'react-plotly.js';
-import Plotly from 'plotly.js/lib/core';
 import contour from 'plotly.js/lib/contour';
+import Plotly from 'plotly.js/lib/core';
 import heatmap from 'plotly.js/lib/heatmap';
 import scatter from 'plotly.js/lib/scatter';
 import scatter3d from 'plotly.js/lib/scatter3d';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { type Figure, type PlotParams } from 'react-plotly.js';
 import factoryModule from 'react-plotly.js/factory';
 
 Plotly.register([scatter, scatter3d, heatmap, contour]);
@@ -42,13 +42,14 @@ function Plot(props: PlotParams) {
     if (!el) {
       return undefined;
     }
+    const measuredElement = el;
 
-    const measure = () => {
-      const next = el.clientWidth;
+    function measure() {
+      const next = measuredElement.clientWidth;
       if (next > 0) {
         setWidth((current) => (current === next ? current : next));
       }
-    };
+    }
 
     measure();
 
@@ -57,7 +58,7 @@ function Plot(props: PlotParams) {
     }
 
     const observer = new ResizeObserver(measure);
-    observer.observe(el);
+    observer.observe(measuredElement);
 
     return () => {
       observer.disconnect();
@@ -69,7 +70,11 @@ function Plot(props: PlotParams) {
     [config],
   );
   const mergedLayout = useMemo(
-    () => ({ ...layout, autosize: false, ...(width != null ? { width } : {}) }),
+    () => ({
+      ...layout,
+      autosize: false,
+      ...(width !== null ? { width } : {}),
+    }),
     [layout, width],
   );
   const mergedStyle = useMemo(
@@ -81,10 +86,10 @@ function Plot(props: PlotParams) {
       top: 0,
       left: 0,
       width: width ?? '100%',
-      height: layout?.height,
+      height: layout.height,
       ...style,
     }),
-    [layout?.height, style, width],
+    [layout.height, style, width],
   );
 
   return (
@@ -94,10 +99,10 @@ function Plot(props: PlotParams) {
         position: 'relative',
         width: '100%',
         minWidth: 0,
-        height: layout?.height,
+        height: layout.height,
       }}
     >
-      {width != null && (
+      {width !== null && (
         <ReactPlot
           {...plotProps}
           config={mergedConfig}

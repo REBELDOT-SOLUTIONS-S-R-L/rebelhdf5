@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 
+import { formatUnknownError } from './error-utils';
 import {
   getDatasetProcessingInfo,
   openPoseTraceSource,
@@ -13,28 +14,8 @@ import { type PythonScanResult } from './python-backend';
 import { type H5File, useStore } from './stores';
 import { resolveFileUrl } from './utils';
 
-function formatUnknownError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-
-  if (typeof error === 'string') {
-    return error;
-  }
-
-  if (
-    typeof error === 'number' ||
-    typeof error === 'boolean' ||
-    typeof error === 'bigint'
-  ) {
-    return `${error}`;
-  }
-
-  try {
-    return JSON.stringify(error) || 'Unknown error';
-  } catch {
-    return 'Unknown error';
-  }
+function isAborted(signal: AbortSignal): boolean {
+  return signal.aborted;
 }
 
 export interface ResolvedFileState {
@@ -206,14 +187,14 @@ export function useResolvedFile(fileUrl: string | null): ResolvedFileState {
       return undefined;
     }
 
-    let cancelled = false;
+    const controller = new AbortController();
     const resolvedUrl = fileUrl;
     setState({ file: null, loading: true, error: null });
 
     async function resolveFile() {
       try {
         const resolvedFile = await resolveFileUrl(resolvedUrl);
-        if (cancelled) {
+        if (isAborted(controller.signal)) {
           return;
         }
 
@@ -230,7 +211,7 @@ export function useResolvedFile(fileUrl: string | null): ResolvedFileState {
         openFiles([resolvedFile]);
         setState({ file: resolvedFile, loading: false, error: null });
       } catch (error: unknown) {
-        if (!cancelled) {
+        if (!isAborted(controller.signal)) {
           setState({
             file: null,
             loading: false,
@@ -243,7 +224,7 @@ export function useResolvedFile(fileUrl: string | null): ResolvedFileState {
     void resolveFile();
 
     return () => {
-      cancelled = true;
+      controller.abort();
     };
   }, [fileUrl, openFiles, opened]);
 
@@ -274,7 +255,7 @@ export function useDatasetProcessingSources(
       return undefined;
     }
 
-    let cancelled = false;
+    const controller = new AbortController();
     const cleanups: (() => void)[] = [];
 
     setState(
@@ -309,14 +290,14 @@ export function useDatasetProcessingSources(
 
           try {
             const source = await openPoseTraceSource(file);
-            if (cancelled) {
+            if (isAborted(controller.signal)) {
               source.cleanup();
               return;
             }
 
             cleanups.push(source.cleanup);
             const info = await getDatasetProcessingInfo(source);
-            if (cancelled) {
+            if (isAborted(controller.signal)) {
               source.cleanup();
               return;
             }
@@ -332,7 +313,7 @@ export function useDatasetProcessingSources(
               },
             }));
           } catch (error: unknown) {
-            if (cancelled) {
+            if (isAborted(controller.signal)) {
               return;
             }
 
@@ -354,7 +335,7 @@ export function useDatasetProcessingSources(
     void loadSources();
 
     return () => {
-      cancelled = true;
+      controller.abort();
       cleanups.forEach((cleanup) => {
         cleanup();
       });

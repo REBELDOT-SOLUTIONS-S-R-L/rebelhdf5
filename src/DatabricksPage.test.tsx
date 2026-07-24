@@ -4,19 +4,47 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import DatabricksPage from './DatabricksPage';
+import {
+  type pollBackendStatus,
+  type PythonBackendStatus,
+} from './python-backend';
 import { useStore } from './stores';
 
 const mocks = vi.hoisted(() => ({
-  pollBackendStatus: vi.fn(),
+  pollBackendStatus: vi.fn<typeof pollBackendStatus>(),
 }));
 
-vi.mock('./python-backend', () => ({
+vi.mock(import('./python-backend'), () => ({
   pollBackendStatus: mocks.pollBackendStatus,
   PYTHON_BACKEND_BASE_URL: 'http://127.0.0.1:4095',
 }));
 
 type FetchMock = ReturnType<typeof vi.fn<typeof fetch>>;
 let fetchMock: FetchMock;
+
+function requestUrl(input: RequestInfo | URL): string {
+  if (typeof input === 'string') {
+    return input;
+  }
+  return input instanceof URL ? input.href : input.url;
+}
+
+function requirePutSecretsCall(): Parameters<typeof fetch> {
+  const call = fetchMock.mock.calls.find(([input]) =>
+    requestUrl(input).includes('put-secrets'),
+  );
+  if (!call) {
+    throw new Error('Expected a request to the put-secrets endpoint.');
+  }
+  return call;
+}
+
+function requireStringBody(init: RequestInit | undefined): string {
+  if (typeof init?.body !== 'string') {
+    throw new TypeError('Expected the request body to be a string.');
+  }
+  return init.body;
+}
 
 function renderPage(): void {
   render(
@@ -29,14 +57,14 @@ function renderPage(): void {
 beforeEach(() => {
   useStore.setState({ opened: [] }, false);
   mocks.pollBackendStatus.mockImplementation(
-    (onStatus: (s: { available: boolean }) => void) => {
-      onStatus({ available: true });
+    (onStatus: (status: PythonBackendStatus) => void) => {
+      onStatus({ available: true, rootDir: '/data', version: 3 });
       return () => {};
     },
   );
 
   fetchMock = vi.fn<typeof fetch>(async (input: RequestInfo | URL) => {
-    const url = String(input);
+    const url = requestUrl(input);
     if (url.includes('active-runs')) {
       return Response.json({ runs: [] });
     }
@@ -82,16 +110,15 @@ describe('DatabricksPage', () => {
       );
     });
 
-    const call = fetchMock.mock.calls.find(([url]) =>
-      String(url).includes('put-secrets'),
-    );
-    expect(call).toBeDefined();
-    const body = JSON.parse((call![1] as RequestInit).body as string);
+    const [, init] = requirePutSecretsCall();
+    const body: unknown = JSON.parse(requireStringBody(init));
     expect(body).toEqual({
       secrets: { max_steps: '5000', token: 'tok-123' },
       scope: 'brev',
     });
 
-    expect(await screen.findByText(/Saved 2 secret/u)).toBeInTheDocument();
+    await expect(
+      screen.findByText(/Saved 2 secret/u),
+    ).resolves.toBeInTheDocument();
   });
 });

@@ -9,18 +9,18 @@ import {
   loadDatasetComparisonValues,
   openPoseTraceSource,
 } from './pose-trace/hdf5';
-import type {
-  DatasetComparisonValuesResult,
-  DatasetProcessingSourceInfo,
-  DemoInfo,
-  PoseTraceSource,
+import {
+  type DatasetComparisonValuesResult,
+  type DatasetProcessingSourceInfo,
+  type DemoInfo,
+  type PoseTraceSource,
 } from './pose-trace/types';
 import { FileService, type H5File, useStore } from './stores';
 
-vi.mock('./pose-trace/hdf5', () => ({
-  getDatasetProcessingInfo: vi.fn(),
-  loadDatasetComparisonValues: vi.fn(),
-  openPoseTraceSource: vi.fn(),
+vi.mock(import('./pose-trace/hdf5'), () => ({
+  getDatasetProcessingInfo: vi.fn<typeof getDatasetProcessingInfo>(),
+  loadDatasetComparisonValues: vi.fn<typeof loadDatasetComparisonValues>(),
+  openPoseTraceSource: vi.fn<typeof openPoseTraceSource>(),
 }));
 
 const initialState = useStore.getState();
@@ -78,7 +78,7 @@ beforeEach(() => {
         datasetName: file.name,
         demos: data.demos.map(demo),
         articulation: null,
-        cleanup: vi.fn(),
+        cleanup: vi.fn<() => void>(),
       };
     },
   );

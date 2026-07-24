@@ -2,14 +2,18 @@ import {
   type JointChartSpec,
   type PlotSceneCamera,
 } from './pose-trace/plotConfig';
-import type { DemoInfo } from './pose-trace/types';
+import { type DemoInfo } from './pose-trace/types';
 
 /** Build a human-readable label for a demo option in the dropdown. */
 export function formatDemoOption(demo: DemoInfo): string {
   const parts = [demo.name];
-  if (demo.num_samples != null) parts.push(`samples=${demo.num_samples}`);
-  if (demo.success != null) parts.push(`success=${demo.success ? 1 : 0}`);
-  if (demo.source_episode_index != null) {
+  if (demo.num_samples !== null) {
+    parts.push(`samples=${demo.num_samples}`);
+  }
+  if (demo.success !== null) {
+    parts.push(`success=${demo.success ? 1 : 0}`);
+  }
+  if (demo.source_episode_index !== null) {
     parts.push(`source=${demo.source_episode_index}`);
   }
   return parts.join(' | ');

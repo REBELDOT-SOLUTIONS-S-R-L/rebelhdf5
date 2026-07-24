@@ -3,10 +3,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fetchBuffer } from '../fetch-utils';
 import { FileService, type H5File } from '../stores';
 import { loadDemoRows, openPoseTraceSource, processDataset } from './hdf5';
-import type { PoseTraceSource } from './types';
+import { type PoseTraceSource } from './types';
 
-vi.mock('../fetch-utils', () => ({
-  fetchBuffer: vi.fn(),
+vi.mock(import('../fetch-utils'), () => ({
+  fetchBuffer: vi.fn<typeof fetchBuffer>(),
 }));
 
 const fetchBufferMock = vi.mocked(fetchBuffer);
@@ -21,12 +21,12 @@ interface PostedMessage {
 // creates a single worker and caches it, so all tests share one instance.
 class FakeWorker {
   public static instances: FakeWorker[] = [];
-  public onmessage: ((event: { data: unknown }) => void) | null = null;
-  public onerror: ((event: { message: string }) => void) | null = null;
-  public readonly posted: Array<{
+  public readonly posted: {
     msg: PostedMessage;
     transfer: Transferable[];
-  }> = [];
+  }[] = [];
+  private messageListener: ((event: { data: unknown }) => void) | null = null;
+  private errorListener: ((event: { message: string }) => void) | null = null;
 
   public constructor() {
     FakeWorker.instances.push(this);
@@ -36,16 +36,29 @@ class FakeWorker {
     this.posted.push({ msg, transfer });
   }
 
-  public terminate(): void {}
+  public addEventListener(
+    type: string,
+    listener: (event: never) => void,
+  ): void {
+    if (type === 'message') {
+      this.messageListener = listener as (event: { data: unknown }) => void;
+    } else if (type === 'error') {
+      this.errorListener = listener as (event: { message: string }) => void;
+    }
+  }
+
+  public terminate(): void {
+    return undefined;
+  }
 
   /** Simulate a message coming back from the worker. */
   public emit(data: unknown): void {
-    this.onmessage?.({ data });
+    this.messageListener?.({ data });
   }
 
   /** Simulate a worker-level error. */
   public emitError(message: string): void {
-    this.onerror?.({ message });
+    this.errorListener?.({ message });
   }
 
   public lastPosted(): { msg: PostedMessage; transfer: Transferable[] } {
@@ -61,7 +74,7 @@ class FakeWorker {
 vi.stubGlobal('Worker', FakeWorker as unknown as typeof Worker);
 
 function theWorker(): FakeWorker {
-  const instance = FakeWorker.instances[0];
+  const instance = FakeWorker.instances.at(0);
   if (!instance) {
     throw new Error('Worker has not been created yet.');
   }
@@ -167,8 +180,10 @@ describe('worker.onerror', () => {
 
 describe('processDataset', () => {
   it('forwards progress and chunk callbacks, then resolves on the final result', async () => {
-    const onProgress = vi.fn();
-    const onChunk = vi.fn();
+    const onProgress =
+      vi.fn<NonNullable<Parameters<typeof processDataset>[1]['onProgress']>>();
+    const onChunk =
+      vi.fn<NonNullable<Parameters<typeof processDataset>[1]['onChunk']>>();
     const meta = { fileName: 'out.hdf5' } as unknown;
 
     const promise = processDataset({ operation: 'merge' } as never, {
@@ -209,7 +224,9 @@ describe('openPoseTraceSource', () => {
 
   it('reads a local file fresh via rebelHdf5Desktop and transfers the buffer', async () => {
     const buffer = new ArrayBuffer(16);
-    const readFile = vi.fn().mockResolvedValue(buffer);
+    const readFile = vi
+      .fn<NonNullable<RebelHdf5DesktopRuntime['readFile']>>()
+      .mockResolvedValue(buffer);
     globalThis.rebelHdf5Desktop = { readFile };
 
     const promise = openPoseTraceSource(
