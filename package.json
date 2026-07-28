@@ -64,7 +64,7 @@
     "@vitejs/plugin-react": "6.0.1",
     "@vitest/coverage-v8": "4.1.5",
     "@vitest/ui": "4.1.5",
-    "electron": "41.5.0",
+    "electron": "43.2.0",
     "eslint": "9.39.4",
     "jsdom": "29.1.1",
     "prettier": "3.8.3",
