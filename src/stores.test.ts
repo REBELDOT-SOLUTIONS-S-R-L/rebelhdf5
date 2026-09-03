@@ -92,7 +92,7 @@ describe('persistence', () => {
     // Wait one microtask tick so the persist middleware flushes.
     await Promise.resolve();
 
-    const raw = globalThis.localStorage.getItem('myhdf5');
+    const raw = globalThis.localStorage.getItem('rebel-hdf5-viewer');
     expect(raw).not.toBeNull();
     const parsed = JSON.parse(raw ?? '{}') as {
       state: { opened: { url: string }[] };
@@ -106,7 +106,7 @@ describe('persistence', () => {
     act(() => useStore.getState().toggleSidebar());
     await Promise.resolve();
 
-    const raw = globalThis.localStorage.getItem('myhdf5');
+    const raw = globalThis.localStorage.getItem('rebel-hdf5-viewer');
     const parsed = JSON.parse(raw ?? '{}') as {
       state: { sidebarMayCollapse: boolean };
     };

@@ -1,5 +1,5 @@
 {
-  "name": "myhdf5",
+  "name": "rebel-hdf5-viewer",
   "private": true,
   "version": "0.0.1",
   "description": "Online service to explore and visualise HDF5 files",
@@ -7,7 +7,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://gitlab.esrf.fr/ui/myhdf5"
+    "url": "git+https://github.com/REBELDOT-SOLUTIONS-S-R-L/rebel-hdf5-viewer.git"
   },
   "engines": {
     "node": ">=24.x",

@@ -27,5 +27,5 @@
 }
 
 .mainInner > :global(.reflex-container) {
-  font-size: 1em; /* let viewer adapt to myHDF5 font size */
+  font-size: 1em; /* let viewer adapt to rebelHDF5 font size */
 }

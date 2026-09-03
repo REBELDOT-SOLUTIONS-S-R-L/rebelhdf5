@@ -1,4 +1,6 @@
-## Dataset tooling — rebelHDF5
+# rebel-HDF5-viewer
+
+## Dataset tooling
 
 Our training pipeline runs entirely on HDF5 files (Isaac Lab + MimicGen output).
 Open-source MyHDF5 was a good starting point for raw inspection but didn't fit
@@ -172,7 +174,7 @@ corepack pnpm desktop:run
 │           ├── <span class="file">pose/format</span><span class="comment"># semantic format, e.g. xyz_quat_gripper</span>
 │           ├── <span class="file">pose/pose_order</span><span class="comment"># full pose column order, e.g. ["x", "y", "z", "qw", "qx", "qy", "qz"]</span>
 │           └── <span class="file">pose/component_slices</span><span class="comment"># EEF pose/gripper column slices in actions/pose; ranges are half-open [start, stop)</span>
-│            
+│
 ├── <span class="folder">demo_&lt;N&gt;/</span>
 │   ├── <span class="folder">attrs/</span>
 │   │   ├── <span class="file">num_samples</span><span class="comment"># number of total samples</span>
@@ -227,7 +229,7 @@ corepack pnpm desktop:run
 │   │       │   └── <span class="file">object_name</span><span class="comment"># (T, 4, 4)</span>
 │   │       └── <span class="folder">subtask_term_signals/</span>
 │   │           └── <span class="file">signal_name</span><span class="comment"># (T, 1)</span>
-│   │ 
+│   │
 │   └── <span class="folder">reference_demo_indices/</span><span class="comment"># (num_subtasks,) source demo index MimicGen selected for each subtask</span>
 │       └── <span class="file">articulation_name</span>
 </pre>
@@ -252,3 +254,22 @@ as:
 
 All original code is used in accordance with the terms of the MIT License. A
 copy of the original license is included in this repository
+
+## Credits
+
+Developed at [RebelDot](https://www.rebeldot.com/).
+
+- **Alexandru Luci** (<alexandru.luci@rebeldot.com>) — main developer
+
+## License
+
+Released under the [MIT License](LICENSE.md), the same license as the upstream
+project it is based on.
+
+<p align="center">
+  <img
+    src="assets/logos/rebeldot-logo-tagline-white-yellow@3x.png"
+    alt="RebelDot — Leading the Change"
+    width="360"
+  />
+</p>

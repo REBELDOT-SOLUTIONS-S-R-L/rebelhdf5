@@ -95,7 +95,7 @@ describe('PoseTracePage', () => {
   it('shows the empty state when no file is open', () => {
     renderPage();
     expect(
-      screen.getByText(/Open an HDF5 file in myHDF5/u),
+      screen.getByText(/Open an HDF5 file in rebelHDF5/u),
     ).toBeInTheDocument();
   });
 
