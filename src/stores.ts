@@ -64,7 +64,7 @@ export const useStore = create<Store>()(
       },
     }),
     {
-      name: 'myhdf5',
+      name: 'rebel-hdf5-viewer',
       partialize: ({ opened, sidebarMayCollapse }) => ({
         opened: opened.filter(({ service }) => service !== FileService.Local), // filter out local files, since they can't be re-opened
         sidebarMayCollapse,

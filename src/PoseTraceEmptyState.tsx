@@ -11,7 +11,7 @@ export function PoseTraceEmptyState({
     <div className={styles.emptyState}>
       <h2 className={styles.emptyTitle}>Pose Trace</h2>
       <p className={styles.emptyText}>
-        Open an HDF5 file in myHDF5, then switch to this page to plot the
+        Open an HDF5 file in rebelHDF5, then switch to this page to plot the
         pose-trace data.
       </p>
       <div className={styles.emptyActions}>

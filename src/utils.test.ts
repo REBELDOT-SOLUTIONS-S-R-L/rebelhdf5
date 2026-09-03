@@ -112,7 +112,7 @@ describe('buildMailto', () => {
   it('produces a mailto link with the encoded subject and body', () => {
     const link = buildMailto('Issue', 'Something broke');
     expect(link.startsWith('mailto:h5web@esrf.fr?')).toBe(true);
-    expect(link).toContain('subject=%5BmyHDF5%5D%20Issue');
+    expect(link).toContain('subject=%5BrebelHDF5%5D%20Issue');
     expect(link).toContain('Something%20broke');
   });
 

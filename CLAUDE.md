@@ -5,9 +5,9 @@ code in this repository.
 
 ## Project Overview
 
-myHDF5 is a free online service to explore and visualize HDF5 files. Built with
-React 18, TypeScript, and Vite. Uses h5wasm (WebAssembly) for client-side HDF5
-reading and @h5web/app for visualization. Deployed to Netlify from `main`.
+rebelHDF5 is a free online service to explore and visualize HDF5 files. Built
+with React 18, TypeScript, and Vite. Uses h5wasm (WebAssembly) for client-side
+HDF5 reading and @h5web/app for visualization. Deployed to Netlify from `main`.
 
 ## Commands
 

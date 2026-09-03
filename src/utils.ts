@@ -164,10 +164,14 @@ Here is some additional context:
       : ''
   }`;
 
-  const params = new URLSearchParams({ subject: `[myHDF5] ${subject}`, body });
+  const params = new URLSearchParams({
+    subject: `[rebelHDF5] ${subject}`,
+    body,
+  });
   const paramsStr = params.toString().replaceAll('+', '%20'); // use percent encoding for spaces to avoid issues with some email clients
 
-  return `mailto:h5web@esrf.fr?${paramsStr}`;
+  // TODO change this to a RebelDot email address once we have one
+  return `mailto:alexandru.luci@rebeldot.com?${paramsStr}`;
 }
 
 export const FEEDBACK_MESSAGE = `<<

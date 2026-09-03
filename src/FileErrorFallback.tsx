@@ -70,7 +70,7 @@ function FileErrorFallback(props: Props) {
         rel="noreferrer"
         href={buildMailto(
           'Error report',
-          `I encountered the following error on myHDF5: "${msg}"${causeMsg ? ` — ${causeMsg}` : ''}`,
+          `I encountered the following error on rebelHDF5: "${msg}"${causeMsg ? ` — ${causeMsg}` : ''}`,
           file,
         )}
       >

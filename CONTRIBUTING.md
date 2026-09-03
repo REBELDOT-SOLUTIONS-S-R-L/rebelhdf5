@@ -20,7 +20,7 @@ pnpm start
 
 ## Development
 
-- `pnpm start` - start myHDF5
+- `pnpm start` - start rebelHDF5
 
 ### `pnpm` cheat sheet
 
@@ -61,7 +61,7 @@ minor/patch version by running `pnpm up`.
 
 ## Build
 
-- `pnpm build` - build myHDF5 for production
+- `pnpm build` - build rebelHDF5 for production
 - `pnpm preview` - serve production build locally
 
 ## Code quality

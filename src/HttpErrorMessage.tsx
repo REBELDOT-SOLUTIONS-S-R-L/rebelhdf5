@@ -18,7 +18,7 @@ function HttpErrorMessage(props: Props) {
   if (status === 401) {
     return (
       <p>
-        Authentication is required to access this file. myHDF5 can only open
+        Authentication is required to access this file. rebelHDF5 can only open
         files that are available publicly.
       </p>
     );
